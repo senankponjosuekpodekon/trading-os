@@ -1,0 +1,45 @@
+# Fichiers temporaires de recherche
+search.md
+data.md
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Turbo
+.turbo/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+*.swp
+
+# IDE
+.idea/
+.vscode/
+
+# Docker
+*.env.docker

@@ -1,0 +1,437 @@
+'use client';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  TrendingUp, TrendingDown, X, Plus, AlertCircle, RefreshCw,
+  Calculator, Zap, History, Activity,
+} from 'lucide-react';
+import axios from 'axios';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { api } from '@/lib/api';
+import { Portfolio, PortfolioSummary, Position, Signal } from '@/types';
+
+const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
+
+interface LivePosition extends Position {
+  livePrice:    number | null;
+  unrealizedPnl: number | null;
+  unrealizedPct: number | null;
+  slDistance:   number | null;
+  tpDistance:   number | null;
+}
+
+function PnlBadge({ value }: { value: string | number | undefined }) {
+  const n = parseFloat(String(value ?? 0));
+  const color = n > 0 ? 'text-emerald-400' : n < 0 ? 'text-red-400' : 'text-gray-400';
+  return <span className={`font-mono font-semibold ${color}`}>{n >= 0 ? '+' : ''}${n.toFixed(2)}</span>;
+}
+
+function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
+      <AlertCircle className="w-5 h-5 shrink-0" />
+      <span className="text-sm flex-1">{message}</span>
+      {onRetry && (
+        <button onClick={onRetry} className="flex items-center gap-1 text-xs hover:text-red-300 transition-colors">
+          <RefreshCw className="w-3.5 h-3.5" />Réessayer
+        </button>
+      )}
+    </div>
+  );
+}
+
+const ASSETS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'EUR/USD', 'GBP/USD', 'XAU/USD', 'V75'];
+
+export default function PortfolioPage() {
+  const [tab,         setTab]         = useState<'open' | 'history'>('open');
+  const [showForm,    setShowForm]    = useState(false);
+  const [closePrice,  setClosePrice]  = useState<Record<string, string>>({});
+  const [form,        setForm]        = useState({ assetSymbol: 'BTC/USDT', direction: 'BUY', entryPrice: '', quantity: '', stopLoss: '', takeProfit: '' });
+  const [riskCalc,    setRiskCalc]    = useState<any>(null);
+  const [riskPct,     setRiskPct]     = useState('1.0');
+  const [calcLoading, setCalcLoading] = useState(false);
+  const qc = useQueryClient();
+
+  const calcRisk = async () => {
+    if (!form.entryPrice || !form.stopLoss || !portfolio) return;
+    setCalcLoading(true);
+    try {
+      const { data } = await axios.post(`${ENGINE_URL}/risk/calculate`, {
+        capital:     parseFloat(portfolio.currentCapital),
+        entry_price: parseFloat(form.entryPrice),
+        stop_loss:   parseFloat(form.stopLoss),
+        direction:   form.direction,
+        risk_pct:    parseFloat(riskPct),
+      });
+      setRiskCalc(data);
+      setForm(v => ({
+        ...v,
+        quantity:   String(data.position_size),
+        takeProfit: String(data.take_profit_1),
+      }));
+    } catch {}
+    setCalcLoading(false);
+  };
+
+  const { data: portfolios, isLoading: loadingPortfolio, error: errorPortfolio, refetch: refetchPortfolio } = useQuery<Portfolio[]>({
+    queryKey: ['portfolios'],
+    queryFn: async () => (await api.get('/portfolios')).data,
+  });
+
+  const portfolio = portfolios?.[0];
+
+  const { data: summary, isLoading: loadingSummary, error: errorSummary, refetch: refetchSummary } = useQuery<PortfolioSummary>({
+    queryKey: ['positions-summary', portfolio?.id],
+    queryFn: async () => (await api.get(`/positions/summary?portfolioId=${portfolio!.id}`)).data,
+    enabled: !!portfolio?.id,
+  });
+
+  // Live positions avec PnL temps réel (J15)
+  const { data: livePositions, refetch: refetchLive } = useQuery<LivePosition[]>({
+    queryKey: ['positions-live', portfolio?.id],
+    queryFn: async () => (await api.get('/positions/live')).data,
+    enabled: tab === 'open',
+    refetchInterval: 30_000,
+  });
+
+  // Signaux actifs pour paper trading (J16)
+  const { data: signals } = useQuery<Signal[]>({
+    queryKey: ['signals'],
+    queryFn: async () => (await api.get('/signals?limit=10')).data,
+  });
+
+  const activeSignals = signals?.filter(s => s.signal !== 'NEUTRAL') ?? [];
+
+  const openPosition = useMutation({
+    mutationFn: (data: any) => api.post('/positions', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions-summary'] });
+      qc.invalidateQueries({ queryKey: ['portfolios'] });
+      setShowForm(false);
+      setForm({ assetSymbol: 'BTC/USDT', direction: 'BUY', entryPrice: '', quantity: '', stopLoss: '', takeProfit: '' });
+    },
+  });
+
+  const closePosition = useMutation({
+    mutationFn: ({ id, exitPrice }: { id: string; exitPrice: number }) =>
+      api.patch(`/positions/${id}/close`, { exitPrice }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions-summary'] });
+      qc.invalidateQueries({ queryKey: ['positions-live'] });
+      qc.invalidateQueries({ queryKey: ['portfolios'] });
+    },
+  });
+
+  const openFromSignal = useMutation({
+    mutationFn: (signalId: string) => api.post(`/positions/from-signal/${signalId}`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions-summary'] });
+      qc.invalidateQueries({ queryKey: ['positions-live'] });
+      qc.invalidateQueries({ queryKey: ['portfolios'] });
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portfolio) return;
+    openPosition.mutate({
+      portfolioId: portfolio.id,
+      assetSymbol: form.assetSymbol,
+      direction: form.direction,
+      entryPrice: parseFloat(form.entryPrice),
+      quantity: parseFloat(form.quantity),
+      stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : undefined,
+      takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : undefined,
+    });
+  };
+
+  const capital = portfolio ? parseFloat(portfolio.currentCapital) : 0;
+  const initial = portfolio ? parseFloat(portfolio.initialCapital) : 0;
+  const totalPnl = summary?.totalPnl ?? 0;
+  const pnlPct = initial > 0 ? ((totalPnl / initial) * 100).toFixed(2) : '0.00';
+
+  const unrealizedTotal = livePositions?.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0) ?? 0;
+
+  return (
+    <AppLayout title="Portfolio">
+      <div className="space-y-5">
+
+        {errorPortfolio && <ErrorBox message="Impossible de charger le portfolio." onRetry={() => refetchPortfolio()} />}
+        {errorSummary  && <ErrorBox message="Impossible de charger les positions." onRetry={() => refetchSummary()} />}
+        {openPosition.isError   && <ErrorBox message={(openPosition.error as any)?.response?.data?.message ?? "Erreur ouverture."} />}
+        {closePosition.isError  && <ErrorBox message={(closePosition.error as any)?.response?.data?.message ?? "Erreur clôture."} />}
+        {openFromSignal.isError && <ErrorBox message={(openFromSignal.error as any)?.response?.data?.message ?? "Erreur paper trading."} />}
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: 'Capital disponible', value: `$${capital.toLocaleString('en-US', { minimumFractionDigits: 2 })}` },
+            { label: 'P&L réalisé', value: <span><PnlBadge value={totalPnl} /> <span className="text-xs text-gray-500">({pnlPct}%)</span></span> },
+            { label: 'PnL non réalisé', value: <span className={`font-mono font-bold ${unrealizedTotal >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{unrealizedTotal >= 0 ? '+' : ''}${unrealizedTotal.toFixed(2)}</span> },
+            { label: 'Win Rate', value: loadingSummary ? '…' : (summary?.winRate ? `${summary.winRate.toFixed(1)}%` : '—') },
+          ].map(s => (
+            <div key={s.label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <p className="text-xs text-gray-500 mb-1">{s.label}</p>
+              <div className="text-xl font-bold text-white">{loadingPortfolio ? <span className="text-gray-600">…</span> : s.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Header + onglets */}
+        <div className="flex items-center justify-between">
+          <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-lg p-1">
+            <button onClick={() => setTab('open')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${tab === 'open' ? 'bg-emerald-500/20 text-emerald-400' : 'text-gray-400 hover:text-white'}`}>
+              <Activity className="w-3.5 h-3.5" />Ouvertes ({livePositions?.length ?? summary?.open ?? 0})
+            </button>
+            <button onClick={() => setTab('history')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${tab === 'history' ? 'bg-emerald-500/20 text-emerald-400' : 'text-gray-400 hover:text-white'}`}>
+              <History className="w-3.5 h-3.5" />Historique ({summary?.closed ?? 0})
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { refetchLive(); refetchSummary(); }}
+              className="p-2 text-gray-400 hover:text-white bg-gray-900 border border-gray-800 rounded-lg transition-colors">
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button onClick={() => setShowForm(v => !v)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-lg text-sm transition-colors">
+              <Plus className="w-4 h-4" />{showForm ? 'Annuler' : 'Nouvelle position'}
+            </button>
+          </div>
+        </div>
+
+        {/* Paper Trading depuis signal */}
+        {activeSignals.length > 0 && tab === 'open' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm font-semibold text-white">Paper Trading — signaux actifs</span>
+              <span className="text-xs text-gray-500">1% risque, sizing automatique</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {activeSignals.slice(0, 5).map(s => (
+                <button key={s.id}
+                  disabled={openFromSignal.isPending}
+                  onClick={() => openFromSignal.mutate(s.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 ${
+                    s.signal === 'BUY'
+                      ? 'bg-emerald-400/10 text-emerald-400 border-emerald-400/20 hover:bg-emerald-400/20'
+                      : 'bg-red-400/10 text-red-400 border-red-400/20 hover:bg-red-400/20'
+                  }`}>
+                  {s.signal === 'BUY' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                  {s.signal} {s.asset?.symbol} · {Math.round(s.confidence)}%
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Formulaire manuel */}
+        {showForm && (
+          <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+            <h3 className="text-sm font-semibold text-white">Ouvrir une position manuellement</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Actif</label>
+                <select value={form.assetSymbol} onChange={e => setForm(v => ({ ...v, assetSymbol: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500">
+                  {ASSETS.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Direction</label>
+                <select value={form.direction} onChange={e => setForm(v => ({ ...v, direction: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500">
+                  <option>BUY</option><option>SELL</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Risque %</label>
+                <input type="number" step="0.1" min="0.1" max="5" value={riskPct}
+                  onChange={e => setRiskPct(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500" />
+              </div>
+              {[
+                { label: "Prix d'entrée", key: 'entryPrice', required: true },
+                { label: 'Stop Loss',     key: 'stopLoss' },
+                { label: 'Take Profit',   key: 'takeProfit' },
+                { label: 'Quantité',      key: 'quantity', required: true },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="block text-xs font-medium text-gray-400 mb-1">{f.label}</label>
+                  <input type="number" step="any" required={f.required}
+                    value={(form as any)[f.key]}
+                    onChange={e => setForm(v => ({ ...v, [f.key]: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500" />
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={calcRisk} disabled={calcLoading || !form.entryPrice || !form.stopLoss}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 border border-gray-700 text-gray-300 text-sm rounded-lg transition-colors">
+                  {calcLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
+                  Risk Engine
+                </button>
+                {riskCalc && (
+                  <div className="flex gap-3 text-xs">
+                    <span className="text-gray-400">Size: <span className="text-white font-mono">{riskCalc.position_size}</span></span>
+                    <span className="text-gray-400">R/R: <span className="text-yellow-400 font-mono">{riskCalc.risk_reward}x</span></span>
+                  </div>
+                )}
+              </div>
+              <button type="submit" disabled={openPosition.isPending}
+                className="flex items-center gap-2 px-6 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition-colors">
+                {openPosition.isPending && <RefreshCw className="w-4 h-4 animate-spin" />}
+                Confirmer
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Onglet OUVERTES — avec PnL live */}
+        {tab === 'open' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800 bg-gray-800/50">
+                  {['Actif', 'Dir.', 'Entrée', 'Prix live', 'PnL live', 'SL', 'TP', ''].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {!livePositions && (
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-600">
+                    <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />Chargement prix live…
+                  </td></tr>
+                )}
+                {livePositions?.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-12 text-center">
+                    <div className="flex flex-col items-center gap-2 text-gray-600">
+                      <Activity className="w-8 h-8" />
+                      <p>Aucune position ouverte</p>
+                    </div>
+                  </td></tr>
+                )}
+                {livePositions?.map((p: LivePosition) => {
+                  const entry     = parseFloat(p.entryPrice);
+                  const sl        = p.stopLoss   ? parseFloat(p.stopLoss)   : null;
+                  const tp        = p.takeProfit ? parseFloat(p.takeProfit) : null;
+                  const live      = p.livePrice;
+                  const upnl      = p.unrealizedPnl;
+                  const upnlPct   = p.unrealizedPct;
+                  // Progress bar SL→Entry→TP
+                  const total     = sl && tp ? Math.abs(tp - sl) : null;
+                  const progress  = sl && tp && live
+                    ? Math.max(0, Math.min(100, ((live - sl) / (tp - sl)) * 100))
+                    : null;
+                  return (
+                    <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <span className="text-white font-semibold">{p.asset?.symbol}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.direction === 'BUY'
+                          ? <span className="text-emerald-400 text-xs font-bold flex items-center gap-1"><TrendingUp className="w-3 h-3" />BUY</span>
+                          : <span className="text-red-400 text-xs font-bold flex items-center gap-1"><TrendingDown className="w-3 h-3" />SELL</span>}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-gray-300">${entry.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-4 py-3 font-mono text-white font-semibold">
+                        {live ? `$${live.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : <span className="text-gray-600">…</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {upnl !== null ? (
+                          <div>
+                            <span className={`font-mono font-semibold ${upnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}
+                            </span>
+                            <span className={`text-xs ml-1 ${upnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                              ({upnlPct! >= 0 ? '+' : ''}{upnlPct?.toFixed(2)}%)
+                            </span>
+                            {progress !== null && (
+                              <div className="mt-1 h-1 w-20 bg-gray-700 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all ${upnl >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}
+                                  style={{ width: `${p.direction === 'BUY' ? progress : 100 - progress}%` }} />
+                              </div>
+                            )}
+                          </div>
+                        ) : <span className="text-gray-600">—</span>}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-red-400 text-xs">
+                        {sl ? `$${sl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-emerald-400 text-xs">
+                        {tp ? `$${tp.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <input type="number" step="any" placeholder="Exit"
+                            value={closePrice[p.id] ?? ''}
+                            onChange={e => setClosePrice(v => ({ ...v, [p.id]: e.target.value }))}
+                            className="w-20 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-white text-xs focus:outline-none focus:border-red-500" />
+                          <button
+                            disabled={!closePrice[p.id] || closePosition.isPending}
+                            onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
+                            className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Onglet HISTORIQUE */}
+        {tab === 'history' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800 bg-gray-800/50">
+                  {['Actif', 'Dir.', 'Entrée', 'Sortie', 'PnL $', 'PnL %', 'Date'].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-600">
+                    <History className="w-8 h-8 inline mb-2 block mx-auto" />Aucun trade clôturé
+                  </td></tr>
+                )}
+                {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').map((p: Position) => {
+                  const pnl = parseFloat(String(p.pnl ?? 0));
+                  const pct = parseFloat(String(p.pnlPercent ?? 0));
+                  return (
+                    <tr key={p.id} className={`hover:bg-gray-800/30 ${pnl > 0 ? 'border-l-2 border-l-emerald-500/30' : 'border-l-2 border-l-red-500/30'}`}>
+                      <td className="px-4 py-3 text-white font-semibold">{p.asset?.symbol}</td>
+                      <td className="px-4 py-3">
+                        {p.direction === 'BUY'
+                          ? <span className="text-emerald-400 text-xs font-bold">BUY</span>
+                          : <span className="text-red-400 text-xs font-bold">SELL</span>}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-gray-400">${parseFloat(p.entryPrice).toLocaleString()}</td>
+                      <td className="px-4 py-3 font-mono text-gray-300">${p.exitPrice ? parseFloat(String(p.exitPrice)).toLocaleString() : '—'}</td>
+                      <td className="px-4 py-3"><PnlBadge value={pnl} /></td>
+                      <td className={`px-4 py-3 font-mono text-xs ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {p.closedAt ? new Date(p.closedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
+}

@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USERS ───────────────────────────────────────────────────
+
+enum UserRole {
+  TRADER
+  INVESTOR
+  ADMIN
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  password     String
+  name         String
+  role         UserRole  @default(TRADER)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  portfolios   Portfolio[]
+  journal      JournalEntry[]
+  strategies   UserStrategy[]
+
+  @@map("users")
+}
+
+// ─── PORTFOLIOS ──────────────────────────────────────────────
+
+enum PortfolioType {
+  PAPER
+  LIVE
+}
+
+model Portfolio {
+  id           String        @id @default(cuid())
+  name         String
+  type         PortfolioType @default(PAPER)
+  currency     String        @default("USD")
+  initialCapital Decimal     @default(10000)
+  currentCapital Decimal     @default(10000)
+  userId       String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions    Position[]
+
+  @@map("portfolios")
+}
+
+// ─── MARKETS & ASSETS ────────────────────────────────────────
+
+enum MarketType {
+  CRYPTO
+  FOREX
+  STOCKS
+  INDICES
+  COMMODITIES
+  SYNTHETIC
+}
+
+model Market {
+  id           String     @id @default(cuid())
+  name         String     @unique
+  type         MarketType
+  isActive     Boolean    @default(true)
+
+  assets       Asset[]
+
+  @@map("markets")
+}
+
+model Asset {
+  id           String   @id @default(cuid())
+  symbol       String   @unique
+  name         String
+  marketId     String
+  baseCurrency String   @default("USD")
+  isActive     Boolean  @default(true)
+  metadata     Json?
+
+  market       Market   @relation(fields: [marketId], references: [id])
+  signals      Signal[]
+  positions    Position[]
+
+  @@map("assets")
+}
+
+// ─── STRATEGIES ──────────────────────────────────────────────
+
+enum SignalType {
+  BUY
+  SELL
+  NEUTRAL
+}
+
+model Strategy {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String?
+  rules        Json
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  signals      Signal[]
+  userStrategies UserStrategy[]
+
+  @@map("strategies")
+}
+
+model UserStrategy {
+  id           String   @id @default(cuid())
+  userId       String
+  strategyId   String
+  isEnabled    Boolean  @default(true)
+  customRules  Json?
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy     Strategy @relation(fields: [strategyId], references: [id])
+
+  @@unique([userId, strategyId])
+  @@map("user_strategies")
+}
+
+// ─── SIGNALS ─────────────────────────────────────────────────
+
+model Signal {
+  id           String     @id @default(cuid())
+  assetId      String
+  strategyId   String
+  signal       SignalType
+  confidence   Float
+  timeframe    String
+  entryPrice   Decimal?
+  stopLoss     Decimal?
+  takeProfit1  Decimal?
+  takeProfit2  Decimal?
+  riskReward   Float?
+  indicators   Json?
+  metadata     Json?
+  explanation  String?
+  isActive     Boolean    @default(true)
+  expiresAt    DateTime?
+  createdAt    DateTime   @default(now())
+
+  asset        Asset      @relation(fields: [assetId], references: [id])
+  strategy     Strategy   @relation(fields: [strategyId], references: [id])
+  positions    Position[]
+
+  @@map("signals")
+}
+
+// ─── POSITIONS ───────────────────────────────────────────────
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+model Position {
+  id           String         @id @default(cuid())
+  portfolioId  String
+  assetId      String
+  signalId     String?
+  status       PositionStatus @default(OPEN)
+  direction    SignalType
+  entryPrice   Decimal
+  exitPrice    Decimal?
+  quantity     Decimal
+  stopLoss     Decimal?
+  takeProfit   Decimal?
+  pnl          Decimal?
+  pnlPercent   Float?
+  openedAt     DateTime       @default(now())
+  closedAt     DateTime?
+
+  portfolio    Portfolio      @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  asset        Asset          @relation(fields: [assetId], references: [id])
+  signal       Signal?        @relation(fields: [signalId], references: [id])
+  journal      JournalEntry[]
+
+  @@map("positions")
+}
+
+// ─── JOURNAL ─────────────────────────────────────────────────
+
+model JournalEntry {
+  id           String    @id @default(cuid())
+  userId       String
+  positionId   String?
+  title        String
+  content      String
+  emotion      String?
+  grade        Int?
+  tags         String[]
+  createdAt    DateTime  @default(now())
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position     Position? @relation(fields: [positionId], references: [id])
+
+  @@map("journal_entries")
+}

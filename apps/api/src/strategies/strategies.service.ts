@@ -1,0 +1,73 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateStrategyDto, UpdateStrategyDto, ToggleUserStrategyDto } from './dto/create-strategy.dto';
+
+@Injectable()
+export class StrategiesService {
+  constructor(private prisma: PrismaService) {}
+
+  async findAll() {
+    return this.prisma.strategy.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findAllWithUserStatus(userId: string) {
+    const strategies = await this.prisma.strategy.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+    const userStrategies = await this.prisma.userStrategy.findMany({
+      where: { userId },
+    });
+    const map = new Map(userStrategies.map(us => [us.strategyId, us]));
+    return strategies.map(s => ({
+      ...s,
+      userStrategy: map.get(s.id) ?? null,
+      isEnabledByUser: (map.get(s.id) as any)?.isEnabled ?? false,
+    }));
+  }
+
+  async findOne(id: string) {
+    const strategy = await this.prisma.strategy.findUnique({ where: { id } });
+    if (!strategy) throw new NotFoundException(`Strategy ${id} not found`);
+    return strategy;
+  }
+
+  async create(dto: CreateStrategyDto) {
+    return this.prisma.strategy.create({ data: dto });
+  }
+
+  async update(id: string, dto: UpdateStrategyDto) {
+    await this.findOne(id);
+    return this.prisma.strategy.update({ where: { id }, data: dto });
+  }
+
+  async remove(id: string) {
+    await this.findOne(id);
+    return this.prisma.strategy.delete({ where: { id } });
+  }
+
+  async toggleUserStrategy(userId: string, strategyId: string, dto: ToggleUserStrategyDto) {
+    await this.findOne(strategyId);
+    return this.prisma.userStrategy.upsert({
+      where: { userId_strategyId: { userId, strategyId } },
+      create: { userId, strategyId, isEnabled: dto.isEnabled, customRules: dto.customRules },
+      update: { isEnabled: dto.isEnabled, customRules: dto.customRules },
+    });
+  }
+
+  async getUserStrategies(userId: string) {
+    return this.prisma.userStrategy.findMany({
+      where: { userId, isEnabled: true },
+      include: { strategy: true },
+    });
+  }
+
+  async getStats() {
+    const [total, active] = await Promise.all([
+      this.prisma.strategy.count(),
+      this.prisma.strategy.count({ where: { isActive: true } }),
+    ]);
+    return { total, active };
+  }
+}
