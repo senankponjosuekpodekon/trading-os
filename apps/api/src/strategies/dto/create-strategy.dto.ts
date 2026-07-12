@@ -1,11 +1,13 @@
-import { IsString, IsOptional, IsBoolean, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsObject, MaxLength } from 'class-validator';
 
 export class CreateStrategyDto {
   @IsString()
+  @MaxLength(120)
   name: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   description?: string;
 
   @IsObject()
@@ -19,10 +21,12 @@ export class CreateStrategyDto {
 export class UpdateStrategyDto {
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   name?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   description?: string;
 
   @IsOptional()

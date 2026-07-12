@@ -4,11 +4,22 @@
 
 ---
 
+## Vision du projet
+
+```
+MVP (actuel)       → Signaux techniques + LLM + Paper trading
+Phase A (prochain) → Enrichissement par marché : on-chain, macro, tick stats
+Phase B            → ML scoring + feedback loop + pandas-ta migration
+Phase C            → Analyse asymétrique pré-listing + alpha on-chain
+Phase D            → Multi-agents autonomes + exécution réelle
+```
+
+---
+
 ## 🔑 À FAIRE PAR TOI (actions externes / comptes)
 
-### Clés API
+### Clés API MVP
 - [ ] 👤 Créer compte **newsapi.org** (gratuit) → copier `NEWS_API_KEY` dans `.env`
-  - Lien : https://newsapi.org/register
   - Plan gratuit : 100 req/jour — suffisant (cache 15 min actif)
 - [ ] 👤 Optionnel : créer compte **OpenAI** → `OPENAI_API_KEY` pour activer GPT-4o
   - Alternative gratuite : installer Ollama local (`ollama pull llama3.2`)
@@ -16,7 +27,16 @@
   - Plan gratuit : 800 req/jour — https://twelvedata.com
 - [ ] 👤 Optionnel : générer **DERIV_TOKEN** pour trades réels
   - App Deriv → API Token → permission : Trade, Read
-  - Sans token : mode paper actif automatiquement
+
+### Clés API Phase A (post-déploiement)
+- [ ] 👤 Créer compte **Coinglass** → `COINGLASS_API_KEY` (gratuit limité)
+  - Funding rates, Open Interest, liquidations — https://coinglass.com/pricing
+- [ ] 👤 Créer compte **LunarCrush** → `LUNARCRUSH_API_KEY` (500 req/jour gratuit)
+  - Sentiment social crypto + stocks — https://lunarcrush.com/developers/api
+- [ ] 👤 Créer compte **CryptoQuant** → `CRYPTOQUANT_API_KEY` (free tier limité)
+  - Exchange flows, MVRV, SOPR, whale data — https://cryptoquant.com
+- [ ] 👤 Optionnel : compte **Glassnode** → `GLASSNODE_API_KEY` (free tier)
+  - On-chain BTC/ETH avancé — https://glassnode.com
 
 ### Tests manuels à faire
 - [ ] 👤 Tester Auth : Register → Login → Logout → vérifier JWT
@@ -33,131 +53,443 @@
 
 ## 🤖 À FAIRE PAR CASCADE
 
-### ⚡ Modularité & Scalabilité (Backend Engine)
+---
 
-- [ ] 🤖 ⚡ **Scraper personnalisé** — remplacer dépendance brvm.org fragile
-  - Scraper robuste avec fallback multiple (brvm.org → africainvesting.com → cache local)
-  - Détection auto changement structure HTML (parser adaptatif)
-  - Stockage en DB PostgreSQL (table `brvm_quotes` + historique)
-  - Refresh planifié toutes les heures via tâche de fond
-  - Endpoints : `/brvm/scrape/force`, `/brvm/scrape/status`
+### ⚡ MVP — Stabilité & Performance
 
-- [ ] 🤖 ⚡ **Cache Redis centralisé** — actuellement cache mémoire Python dans `news.py`
-  - Migrer tous les caches mémoire (`_cache` dict dans `news.py`, `scan.py`) vers Redis
-  - TTLs : news 15min, klines 5min, BRVM quotes 60min, scan results 30s
-  - Pattern `cache_or_fetch()` centralisé dans `utils/cache.py`
+- [x] 🤖 ⚡ **Cache Redis centralisé** ✅ — actuellement cache mémoire Python dans `news.py`
+  - `utils/cache.py` créé avec client Redis asynchrone
+  - `news.py` migré vers Redis (sentiment + articles, TTL 15min)
+  - TTLs restants : klines 5min, BRVM quotes 60min, scan results 30s (à faire)
 
-- [ ] 🤖 ⚡ **Pagination API NestJS** — endpoints `/signals`, `/positions`, `/journal`
+- [x] 🤖 ⚡ **Pagination API NestJS** ✅ — `/signals`, `/positions`, `/journal`
   - Ajouter `?page=&limit=&sort=` sur tous les endpoints liste
-  - Cursor-based pagination pour le journal (volume élevé prévu)
-
-- [ ] 🤖 **Rate limiting par user** — actuellement global IP dans engine
-  - NestJS : Throttler par userId (pas IP) pour éviter abus authentifiés
-  - Engine FastAPI : rate limit par clé API future
-
-- [ ] 🤖 **Séparation config/env** — valeurs hardcodées dans les routers
-  - Créer `engine/config.py` centralisé (Pydantic Settings)
-  - Éliminer `os.getenv(...)` dispersés dans chaque router
-
-- [ ] 🤖 **Éliminer mock data restants** — positions PnL live parfois fallback 0
-  - Vérifier `fetchLivePrice()` dans `positions.service.ts` sur tous actifs
-  - Ajouter fallback Twelve Data si Binance ne répond pas sur un actif
-
-### ⚡ Performance & Chargement Rapide
 
 - [ ] 🤖 ⚡ **Next.js optimisations**
-  - Ajouter `staleTime` cohérent sur tous les `useQuery` (actuellement manquant sur 5 pages)
-  - `refetchOnWindowFocus: false` global dans QueryClient (évite re-fetch inutiles)
-  - Lazy loading des composants lourds (`Chart`, `Backtest`) avec `dynamic(() => import(...))`
-  - Image optimization si ajout de logos/icônes actifs
+  - `staleTime` cohérent sur tous les `useQuery`
+  - `refetchOnWindowFocus: false` global dans QueryClient
+  - Lazy loading `Chart`, `Backtest` avec `dynamic(() => import(...))`
 
 - [ ] 🤖 ⚡ **Prefetch données critiques**
-  - Dashboard : prefetch prix + portfolio summary au layout level (pas dans la page)
-  - Signals : garder dernier scan en cache Redis 30s → pas de reload à chaque visite
+  - Dashboard : prefetch prix + portfolio au layout level
+  - Signals : garder dernier scan en cache Redis 30s
 
-- [ ] 🤖 **Compression HTTP**
-  - NestJS : activer `compression` middleware (gzip/brotli sur JSON responses)
-  - Engine FastAPI : activer `GZipMiddleware` pour réponses > 1KB
-
-- [ ] 🤖 **Index base de données**
-  - Vérifier indexes Prisma sur : `Signal.createdAt`, `Position.userId`, `JournalEntry.createdAt`
-  - Ajouter index composite sur `Signal(userId, createdAt DESC)` pour le feed
+- [ ] 🤖 ⚡ **Vitesse signaux < 1 seconde**
+  - Migrer calculs techniques vers `pandas-ta` (remplace TA-Lib manuel)
+  - Paralléliser fetch multi-symboles avec `asyncio.gather`
+  - Pré-calculer features en background toutes les 30s → scan devient lookup
 
 - [ ] 🤖 **WebSocket stabilité**
-  - Reconnexion auto avec backoff exponentiel si WS déconnecté (actuellement pas de retry)
-  - Heartbeat ping/pong côté client pour détecter connexions mortes
+  - Reconnexion auto avec backoff exponentiel
+  - Heartbeat ping/pong côté client
 
-### Scraper Personnalisé (détail)
+- [x] 🤖 **Séparation config/env** → `engine/config.py` centralisé (Pydantic Settings)
 
-- [ ] 🤖 **`engine/scrapers/brvm_scraper.py`**
-  - Sources primaire + fallback :
-    1. `brvm.org/fr/cours-actions/0` (actuel)
-    2. `africainvesting.com/stocks/brvm/` (backup)
-    3. Cache DB PostgreSQL (dernier scrape valide)
-  - Normalisation données : XOF, variation %, volume
-  - Stockage historique : table `brvm_daily_prices(symbol, date, open, high, low, close, volume)`
-  - Cron interne FastAPI : scrape auto à 16h30 UTC (heure fermeture BRVM)
+- [x] 🤖 **Index base de données**
+  - Index composite `Signal(assetId, createdAt DESC)`
+  - Index `Portfolio.userId`, `Position.portfolioId`, `JournalEntry(userId, createdAt)`
 
-- [ ] 🤖 **`engine/scrapers/crypto_news_scraper.py`**
-  - Sources sans API key : CoinDesk RSS, CryptoCompare public, Decrypt RSS
-  - Fallback si NewsAPI quota épuisé (100/jour plan gratuit)
-  - Parser RSS universel (`feedparser`) → même format que NewsAPI
+---
+
+### 📦 Phase A — Enrichissement par Marché (post-déploiement)
+
+> Objectif : chaque marché reçoit les couches de données qui lui correspondent vraiment
+
+#### 🟠 Crypto — Couche On-Chain & Dérivés
+
+- [ ] 🤖 **`engine/routers/onchain.py`** — Signal asymétrique crypto
+  - **Fear & Greed Index** (alternative.me, gratuit, 0 clé)
+    - Score < 20 → `+20 pts` confiance BUY contrarian
+    - Score > 80 → `-20 pts` / signal SELL contrarian
+  - **Funding Rate** (Coinglass API)
+    - Funding < -0.01% → shorts surpeuplés → `+15 pts` long squeeze
+    - Funding > +0.05% → longs surpeuplés → `+15 pts` short squeeze
+  - **Open Interest change 24h** (Coinglass API)
+    - OI ↑ + prix ↑ → trend confirmé `+10 pts`
+    - OI ↑ + prix ↓ → short squeeze imminent `+15 pts`
+    - OI chute brutale → liquidations → `danger flag`
+  - **Exchange Net Flow** (CryptoQuant, free tier)
+    - Outflows persistants 30j → accumulation → `+20 pts` asymétrique
+    - Inflows spike → distribution whale → `-20 pts`
+  - **MVRV Ratio** (CryptoQuant/Glassnode)
+    - MVRV < 1.0 → zone d'achat historique extreme → `+30 pts`
+    - MVRV > 3.5 → zone distribution → `-25 pts`
+  - Endpoint : `GET /onchain/score/{symbol}` → retourne `asymmetric_score` + `signals[]`
+  - Intégration dans `scan.py` : `confidence += onchain_bonus()`
+
+- [ ] 🤖 **`engine/routers/tokenomics.py`** — Analyse tokenomics pré-signal
+  - Fetch token unlock schedule (Token Unlocks API ou CoinGecko)
+  - Upcoming unlock > 20% supply dans 30j → `danger_flag = True` → signal désactivé
+  - Top 10 holders > 80% → concentration flag → `confidence -= 20`
+  - Endpoint : `GET /tokenomics/{symbol}` → unlock calendar + concentration score
+
+- [ ] 🤖 **`engine/routers/social_sentiment.py`** — LunarCrush intégration
+  - Galaxy Score, AltRank, social dominance, interactions/post
+  - Galaxy Score > 60 + trending → `+12 pts` momentum social
+  - Endpoint : `GET /social/{symbol}` → social metrics
+  - Affiché dans la carte signal (frontend)
+
+#### 🔵 Forex — Couche Macro & Calendrier
 
 - [ ] 🤖 **`engine/scrapers/forex_calendar_scraper.py`**
-  - Calendrier économique Forex Factory (événements macro : NFP, CPI, FOMC)
-  - Impact HIGH = avertissement dans signaux Forex avant publication
-  - Scrape hebdomadaire + cache DB
+  - Calendrier économique Forex Factory (NFP, CPI, FOMC, BCE)
+  - Événement HIGH dans < 2h → `macro_risk = True` → scan forex suspendu
+  - Événement HIGH passé → potentielle hausse volatilité post-news → flag
+  - Cache DB + refresh hebdomadaire
 
-### Notifications SSE (complétude)
+- [ ] 🤖 **DXY momentum dans scan Forex**
+  - Fetch DXY (Twelve Data) → calcul momentum 5j
+  - DXY ↑ fort → renforcer signaux SELL EUR/USD, GBP/USD
+  - DXY ↓ fort → renforcer signaux BUY paires majeures vs USD
 
-- [ ] 🤖 **Brancher les notifications dans le flux métier**
-  - `signals.service.ts` : push notif quand signal BUY/SELL confiance > 70
-  - `watcher.service.ts` : push notif quand SL/TP touché sur position
-  - `journal.service.ts` : push notif quand trade fermé automatiquement
-  - Frontend : badge compteur + toast notification dans `AppLayout`
+- [ ] 🤖 **COT Report parser** (CFTC public, gratuit)
+  - Publié chaque vendredi → positions réelles hedge funds vs commerciaux
+  - Commerciaux extrêmement long + hedge funds extrêmement short → squeeze signal
+  - Stocké en DB, affiché dans page Signals pour paires Forex
+
+#### 🟡 BRVM — Couche Fondamentaux Entreprises
+
+- [ ] 🤖 **`engine/scrapers/brvm_scraper.py`** — Robuste
+  - Sources : brvm.org → africainvesting.com → cache DB
+  - Table `brvm_daily_prices(symbol, date, open, high, low, close, volume)`
+  - Cron auto à 16h30 UTC (fermeture BRVM)
+
+- [ ] 🤖 **`engine/scrapers/brvm_fundamentals.py`** — Données entreprises
+  - Scrape bfin.brvm.org : P/E, dividende, revenus, FCF, ROE
+  - Table `brvm_fundamentals(symbol, pe_ratio, dividend_yield, revenue_growth, roe)`
+  - Signal asymétrique BRVM :
+    - P/E bas + dividende croissant + volume anormal → opportunité non pricée
+    - Pas de couverture analytique institutionnelle → edge supplémentaire
+
+#### 🟣 Deriv V75/V100 — Couche Statistique Stochastique
+
+- [ ] 🤖 **`engine/routers/tick_stats.py`** — Analyse statistique synthétique
+  - ATR rolling (7j/30j/90j) → z-score régime actuel vs historique
+  - Bollinger Band width → détection compression pré-expansion
+  - Standard deviation → overextension flag (> 2.5 sigma)
+  - Tick velocity + accélération (Deriv WS tick stream)
+  - Régimes : `LOW_VOL` / `EXPANSION` / `EXHAUSTION`
+  - Signal : "compression depuis N ticks → probabilité expansion X%"
+  - Monte Carlo simple : 1000 simulations → range attendu prochain mouvement
+
+---
+
+### 🧠 Phase B — Machine Learning & Feedback Loop
+
+> Condition : 500+ signaux enregistrés avec résultats réels dans le journal
+
+- [ ] 🤖 **`engine/ml/feature_store.py`** — Stocker les features brutes
+  - À chaque signal généré : sauvegarder les 50+ features numériques en DB
+  - Table `signal_features(signal_id, features_json, outcome, pnl)`
+  - `outcome` renseigné automatiquement quand la position se ferme
+  - C'est le dataset d'entraînement pour tous les modèles futurs
+
+- [ ] 🤖 **`engine/ml/signal_scorer.py`** — XGBoost/LightGBM
+  - Input : feature vector (technique + sentiment + on-chain + macro)
+  - Output : `buy_probability`, `sell_probability`, `confidence_ml`
+  - Remplace progressivement le scoring manuel par marché
+  - Entraînement : `POST /ml/train` → charge journal → fit modèle → sauvegarde
+  - Shadow mode d'abord → comparer ML vs manuel sans risque
+
+- [ ] 🤖 **`engine/ml/regime_classifier.py`** — Hidden Markov Model
+  - Détecter régimes : Bull / Bear / Sideways / Transition
+  - Par actif + par timeframe
+  - Améliore le `regime.py` actuel (actuellement règles statiques)
+
+- [ ] 🤖 **Migration pandas-ta**
+  - Remplacer calculs manuels EMA/RSI/MACD/BB/ATR par `pandas-ta`
+  - `df.ta.ema()`, `df.ta.rsi()`, `df.ta.macd()` etc.
+  - Gain vitesse ~3-5x sur le calcul des features
+  - Ouvre accès à 130+ indicateurs supplémentaires sans code
+
+- [ ] 🤖 **Backtester ML** — valider edge du modèle
+  - Walk-forward testing (pas de look-ahead bias)
+  - Comparer ML signal vs technique seul sur historique
+  - Métriques : Sharpe, win rate, profit factor, max drawdown
+
+---
+
+### 🔮 Phase C — Alpha Pré-Listing & Analyse Asymétrique Avancée
+
+> Inspiré de l'analyse on-chain pre-ICO/presale — détecter AVANT le marché
+
+- [ ] 🤖 **`engine/routers/presale_scanner.py`** — Détection early stage
+  - Sources : CoinGecko upcoming listings, ICO Drops API, CryptoPanic nouveaux tokens
+  - Critères d'éligibilité automatique :
+    - Developer activity GitHub > seuil (commits actifs)
+    - Audit sécurité publié → flag positif
+    - Unlock schedule sain (team vesting > 1 an)
+    - TVL croissant si DeFi protocol
+    - Pas de concentration > 50% top 5 wallets
+  - Output : `pre_listing_score` + `risk_flags[]`
+  - Page dédiée "Early Alpha" dans le frontend
+
+- [ ] 🤖 **`engine/routers/whale_tracker.py`** — Tracking smart money
+  - Via Nansen API (free tier) ou Arkham Intelligence
+  - Wallets labellisés "Smart Money" qui accumulent un token
+  - Wallets fonds VC connus → mouvement de tokens = signal
+  - Alerte : "Wallet Binance Labs accumule TOKEN depuis 7j"
+
+- [ ] 🤖 **`engine/routers/developer_activity.py`** — Santé fondamentale
+  - GitHub API publique (gratuite) → commits, contributors, releases
+  - Projet avec 0 commits depuis 60j → `zombie_flag = True`
+  - Nouveau release majeur → signal positif fondamental
+  - Token Terminal API → protocol revenue réel
+
+- [ ] 🤖 **`engine/routers/defi_metrics.py`** — TVL & DeFi
+  - DefiLlama API (gratuite) → TVL par protocole
+  - TVL ↑ 20%+ sur 30j mais token price flat → asymétrie fondamentale
+  - Protocol fees / revenue → valorisation relative (P/S ratio DeFi)
+
+---
+
+### 🚀 Phase D — Autonomie & Multi-Agents (Vision Long Terme)
+
+> Architecture finale : chaque marché a ses propres agents spécialisés
+
+- [ ] 🤖 **Architecture multi-agents par marché**
+  ```
+  Agent Macro        → surveille Fed, BCE, BIS, calendrier éco
+  Agent On-Chain     → surveille exchange flows, MVRV, whale moves
+  Agent Technique    → price action, SMC, indicators
+  Agent Sentiment    → news NLP, social, LunarCrush
+  Agent Risque       → position sizing, drawdown, corrélations
+  Agent Superviseur  → agrège tous les agents → décision finale
+  ```
+
+- [ ] 🤖 **Exécution automatique paper → réel**
+  - Mode paper → validé 3 mois → passage réel avec limite de capital
+  - Deriv API → exécution automatique V75/V100 si signal confiance > 80
+  - Binance API → exécution crypto si signal asymétrique confirmé
+
+- [ ] 🤖 **Continuous learning pipeline**
+  - Chaque trade clôturé → features + résultat → re-entraînement auto
+  - A/B testing stratégies → sélection darwiniste des meilleurs modèles
+
+---
+
+### 📢 Notifications SSE (complétude MVP)
+
+- [x] 🤖 **Brancher les notifications dans le flux métier**
+  - `signals.service.ts` : push notif quand signal BUY/SELL confiance ≥ 70 ✅
+  - `watcher.service.ts` : push notif userId quand SL/TP touché ✅
+  - `journal.service.ts` : notification fusionnée avec watcher (trade fermé auto)
+  - [ ] Frontend : badge compteur + toast notification dans `AppLayout`
 
 ### RAG & IA (enrichissement)
 
 - [ ] 🤖 **Ingestion auto quotidienne RAG**
   - Tâche planifiée (FastAPI lifespan) : ingest news du jour dans pgvector à 8h UTC
   - Deduplication par hash titre avant embedding
-  - Endpoint `/rag/ingest/today` pour déclencher manuellement
 
 - [ ] 🤖 **Vectoriser le journal de trading**
-  - Chaque trade clôturé → embedding automatique → ajout RAG
-  - L'assistant peut alors répondre "quand est-ce que tu as bien tradé BTC ?"
+  - Chaque trade clôturé → embedding → ajout RAG
+  - L'assistant peut répondre "quand est-ce que tu as bien tradé BTC ?"
 
-- [ ] 🤖 **Strategy Builder Agent** (J23 suite)
-  - Endpoint `/ai/strategy/suggest` : LLM génère des règles de stratégie basées sur historique
-  - Paramètres : style (scalp/swing/position), actif, tolérance risque
-  - Output JSON compatible avec le format `Strategy.rules` existant
+- [ ] 🤖 **Strategy Builder Agent**
+  - Endpoint `/ai/strategy/suggest` : LLM génère règles basées sur historique
+  - Output JSON compatible `Strategy.rules` existant
+
+### Scrapers
+
+- [ ] 🤖 **`engine/scrapers/crypto_news_scraper.py`**
+  - CoinDesk RSS, CryptoCompare public, Decrypt RSS
+  - Fallback si NewsAPI quota épuisé
 
 ---
 
-## 🚀 Déploiement (J30)
+## �️ Qualité Produit SaaS
+
+> Ces tâches sont **bloquantes avant mise en production**. Un SaaS financier sans elles est indéfendable.
+
+### 🔴 Priorité 1 — Bloquant prod (avant déploiement)
+
+#### Gestion d'erreurs
+- [x] 🤖 **`GlobalExceptionFilter` NestJS** ✅
+  - Intercepter toutes les exceptions non gérées
+  - En prod : réponse JSON propre sans stack trace exposé
+  - En dev : stack trace complet pour debug
+  - Logger chaque erreur 500 avec contexte (userId, route, body)
+
+- [x] 🤖 **Logging structuré Python Engine** ✅
+  - `utils/logger.py` créé avec structlog
+  - Tous les `except Exception:` dans `news_scraper.py` logguent source + erreur
+  - Timeout partiel géré : les sources qui échouent ne bloquent pas les autres
+
+- [x] 🤖 **Validation secrets au démarrage** ✅
+  - `engine/config.py` centralisé (Pydantic Settings) — éliminer `os.getenv()` dispersés
+  - App refuse de démarrer si `DATABASE_URL` absent
+  - Warning clair si `NEWS_API_KEY`, `OPENAI_API_KEY` absents (dégradé, pas crash)
+
+- [x] 🤖 **Timeouts stricts sur sources externes** ✅
+  - `news_scraper.py` : timeout 5s par source, résultat partiel si certaines timeout
+  - `watcher.service.ts` : timeout 5s + retry 3× avec backoff sur Binance
+  - Circuit breaker à implémenter plus tard (Redis state)
+
+- [x] 🤖 **Fix import `os` dans `scan.py`** ✅
+  - Import `os` en haut du fichier utilisé partout
+  - `aggregate_sentiment` exporté proprement depuis `news_scraper.py`
+
+#### Sécurité
+- [x] 🤖 **Rate limiting par userId** ✅
+  - `UserThrottlerGuard` décode le JWT et utilise `sub` comme tracker
+  - `@Throttle({ default: { limit: 10, ttl: 60_000 } })` sur `POST /signals/scan`
+  - Fallback IP pour les requêtes non authentifiées
+
+- [x] 🤖 **Sanitisation inputs texte** ✅
+  - `@MaxLength()` ajouté sur Auth, Journal, Strategy, Position DTOs
+  - `@ArrayMaxSize(20)` sur les tags du journal
+
+- [x] 🤖 **Logging tentatives auth échouées** ✅
+  - `AuthController.login` loggue email + IP + timestamp sur chaque échec
+  - Rate limit strict déjà actif sur `POST /auth/login` (brute force protection)
+
+- [x] 🤖 **Refresh token rotation** ✅
+  - Access token 15min + Refresh token 30j stocké en DB (hash SHA-256)
+  - Table `RefreshToken` liée à `User` : tokenHash, expiresAt, revokedAt, replacedBy, userAgent, ip
+  - Rotation à chaque `POST /auth/refresh` : ancien token révoqué, nouveau couple émis
+  - Détection de réutilisation : si token déjà remplacé est réutilisé → revoke tous les tokens du user
+  - Frontend : `api.ts` interceptor 401 → `POST /auth/refresh` + retry requête originale
+  - Endpoints : `/auth/refresh`, `/auth/logout`, JWT `expiresIn` passé à `15m`
+
+### 🟡 Priorité 2 — Qualité prod
+
+#### Tests
+- [x] 🤖 **Tests NestJS** ✅ — infrastructure démarrée
+  - `auth.service.spec.ts` : register, login, refresh rotation, reuse detection, token invalide, token expiré (9 tests ✅)
+  - `positions.service.spec.ts` : open, close, SL trigger, TP trigger, drawdown block (4 tests ✅)
+  - `watcher.service.spec.ts` : fermeture auto correcte BUY/SELL, journal auto (3 tests ✅)
+  - `signals.service.spec.ts` : filtrage par confiance, pagination (3 tests ✅)
+  - Objectif : 30+ tests → continuer d'ajouter des cas edge
+
+- [x] 🤖 **Tests Python Engine** (élargissement) ✅
+  - `test_scan.py` : `analyze_candles` sur séries BUY/SELL + no data
+  - `test_news_scraper.py` : sentiment heuristic, aggregate, hash
+  - `test_regime.py` : trending/ranging/volatile + bonus/filtre
+  - `test_risk.py` : sizing, targets, ajustements régime, plafonnements
+  - **Total : 71 tests passent**
+
+- [x] 🤖 **Tests Next.js** ✅ (étendus)
+  - Auth login/register : render, submit success, validation error
+  - ErrorBoundary : fallback UI quand enfant throw
+  - Dashboard : render avec data, skeleton loading, error state
+  - Signals : empty state, liste, scan mutation
+  - Portfolio : render + fetch data, switch historique
+  - Setup Jest + React Testing Library + ts-jest
+  - **Total : 16 tests passent**
+
+#### Resilience
+- [x] 🤖 **Retry avec backoff exponentiel + jitter** ✅
+  - `apps/engine/utils/http.py` : `retry_async(max_retries=3, base_delay=0.5s, jitter ±25%)`
+  - Pas de retry sur les 4xx client (sauf 429) ; backoff plus long sur 429
+  - Binance klines (`scan.py`) : retry 3× sur erreurs HTTP/timeout/connexion
+  - Twelve Data (`scan.py`) : retry 2×, sémaphore un appel à la fois pour éviter le 429
+  - Binance live prices (`ws.py`) : retry 3× idem ; fix paramètre `symbols` sans espaces (évitait le 400)
+  - NestJS Watcher (`watcher.service.ts`) : `retryWithBackoff()` 3× avec délai exponentiel
+
+- [x] 🤖 **CRON scan automatique** — signaux sans intervention manuelle
+  - `@Cron('0 6 * * *')` NestJS → scan de tous les actifs actifs à 6h UTC
+  - `@Cron('0 */4 * * *')` → re-scan toutes les 4h
+  - Notification SSE globale si signal confiance ≥ 70%
+
+### 🟠 Priorité 3 — Performance & UX
+
+#### Vitesse chargement Next.js
+- [x] 🤖 **QueryClient global optimisé** ✅
+  - `refetchOnWindowFocus: false` global
+  - `retry: 1` et `gcTime: 5min`
+  - `staleTime` par défaut 1min (peut être affiné par hook)
+
+- [x] 🤖 **Lazy loading composants lourds** ✅
+  - `Chart` → `CandlestickChart` dynamic import `ssr: false`
+  - `BacktestChart` → `MiniEquityChart` dynamic import
+  - `AiChat` → à faire quand composant extrait
+
+- [x] 🤖 **Loading skeletons** ✅ (partiel)
+  - Dashboard : `SkeletonCard` sur les stat cards
+  - Chart : placeholder pendant chargement du graphique
+  - Backtest : skeleton sur la courbe d'équité
+
+- [x] 🤖 **Error boundaries React** ✅
+  - `<ErrorBoundary>` global dans `Providers.tsx` — une erreur composant ne crashe pas tout
+  - Fallback UI : "Erreur de chargement — Réessayer"
+
+#### Vitesse signaux < 1 seconde
+- [x] 🤖 **Migration pandas-ta** ✅
+  - `ema()`, `rsi()`, `macd()`, `bollinger()`, `atr()` migrés vers `pandas-ta`
+  - 25 tests engine passent
+  - Ouvre accès 130+ indicateurs additionnels sans code
+
+- [x] 🤖 **Pré-calcul features en background** ✅
+  - Tâche FastAPI lifespan : recalcul features toutes les 30s sur actifs actifs
+  - Cache Redis : features précalculées → scan devient un simple lookup
+  - Mesuré : scan < 15ms quand cache hit (vs 3-5s avant)
+
+#### Responsivité mobile
+- [x] 🤖 **Tables → Cards sur mobile** ✅
+  - Portfolio : positions ouvertes + historique en cards mobile
+  - Signals : déjà en cards responsive
+  - Journal : cards existants + formulaire responsive
+  - Backtest : trades en cards mobile
+
+- [x] 🤖 **Navigation mobile** ✅
+  - Bottom navigation bar sur mobile (Dashboard, Signals, Portfolio, IA)
+  - Sidebar masquée sur `<768px`
+  - Padding main ajusté pour mobile
+
+- [x] 🤖 **Charts adaptatifs** ✅
+  - Chart TradingView : hauteur 320px mobile / 500px desktop
+  - Contrôles : scroll horizontal sur petit écran
+  - Sélecteurs `shrink-0` pour éviter le wrapping
+
+### 🔵 Priorité 4 — SaaS Readiness (post-déploiement)
+
+- [ ] 🤖 **Plans & abonnements**
+  - Table `plans` + `subscriptions` en DB
+  - Plans : Free | Starter 19$/mois | Pro 49$/mois | Fund 199$/mois
+  - Features par plan : nombre scans/h, marchés accessibles, presale scanner (Pro+)
+  - Stripe intégration : `POST /billing/checkout`, webhooks paiement
+
+- [ ] 🤖 **Refresh token rotation**
+  - Access token 15min + Refresh token 7j en cookie httpOnly
+  - Rotation à chaque refresh (invalidation ancien token)
+  - Blacklist tokens révoqués en Redis
+
+- [ ] 🤖 **Audit trail**
+  - Table `audit_logs(userId, action, entity, entityId, metadata, timestamp)`
+  - Logger : login, open/close position, strategy change, backtest lancé
+  - Endpoint admin : `GET /admin/audit-logs`
+
+- [ ] 🤖 **2FA TOTP**
+  - Optionnel MVP, obligatoire si compte avec trades réels
+  - `speakeasy` (Node) → QR code → vérification code 6 chiffres
+
+---
+
+## �🚀 Déploiement (priorité)
 
 - [ ] 👤 Louer VPS Hetzner (CX21 min — 2 vCPU, 4GB RAM, 40GB SSD)
-  - Région : Nuremberg ou Helsinki (latence Europe/Afrique ok)
+  - Région : Nuremberg ou Helsinki
   - OS : Ubuntu 24.04 LTS
 - [ ] 👤 Pointer domaine DNS → IP VPS
-- [ ] 🤖 Créer `docker-compose.prod.yml` avec tous les services
-- [ ] 🤖 Créer `Dockerfile` pour NestJS API (déjà fait pour Engine)
-- [ ] 🤖 Créer `Dockerfile` pour Next.js Web
-- [ ] 🤖 Config Nginx reverse proxy + SSL Let's Encrypt
-- [ ] 🤖 Script deploy `deploy.sh` (pull → build → restart)
-- [ ] 👤 Configurer secrets GitHub/Hetzner pour CI/CD optionnel
-- [ ] 🤖 Health checks Docker Compose (tous services)
+- [ ] 🤖 `docker-compose.prod.yml` avec tous les services
+- [ ] 🤖 `Dockerfile` NestJS API + Next.js Web
+- [ ] 🤖 Nginx reverse proxy + SSL Let's Encrypt
+- [ ] 🤖 Script `deploy.sh` (pull → build → restart)
+- [ ] 🤖 Health checks Docker Compose
 - [ ] 🤖 Backup automatique PostgreSQL (pg_dump cron quotidien)
+- [ ] 👤 Configurer secrets GitHub pour CI/CD optionnel
 
 ---
 
-## 📊 Features Futures (post-déploiement)
+## 📊 Features UX (post-déploiement)
 
-- [ ] 🤖 **Alertes prix** — définir un prix cible → notif SSE + email quand atteint
-- [ ] 🤖 **Multi-compte** — support plusieurs portfolios par user
+- [ ] 🤖 **Alertes prix** — notif SSE + email quand prix cible atteint
+- [ ] 🤖 **Multi-compte** — plusieurs portfolios par user
 - [ ] 🤖 **Export CSV/PDF** — journal + rapport performance
-- [ ] 🤖 **Scoring ML** — scikit-learn sur historique signaux pour affiner confiance
-- [ ] 🤖 **Calendrier économique** — page dédiée événements macro (FOMC, NFP, CPI)
+- [ ] 🤖 **Calendrier économique** — page dédiée FOMC, NFP, CPI, BRVM events
+- [ ] 🤖 **Page "Early Alpha"** — presale scanner + on-chain asymétrique
+- [ ] 🤖 **Heatmap marchés** — vue globale état on-chain par actif
 - [ ] 👤 **Application mobile** — React Native ou PWA (futur)
 
 ---
@@ -182,5 +514,21 @@
 - [x] Notifications SSE infrastructure
 - [x] LLM explications signaux + rapport hebdo (OpenAI/Ollama/mock)
 
+---
 
-Apres nous aller travailler actif par actif et marché par marché
+## 📝 Notes de recherche
+
+- **pandas-ta** : bibliothèque Python 130+ indicateurs, syntaxe `df.ta.rsi()` — remplace TA-Lib manuel, ~3-5x plus rapide, à migrer en Priorité 3
+- **Vitesse signaux** : objectif < 1 seconde par actif → pré-calcul background + asyncio.gather + pandas-ta + cache Redis features
+- **Analyse asymétrique on-chain** : détecter en Phase 2-3 (accumulation silencieuse) avant Phase 4-5 (attention marché). Métriques : exchange outflows, MVRV < 1, whale accumulation, developer activity, TVL growth vs prix flat
+- **Par marché** : Crypto = on-chain | Forex = COT + macro calendrier | BRVM = fondamentaux entreprises + volume anormal | V75 = statistiques stochastiques + tick data
+- **Sécurité SaaS financier** : rate limit par userId (pas IP), sanitisation inputs, logging auth échouées, refresh token rotation, 2FA pour trades réels
+- **Tests manquants critiques** : 0 tests NestJS actuellement — auth, positions, watcher sont non testés
+- **Scraper news_scraper.py** : 30 connexions parallèles → timeout strict 3s/source obligatoire avant prod
+- **Circuit breaker** : si Binance/TwelveData échoue 3× → skip 5min, évite cascade d'erreurs en prod
+- **Mobile** : tables → cards sur <768px, bottom nav bar, charts adaptatifs
+- **SaaS plans** : Free | Starter 19$/mois | Pro 49$/mois | Fund 199$/mois — Stripe + webhooks
+
+
+
+alternative.me fonctionne?

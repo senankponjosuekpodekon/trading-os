@@ -58,7 +58,7 @@ export default function DashboardPage() {
 
   const { data: signals } = useQuery<Signal[]>({
     queryKey: ['signals'],
-    queryFn: async () => (await api.get('/signals?limit=5')).data,
+    queryFn: async () => (await api.get('/signals?limit=5')).data.data,
     refetchInterval: 60_000,
   });
 

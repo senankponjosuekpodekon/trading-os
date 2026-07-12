@@ -7,6 +7,7 @@ import time
 import os
 import pandas as pd
 import numpy as np
+import pandas_ta as ta
 from concurrent.futures import ThreadPoolExecutor
 
 from routers.price_action import detect_market_structure, price_action_bonus
@@ -16,8 +17,24 @@ from routers.regime import detect_regime, regime_bonus, regime_filter
 from routers.smc import analyze_smc, smc_bonus
 from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
+from routers.news_scraper import scrape_all_sources, aggregate_sentiment
+import config
+from utils.cache import get_cached, set_cached
+from utils.logger import get_logger
+from utils.http import retry_async
 
+logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=4)
+
+# Actifs précalculés en background
+ACTIVE_SYMBOLS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "AVAX/USDT",
+    "ADA/USDT", "XRP/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT",
+    "EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "WTI/USD",
+]
+WARMUP_TIMEFRAMES = ["1h", "4h"]
+WARMUP_INTERVAL_SECONDS = 30
+WARMUP_TTL_SECONDS = 45
 
 router = APIRouter()
 
@@ -50,10 +67,9 @@ SYMBOL_TO_TWELVEDATA = {
     "USD/CAD": "USD/CAD",
     "XAU/USD": "XAU/USD",
     "XAG/USD": "XAG/USD",
-    "WTI/USD": "WTI/USD",
 }
 
-TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "")
+TWELVE_DATA_API_KEY = config.settings.twelve_data_api_key
 
 # Conversion timeframe interne → Twelve Data
 TF_TO_TD: dict = {
@@ -70,41 +86,30 @@ class ScanRequest(BaseModel):
 
 
 def ema(s: pd.Series, p: int) -> pd.Series:
-    return s.ewm(span=p, adjust=False).mean()
+    return ta.ema(s, length=p)
 
 def rsi(s: pd.Series, p: int = 14) -> pd.Series:
-    d = s.diff()
-    g = d.clip(lower=0).rolling(p).mean()
-    l = (-d.clip(upper=0)).rolling(p).mean()
-    rs = g / l.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    return ta.rsi(s, length=p)
 
 def atr(h: pd.Series, lo: pd.Series, c: pd.Series, p: int = 14) -> pd.Series:
-    pc = c.shift(1)
-    tr = pd.concat([h - lo, (h - pc).abs(), (lo - pc).abs()], axis=1).max(axis=1)
-    return tr.rolling(p).mean()
+    return ta.atr(h, lo, c, length=p)
 
 def macd(s: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
-    fast_ema = s.ewm(span=fast, adjust=False).mean()
-    slow_ema = s.ewm(span=slow, adjust=False).mean()
-    macd_line    = fast_ema - slow_ema
-    signal_line  = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram    = macd_line - signal_line
-    return macd_line, signal_line, histogram
+    out = ta.macd(s, fast=fast, slow=slow, signal=signal)
+    # pandas-ta order: MACD line, histogram, signal line
+    return out.iloc[:, 0], out.iloc[:, 2], out.iloc[:, 1]
 
 def bollinger(s: pd.Series, p: int = 20, k: float = 2.0):
-    mid  = s.rolling(p).mean()
-    std  = s.rolling(p).std()
-    upper = mid + k * std
-    lower = mid - k * std
-    bw    = (upper - lower) / mid  # bandwidth
-    return upper, mid, lower, bw
+    out = ta.bbands(s, length=p, std=k)
+    # pandas-ta order: lower, mid, upper, bandwidth, %B
+    return out.iloc[:, 2], out.iloc[:, 1], out.iloc[:, 0], out.iloc[:, 3]
 
 
 _http_client: Optional[httpx.AsyncClient] = None
 _klines_cache: dict = {}  # key -> (timestamp, df)
 _CACHE_TTL = 60  # secondes
 _CACHE_TTL_TD = 300  # Twelve Data: 5min (limite 800 req/jour sur plan gratuit)
+_TD_SEMAPHORE = asyncio.Semaphore(1)  # Twelve Data : un appel à la fois pour éviter le 429
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -139,11 +144,24 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
         "format":    "JSON",
         "order":     "ASC",
     }
+
+    async def _do_fetch():
+        async with _TD_SEMAPHORE:
+            client = _get_http_client()
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            return r.json()
+
     try:
-        client = _get_http_client()
-        r = await client.get(url, params=params)
-        r.raise_for_status()
-        data = r.json()
+        data = await retry_async(
+            _do_fetch,
+            max_retries=2,
+            base_delay=1.0,
+            exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
+            on_retry=lambda attempt, exc: logger.warning(
+                "twelvedata_retry", symbol=symbol, attempt=attempt, error=str(exc)
+            ),
+        )
         if "values" not in data:
             return None
         rows = data["values"]
@@ -173,11 +191,23 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
             return df
 
     url = f"https://api.binance.com/api/v3/klines?symbol={binance_sym}&interval={interval}&limit={limit}"
-    try:
+
+    async def _do_fetch():
         client = _get_http_client()
         r = await client.get(url)
         r.raise_for_status()
-        data = r.json()
+        return r.json()
+
+    try:
+        data = await retry_async(
+            _do_fetch,
+            max_retries=3,
+            base_delay=0.5,
+            exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
+            on_retry=lambda attempt, exc: logger.warning(
+                "binance_retry", symbol=symbol, attempt=attempt, error=str(exc)
+            ),
+        )
         df = pd.DataFrame(data, columns=[
             "time","open","high","low","close","volume",
             "close_time","quote_vol","trades","taker_buy_base","taker_buy_quote","ignore"
@@ -433,11 +463,48 @@ def analyze_candles(symbol: str, timeframe: str, df: pd.DataFrame) -> dict:
     }
 
 
+async def fetch_and_analyze(symbol: str, timeframe: str) -> dict:
+    """Fetch klines et analyse un actif — utilisé par warmup et fallback."""
+    tf = TF_MAP.get(timeframe, "1h")
+    df = await fetch_binance_klines(symbol, tf)
+    if df is None:
+        df = await fetch_twelvedata_klines(symbol, tf)
+    if df is None or len(df) < 50:
+        return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, analyze_candles, symbol, timeframe, df)
+
+
+async def warmup_features():
+    """Tâche de fond : précalcule les features scan pour les actifs actifs."""
+    while True:
+        for timeframe in WARMUP_TIMEFRAMES:
+            tasks = [fetch_and_analyze(sym, timeframe) for sym in ACTIVE_SYMBOLS]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for sym, res in zip(ACTIVE_SYMBOLS, results):
+                if isinstance(res, Exception):
+                    logger.warning("warmup_failed", symbol=sym, timeframe=timeframe, error=str(res))
+                    continue
+                await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_SECONDS)
+            logger.info("warmup_done", timeframe=timeframe, symbols=len(ACTIVE_SYMBOLS))
+        await asyncio.sleep(WARMUP_INTERVAL_SECONDS)
+
+
 @router.post("/multi")
 async def scan_multi(req: ScanRequest):
     t0  = time.monotonic()
     tf  = TF_MAP.get(req.timeframe, "1h")
     loop = asyncio.get_event_loop()
+
+    # 0. Cache lookup rapide : si toutes les features sont précalculées, retour immédiat
+    cached_results = []
+    missing_symbols = []
+    for sym in req.symbols:
+        cached = await get_cached(f"scan:{sym}:{req.timeframe}")
+        if cached:
+            cached_results.append({**cached, "cached": True})
+        else:
+            missing_symbols.append(sym)
 
     async def _fetch(sym: str) -> Optional[pd.DataFrame]:
         # Essai Binance en premier
@@ -448,14 +515,14 @@ async def scan_multi(req: ScanRequest):
         return await fetch_twelvedata_klines(sym, tf)
 
     # 1. Fetch toutes les klines en parallèle (I/O) — Binance + Twelve Data fallback
-    dfs = await asyncio.gather(*[_fetch(sym) for sym in req.symbols])
+    dfs = await asyncio.gather(*[_fetch(sym) for sym in missing_symbols])
 
     async def _no_data(s: str):
         return {"symbol": s, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
 
     # 2. Analyse CPU dans un thread pool pour ne pas bloquer l'event loop
     analyze_tasks = []
-    for sym, df in zip(req.symbols, dfs):
+    for sym, df in zip(missing_symbols, dfs):
         if df is None or len(df) < 50:
             analyze_tasks.append(_no_data(sym))
         else:
@@ -463,11 +530,14 @@ async def scan_multi(req: ScanRequest):
                 loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df)
             )
 
-    results = list(await asyncio.gather(*analyze_tasks))
+    computed_results = list(await asyncio.gather(*analyze_tasks))
+    for r in computed_results:
+        await set_cached(f"scan:{r['symbol']}:{req.timeframe}", r, ttl=WARMUP_TTL_SECONDS)
+
+    results = cached_results + computed_results
 
     # 3. Enrichissement sentiment news (en parallèle, non bloquant si NEWS_API_KEY absent)
-    import os as _os
-    if _os.getenv("NEWS_API_KEY"):
+    if config.settings.news_api_key:
         sentiment_tasks = [
             get_news_sentiment(NewsRequest(symbol=r["symbol"], limit=5, analyze=True))
             for r in results if r.get("signal") in ("BUY", "SELL")
@@ -499,6 +569,34 @@ async def scan_multi(req: ScanRequest):
                             for a in s.articles[:3]
                         ],
                     }
+
+    # 4. Enrichissement sentiment scraper propriétaire (RSS + Reddit + Nitter)
+    # Fonctionne sans aucune clé API — toujours actif
+    scraper_tasks = [
+        scrape_all_sources(r["symbol"])
+        for r in results if r.get("signal") in ("BUY", "SELL")
+    ]
+    if scraper_tasks:
+        scraper_results = await asyncio.gather(*scraper_tasks, return_exceptions=True)
+        active_signals = [r for r in results if r.get("signal") in ("BUY", "SELL")]
+        for r, scraped in zip(active_signals, scraper_results):
+            if isinstance(scraped, Exception) or not scraped:
+                continue
+            agg = aggregate_sentiment(scraped)
+            bonus = agg["bonus"]
+            if r.get("signal") == "BUY" and agg["label"] == "bearish":
+                bonus = -abs(bonus)
+            elif r.get("signal") == "SELL" and agg["label"] == "bullish":
+                bonus = -abs(bonus)
+            r["confidence"] = max(0, min(100, r.get("confidence", 0) + bonus))
+            r["scraper_sentiment"] = {
+                "label":   agg["label"],
+                "score":   agg["score"],
+                "bonus":   bonus,
+                "bullish": agg["bullish"],
+                "bearish": agg["bearish"],
+                "sources": list({a.source for a in scraped[:5]}),
+            }
 
     ws_module.set_latest_signals(results)
 

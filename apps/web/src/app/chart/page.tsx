@@ -1,13 +1,19 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
+import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { CandlestickChart, OHLCBar, ChartMarker, Drawing } from '@/components/chart/CandlestickChart';
+import { OHLCBar, ChartMarker, Drawing } from '@/components/chart/CandlestickChart';
 import { DrawingToolbar, DrawingTool } from '@/components/chart/DrawingToolbar';
 import { api } from '@/lib/api';
 import { Signal } from '@/types';
 import { RefreshCw, TrendingUp, TrendingDown, Minus, X } from 'lucide-react';
+
+const CandlestickChart = dynamic(
+  () => import('@/components/chart/CandlestickChart').then(mod => mod.CandlestickChart),
+  { ssr: false, loading: () => <div className="h-[500px] flex items-center justify-center text-gray-600">Chargement du graphique…</div> },
+);
 
 const SYMBOLS    = [
   'BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT',
@@ -49,6 +55,14 @@ export default function ChartPage() {
   const [timeframe, setTimeframe] = useState('1h');
   const [activeTool, setActiveTool] = useState<DrawingTool>('pointer');
   const [drawings,   setDrawings]   = useState<Drawing[]>([]);
+  const [chartHeight, setChartHeight] = useState(500);
+
+  useEffect(() => {
+    const update = () => setChartHeight(window.innerWidth < 768 ? 320 : 500);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
 
   // Klines Binance
   const { data: klines, isFetching, refetch } = useQuery<OHLCBar[]>({
@@ -61,7 +75,7 @@ export default function ChartPage() {
   // Signaux enregistrés pour cet actif
   const { data: signals } = useQuery<Signal[]>({
     queryKey: ['signals'],
-    queryFn:  async () => (await api.get('/signals?limit=100')).data,
+    queryFn:  async () => (await api.get('/signals?limit=100')).data.data,
     staleTime: 30_000,
   });
 
@@ -103,22 +117,22 @@ export default function ChartPage() {
       <div className="space-y-4">
 
         {/* Contrôles */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-nowrap md:flex-wrap items-center gap-3 overflow-x-auto pb-1 scrollbar-hide">
           {/* Sélecteur symbole */}
-          <div className="flex bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div className="flex shrink-0 bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
             {SYMBOLS.map(s => (
               <button key={s} onClick={() => setSymbol(s)}
-                className={`px-3 py-2 text-sm font-medium transition-colors ${symbol === s ? 'bg-emerald-500/20 text-emerald-400' : 'text-gray-400 hover:text-white'}`}>
+                className={`px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap ${symbol === s ? 'bg-emerald-500/20 text-emerald-400' : 'text-gray-400 hover:text-white'}`}>
                 {s.replace('/USDT', '')}
               </button>
             ))}
           </div>
 
           {/* Sélecteur timeframe */}
-          <div className="flex bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div className="flex shrink-0 bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
             {TIMEFRAMES.map(tf => (
               <button key={tf} onClick={() => setTimeframe(tf)}
-                className={`px-3 py-2 text-sm font-medium transition-colors ${timeframe === tf ? 'bg-emerald-500/20 text-emerald-400' : 'text-gray-400 hover:text-white'}`}>
+                className={`px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap ${timeframe === tf ? 'bg-emerald-500/20 text-emerald-400' : 'text-gray-400 hover:text-white'}`}>
                 {tf}
               </button>
             ))}
@@ -177,7 +191,7 @@ export default function ChartPage() {
             <CandlestickChart
               data={klines}
               markers={markers}
-              height={500}
+              height={chartHeight}
               showVolume={true}
               activeTool={activeTool}
               drawings={drawings}

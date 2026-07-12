@@ -18,6 +18,9 @@ BRVM_BASE    = "https://www.brvm.org"
 BRVM_ACTIONS = f"{BRVM_BASE}/fr/cours-actions/0"
 BRVM_HISTORY = f"{BRVM_BASE}/fr/cours-history"
 
+WESTBOURSE_BASE     = "https://www.westbourse.com"
+WESTBOURSE_ACTIONS  = f"{WESTBOURSE_BASE}/api/public/v1/actions"
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml",
@@ -47,19 +50,54 @@ class BrvmScanRequest(BaseModel):
     timeframe: str = "1d"
 
 
-async def fetch_brvm_quotes() -> List[dict]:
-    """Scrape la page des cours actions de la BRVM."""
+async def _fetch_westbourse_quotes() -> List[dict]:
+    """Récupère les cours via l'API publique Westbourse."""
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            r = await client.get(WESTBOURSE_ACTIONS)
+            r.raise_for_status()
+            payload = r.json()
+    except Exception:
+        return []
+
+    actions = payload.get("actions") or []
+    quotes = []
+    for a in actions:
+        try:
+            symbol = a.get("code", "")
+            name   = a.get("nom", "")
+            price  = float(a.get("cours", 0) or 0)
+            chg_pct = float(a.get("variation_pct", 0) or 0)
+            volume = int(a.get("volume", 0) or 0)
+            if not symbol or price <= 0:
+                continue
+            quotes.append({
+                "symbol":     symbol,
+                "name":       name,
+                "price":      price,
+                "change":     round(price * chg_pct / 100, 2),
+                "change_pct": chg_pct,
+                "volume":     volume,
+                "market":     "BRVM",
+                "currency":   "XOF",
+            })
+        except (ValueError, TypeError):
+            continue
+    return quotes
+
+
+async def _fetch_scraped_brvm_quotes() -> List[dict]:
+    """Scrape la page des cours actions de la BRVM (fallback)."""
     try:
         async with httpx.AsyncClient(timeout=8, headers=HEADERS, follow_redirects=True) as client:
             r = await client.get(BRVM_ACTIONS)
             r.raise_for_status()
-    except Exception as e:
+    except Exception:
         return []
 
     soup = BeautifulSoup(r.text, "lxml")
     quotes = []
 
-    # Table des cours sur brvm.org
     table = soup.find("table", {"id": "table-sm"}) or soup.find("table", class_=lambda c: c and "cours" in c.lower())
     if not table:
         tables = soup.find_all("table")
@@ -92,6 +130,14 @@ async def fetch_brvm_quotes() -> List[dict]:
             continue
 
     return quotes
+
+
+async def fetch_brvm_quotes() -> List[dict]:
+    """Cours BRVM : Westbourse en priorité, scraping en fallback."""
+    quotes = await _fetch_westbourse_quotes()
+    if quotes:
+        return quotes
+    return await _fetch_scraped_brvm_quotes()
 
 
 def _mock_brvm_quotes() -> List[dict]:

@@ -10,7 +10,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from routers import health, indicators, analyze, scan, ws, risk, backtest, llm, brvm, deriv, rag, news
+from routers import health, indicators, analyze, scan, ws, risk, backtest, llm, brvm, deriv, rag, news, news_scraper
+import config  # noqa: F401 — valide les secrets au démarrage
 import asyncio
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute", "1000/hour"])
@@ -21,13 +22,16 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Trading OS Engine starting up")
-    task = asyncio.create_task(ws.price_broadcaster())
+    price_task = asyncio.create_task(ws.price_broadcaster())
+    warmup_task = asyncio.create_task(scan.warmup_features())
     yield
-    task.cancel()
-    try:
-        await asyncio.wait_for(task, timeout=5.0)
-    except (asyncio.CancelledError, asyncio.TimeoutError):
-        pass
+    price_task.cancel()
+    warmup_task.cancel()
+    for task in (price_task, warmup_task):
+        try:
+            await asyncio.wait_for(task, timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
     logger.info("Trading OS Engine shutting down")
 
 
@@ -67,7 +71,8 @@ app.include_router(llm.router,      prefix="",  tags=["LLM"])
 app.include_router(brvm.router,     prefix="",  tags=["BRVM"])
 app.include_router(deriv.router,    prefix="",  tags=["Deriv"])
 app.include_router(rag.router,      prefix="",  tags=["RAG"])
-app.include_router(news.router,     prefix="",  tags=["News"])
+app.include_router(news.router,         prefix="",  tags=["News"])
+app.include_router(news_scraper.router, prefix="",  tags=["News Scraper"])
 
 if __name__ == "__main__":
     import uvicorn

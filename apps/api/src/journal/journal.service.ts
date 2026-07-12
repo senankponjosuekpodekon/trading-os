@@ -1,16 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { IsString, IsOptional, IsInt, IsArray, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsArray, Min, Max, MaxLength, ArrayMaxSize } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 
 export class CreateJournalDto {
   @IsString()
+  @MaxLength(200)
   title: string;
 
   @IsString()
+  @MaxLength(5000)
   content: string;
 
   @IsOptional()
+  @IsOptional()
   @IsString()
+  @MaxLength(50)
   emotion?: string;
 
   @IsOptional()
@@ -21,6 +25,7 @@ export class CreateJournalDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(20)
   tags?: string[];
 
   @IsOptional()
@@ -46,17 +51,38 @@ export class JournalService {
     });
   }
 
-  async findAll(userId: string, limit = 30) {
-    return this.prisma.journalEntry.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      include: {
-        position: {
-          include: { asset: { select: { symbol: true } } },
+  async findAll(userId: string, opts: { page: number; limit: number; sort: string }) {
+    const [field, dir] = opts.sort.split(':');
+    const orderByField = ['createdAt', 'grade'].includes(field) ? field : 'createdAt';
+    const orderBy: any = { [orderByField]: dir === 'asc' ? 'asc' : 'desc' };
+    const skip = (opts.page - 1) * opts.limit;
+
+    const where = { userId };
+
+    const [data, total] = await Promise.all([
+      this.prisma.journalEntry.findMany({
+        where,
+        skip,
+        take: opts.limit,
+        orderBy,
+        include: {
+          position: {
+            include: { asset: { select: { symbol: true } } },
+          },
         },
+      }),
+      this.prisma.journalEntry.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        page: opts.page,
+        limit: opts.limit,
+        total,
+        totalPages: Math.ceil(total / opts.limit),
       },
-    });
+    };
   }
 
   async findOne(userId: string, id: string) {

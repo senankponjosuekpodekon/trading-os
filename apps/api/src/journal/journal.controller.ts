@@ -13,8 +13,17 @@ export class JournalController {
   }
 
   @Get()
-  findAll(@Request() req: any, @Query('limit') limit?: string) {
-    return this.journalService.findAll(req.user.id, limit ? parseInt(limit) : 30);
+  findAll(
+    @Request() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('sort') sort?: string,
+  ) {
+    return this.journalService.findAll(req.user.id, {
+      page:  page  ? Math.max(1, parseInt(page, 10))  : 1,
+      limit: limit ? Math.min(100, Math.max(1, parseInt(limit, 10))) : 20,
+      sort:  sort  || 'createdAt:desc',
+    });
   }
 
   @Get('stats')

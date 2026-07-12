@@ -16,20 +16,39 @@ enum UserRole {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
+  id           String         @id @default(cuid())
+  email        String         @unique
   password     String
   name         String
-  role         UserRole  @default(TRADER)
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  role         UserRole       @default(TRADER)
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   portfolios   Portfolio[]
   journal      JournalEntry[]
   strategies   UserStrategy[]
+  refreshTokens RefreshToken[]
 
   @@map("users")
+}
+
+model RefreshToken {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique @map("token_hash")
+  userId       String    @map("user_id")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  replacedBy   String?   @map("replaced_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  userAgent    String?   @map("user_agent")
+  ip           String?   @map("ip")
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
 }
 
 // ─── PORTFOLIOS ──────────────────────────────────────────────
@@ -53,6 +72,7 @@ model Portfolio {
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   positions    Position[]
 
+  @@index([userId])
   @@map("portfolios")
 }
 
@@ -157,6 +177,8 @@ model Signal {
   strategy     Strategy   @relation(fields: [strategyId], references: [id])
   positions    Position[]
 
+  @@index([assetId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
   @@map("signals")
 }
 
@@ -190,6 +212,10 @@ model Position {
   signal       Signal?        @relation(fields: [signalId], references: [id])
   journal      JournalEntry[]
 
+  @@index([portfolioId])
+  @@index([portfolioId, status])
+  @@index([assetId])
+  @@index([status])
   @@map("positions")
 }
 
@@ -209,5 +235,7 @@ model JournalEntry {
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   position     Position? @relation(fields: [positionId], references: [id])
 
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([positionId])
   @@map("journal_entries")
 }

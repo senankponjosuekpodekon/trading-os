@@ -97,7 +97,7 @@ export default function PortfolioPage() {
   // Signaux actifs pour paper trading (J16)
   const { data: signals } = useQuery<Signal[]>({
     queryKey: ['signals'],
-    queryFn: async () => (await api.get('/signals?limit=10')).data,
+    queryFn: async () => (await api.get('/signals?limit=10')).data.data,
   });
 
   const activeSignals = signals?.filter(s => s.signal !== 'NEUTRAL') ?? [];
@@ -293,142 +293,275 @@ export default function PortfolioPage() {
         {/* Onglet OUVERTES — avec PnL live */}
         {tab === 'open' && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-800 bg-gray-800/50">
-                  {['Actif', 'Dir.', 'Entrée', 'Prix live', 'PnL live', 'SL', 'TP', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {!livePositions && (
-                  <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-600">
-                    <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />Chargement prix live…
-                  </td></tr>
-                )}
-                {livePositions?.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-12 text-center">
-                    <div className="flex flex-col items-center gap-2 text-gray-600">
-                      <Activity className="w-8 h-8" />
-                      <p>Aucune position ouverte</p>
-                    </div>
-                  </td></tr>
-                )}
-                {livePositions?.map((p: LivePosition) => {
-                  const entry     = parseFloat(p.entryPrice);
-                  const sl        = p.stopLoss   ? parseFloat(p.stopLoss)   : null;
-                  const tp        = p.takeProfit ? parseFloat(p.takeProfit) : null;
-                  const live      = p.livePrice;
-                  const upnl      = p.unrealizedPnl;
-                  const upnlPct   = p.unrealizedPct;
-                  // Progress bar SL→Entry→TP
-                  const total     = sl && tp ? Math.abs(tp - sl) : null;
-                  const progress  = sl && tp && live
-                    ? Math.max(0, Math.min(100, ((live - sl) / (tp - sl)) * 100))
-                    : null;
-                  return (
-                    <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
-                      <td className="px-4 py-3">
+            {/* Desktop table */}
+            <div className="hidden md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 bg-gray-800/50">
+                    {['Actif', 'Dir.', 'Entrée', 'Prix live', 'PnL live', 'SL', 'TP', ''].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {!livePositions && (
+                    <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-600">
+                      <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />Chargement prix live…
+                    </td></tr>
+                  )}
+                  {livePositions?.length === 0 && (
+                    <tr><td colSpan={8} className="px-4 py-12 text-center">
+                      <div className="flex flex-col items-center gap-2 text-gray-600">
+                        <Activity className="w-8 h-8" />
+                        <p>Aucune position ouverte</p>
+                      </div>
+                    </td></tr>
+                  )}
+                  {livePositions?.map((p: LivePosition) => {
+                    const entry     = parseFloat(p.entryPrice);
+                    const sl        = p.stopLoss   ? parseFloat(p.stopLoss)   : null;
+                    const tp        = p.takeProfit ? parseFloat(p.takeProfit) : null;
+                    const live      = p.livePrice;
+                    const upnl      = p.unrealizedPnl;
+                    const upnlPct   = p.unrealizedPct;
+                    const progress  = sl && tp && live
+                      ? Math.max(0, Math.min(100, ((live - sl) / (tp - sl)) * 100))
+                      : null;
+                    return (
+                      <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
+                        <td className="px-4 py-3">
+                          <span className="text-white font-semibold">{p.asset?.symbol}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {p.direction === 'BUY'
+                            ? <span className="text-emerald-400 text-xs font-bold flex items-center gap-1"><TrendingUp className="w-3 h-3" />BUY</span>
+                            : <span className="text-red-400 text-xs font-bold flex items-center gap-1"><TrendingDown className="w-3 h-3" />SELL</span>}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-gray-300">${entry.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-3 font-mono text-white font-semibold">
+                          {live ? `$${live.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : <span className="text-gray-600">…</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          {upnl !== null ? (
+                            <div>
+                              <span className={`font-mono font-semibold ${upnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}
+                              </span>
+                              <span className={`text-xs ml-1 ${upnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                ({upnlPct! >= 0 ? '+' : ''}{upnlPct?.toFixed(2)}%)
+                              </span>
+                              {progress !== null && (
+                                <div className="mt-1 h-1 w-20 bg-gray-700 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full transition-all ${upnl >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}
+                                    style={{ width: `${p.direction === 'BUY' ? progress : 100 - progress}%` }} />
+                                </div>
+                              )}
+                            </div>
+                          ) : <span className="text-gray-600">—</span>}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-red-400 text-xs">
+                          {sl ? `$${sl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-emerald-400 text-xs">
+                          {tp ? `$${tp.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            <input type="number" step="any" placeholder="Exit"
+                              value={closePrice[p.id] ?? ''}
+                              onChange={e => setClosePrice(v => ({ ...v, [p.id]: e.target.value }))}
+                              className="w-20 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-white text-xs focus:outline-none focus:border-red-500" />
+                            <button
+                              disabled={!closePrice[p.id] || closePosition.isPending}
+                              onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
+                              className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden p-4 space-y-3">
+              {!livePositions && (
+                <div className="text-center text-gray-600 py-8">
+                  <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />Chargement prix live…
+                </div>
+              )}
+              {livePositions?.length === 0 && (
+                <div className="flex flex-col items-center gap-2 text-gray-600 py-8">
+                  <Activity className="w-8 h-8" />
+                  <p>Aucune position ouverte</p>
+                </div>
+              )}
+              {livePositions?.map((p: LivePosition) => {
+                const entry     = parseFloat(p.entryPrice);
+                const sl        = p.stopLoss   ? parseFloat(p.stopLoss)   : null;
+                const tp        = p.takeProfit ? parseFloat(p.takeProfit) : null;
+                const live      = p.livePrice;
+                const upnl      = p.unrealizedPnl;
+                const upnlPct   = p.unrealizedPct;
+                const progress  = sl && tp && live
+                  ? Math.max(0, Math.min(100, ((live - sl) / (tp - sl)) * 100))
+                  : null;
+                return (
+                  <div key={p.id} className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
                         <span className="text-white font-semibold">{p.asset?.symbol}</span>
-                      </td>
-                      <td className="px-4 py-3">
                         {p.direction === 'BUY'
                           ? <span className="text-emerald-400 text-xs font-bold flex items-center gap-1"><TrendingUp className="w-3 h-3" />BUY</span>
                           : <span className="text-red-400 text-xs font-bold flex items-center gap-1"><TrendingDown className="w-3 h-3" />SELL</span>}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-gray-300">${entry.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-3 font-mono text-white font-semibold">
-                        {live ? `$${live.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : <span className="text-gray-600">…</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {upnl !== null ? (
-                          <div>
-                            <span className={`font-mono font-semibold ${upnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}
-                            </span>
-                            <span className={`text-xs ml-1 ${upnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                              ({upnlPct! >= 0 ? '+' : ''}{upnlPct?.toFixed(2)}%)
-                            </span>
-                            {progress !== null && (
-                              <div className="mt-1 h-1 w-20 bg-gray-700 rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full transition-all ${upnl >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}
-                                  style={{ width: `${p.direction === 'BUY' ? progress : 100 - progress}%` }} />
-                              </div>
-                            )}
-                          </div>
-                        ) : <span className="text-gray-600">—</span>}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-red-400 text-xs">
-                        {sl ? `$${sl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-emerald-400 text-xs">
-                        {tp ? `$${tp.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <input type="number" step="any" placeholder="Exit"
-                            value={closePrice[p.id] ?? ''}
-                            onChange={e => setClosePrice(v => ({ ...v, [p.id]: e.target.value }))}
-                            className="w-20 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-white text-xs focus:outline-none focus:border-red-500" />
-                          <button
-                            disabled={!closePrice[p.id] || closePosition.isPending}
-                            onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
-                            className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
-                            <X className="w-4 h-4" />
-                          </button>
+                      </div>
+                      <button
+                        disabled={!closePrice[p.id] || closePosition.isPending}
+                        onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
+                        className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500">Entrée</p>
+                        <p className="font-mono text-gray-300">${entry.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Prix live</p>
+                        <p className="font-mono text-white font-semibold">{live ? `$${live.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '…'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">SL</p>
+                        <p className="font-mono text-red-400">{sl ? `$${sl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">TP</p>
+                        <p className="font-mono text-emerald-400">{tp ? `$${tp.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</p>
+                      </div>
+                    </div>
+                    {upnl !== null && (
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className={`font-mono font-semibold ${upnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {upnl >= 0 ? '+' : ''}${upnl.toFixed(2)}
+                          </span>
+                          <span className={`text-xs ${upnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            ({upnlPct! >= 0 ? '+' : ''}{upnlPct?.toFixed(2)}%)
+                          </span>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        {progress !== null && (
+                          <div className="mt-2 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${upnl >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}
+                              style={{ width: `${p.direction === 'BUY' ? progress : 100 - progress}%` }} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <input type="number" step="any" placeholder="Prix de clôture"
+                      value={closePrice[p.id] ?? ''}
+                      onChange={e => setClosePrice(v => ({ ...v, [p.id]: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-red-500" />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
         {/* Onglet HISTORIQUE */}
         {tab === 'history' && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-800 bg-gray-800/50">
-                  {['Actif', 'Dir.', 'Entrée', 'Sortie', 'PnL $', 'PnL %', 'Date'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').length === 0 && (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-600">
-                    <History className="w-8 h-8 inline mb-2 block mx-auto" />Aucun trade clôturé
-                  </td></tr>
-                )}
-                {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').map((p: Position) => {
-                  const pnl = parseFloat(String(p.pnl ?? 0));
-                  const pct = parseFloat(String(p.pnlPercent ?? 0));
-                  return (
-                    <tr key={p.id} className={`hover:bg-gray-800/30 ${pnl > 0 ? 'border-l-2 border-l-emerald-500/30' : 'border-l-2 border-l-red-500/30'}`}>
-                      <td className="px-4 py-3 text-white font-semibold">{p.asset?.symbol}</td>
-                      <td className="px-4 py-3">
+            {/* Desktop table */}
+            <div className="hidden md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 bg-gray-800/50">
+                    {['Actif', 'Dir.', 'Entrée', 'Sortie', 'PnL $', 'PnL %', 'Date'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').length === 0 && (
+                    <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-600">
+                      <History className="w-8 h-8 inline mb-2 block mx-auto" />Aucun trade clôturé
+                    </td></tr>
+                  )}
+                  {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').map((p: Position) => {
+                    const pnl = parseFloat(String(p.pnl ?? 0));
+                    const pct = parseFloat(String(p.pnlPercent ?? 0));
+                    return (
+                      <tr key={p.id} className={`hover:bg-gray-800/30 ${pnl > 0 ? 'border-l-2 border-l-emerald-500/30' : 'border-l-2 border-l-red-500/30'}`}>
+                        <td className="px-4 py-3 text-white font-semibold">{p.asset?.symbol}</td>
+                        <td className="px-4 py-3">
+                          {p.direction === 'BUY'
+                            ? <span className="text-emerald-400 text-xs font-bold">BUY</span>
+                            : <span className="text-red-400 text-xs font-bold">SELL</span>}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-gray-400">${parseFloat(p.entryPrice).toLocaleString()}</td>
+                        <td className="px-4 py-3 font-mono text-gray-300">${p.exitPrice ? parseFloat(String(p.exitPrice)).toLocaleString() : '—'}</td>
+                        <td className="px-4 py-3"><PnlBadge value={pnl} /></td>
+                        <td className={`px-4 py-3 font-mono text-xs ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          {p.closedAt ? new Date(p.closedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden p-4 space-y-3">
+              {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').length === 0 && (
+                <div className="flex flex-col items-center gap-2 text-gray-600 py-8">
+                  <History className="w-8 h-8" />
+                  <p>Aucun trade clôturé</p>
+                </div>
+              )}
+              {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').map((p: Position) => {
+                const pnl = parseFloat(String(p.pnl ?? 0));
+                const pct = parseFloat(String(p.pnlPercent ?? 0));
+                return (
+                  <div key={p.id} className={`bg-gray-800/50 border rounded-xl p-4 space-y-2 ${pnl > 0 ? 'border-emerald-500/30' : 'border-red-500/30'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-semibold">{p.asset?.symbol}</span>
                         {p.direction === 'BUY'
                           ? <span className="text-emerald-400 text-xs font-bold">BUY</span>
                           : <span className="text-red-400 text-xs font-bold">SELL</span>}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-gray-400">${parseFloat(p.entryPrice).toLocaleString()}</td>
-                      <td className="px-4 py-3 font-mono text-gray-300">${p.exitPrice ? parseFloat(String(p.exitPrice)).toLocaleString() : '—'}</td>
-                      <td className="px-4 py-3"><PnlBadge value={pnl} /></td>
-                      <td className={`px-4 py-3 font-mono text-xs ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">
+                      </div>
+                      <span className="text-gray-600 text-xs">
                         {p.closedAt ? new Date(p.closedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500">Entrée</p>
+                        <p className="font-mono text-gray-400">${parseFloat(p.entryPrice).toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Sortie</p>
+                        <p className="font-mono text-gray-300">${p.exitPrice ? parseFloat(String(p.exitPrice)).toLocaleString() : '—'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-700/50">
+                      <PnlBadge value={pnl} />
+                      <span className={`font-mono text-xs ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

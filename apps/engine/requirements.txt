@@ -9,6 +9,7 @@ yfinance>=1.0.0
 pandas>=2.2.3
 numpy>=2.2.3
 polars>=1.30.0
+pandas-ta>=0.4.67b0
 
 # Database
 asyncpg>=0.30.0
@@ -27,5 +28,6 @@ structlog>=25.3.0
 # ── IA / LLM ─────────────────────────────────────────────────
 openai>=1.86.0               # LLM explanations via GPT-4o / Ollama
 fastembed>=0.8.0             # RAG embeddings ONNX (no GPU needed)
-beautifulsoup4>=4.13.4       # News scraping (BRVM)
+beautifulsoup4>=4.13.4       # News scraping (BRVM + RSS)
+lxml>=5.4.0                  # Parser XML rapide pour RSS feeds (news_scraper.py)
 # scikit-learn>=1.7.0        # ML scoring Phase 3 (non utilisé)

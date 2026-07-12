@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -49,6 +50,29 @@ async function main() {
     });
   }
 
+  const adminPassword = await bcrypt.hash('admin123', 12);
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@example.com' },
+    update: {},
+    create: {
+      email: 'admin@example.com',
+      password: adminPassword,
+      name: 'Admin User',
+      role: 'ADMIN' as any,
+      isActive: true,
+    },
+  });
+
+  await prisma.portfolio.upsert({
+    where: { id: 'default-admin-portfolio' },
+    update: {},
+    create: {
+      name: 'Mon Portfolio',
+      type: 'PAPER',
+      userId: admin.id,
+    },
+  });
+
   const strategy = await prisma.strategy.upsert({
     where: { name: 'EMA Trend + RSI' },
     update: {},
@@ -83,6 +107,7 @@ async function main() {
   console.log(`   Markets: ${markets.length}`);
   console.log(`   Assets:  ${assets.length}`);
   console.log(`   Strategy: ${strategy.name}`);
+  console.log(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
 }
 
 main()

@@ -33,6 +33,10 @@ venv/
 *.log
 npm-debug.log*
 
+# Backups & build info
+*.tsbuildinfo
+backup_*.sql
+
 # OS
 .DS_Store
 *.swp

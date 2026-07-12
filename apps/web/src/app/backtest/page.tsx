@@ -2,8 +2,14 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import axios from 'axios';
+import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Play, TrendingUp, TrendingDown, BarChart2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+
+const MiniEquityChart = dynamic(
+  () => import('@/components/backtest/MiniEquityChart').then(mod => mod.MiniEquityChart),
+  { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
 
@@ -51,49 +57,6 @@ function MetricCard({ label, value, sub, color }: { label: string; value: string
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-xl font-bold font-mono ${color ?? 'text-white'}`}>{value}</p>
       {sub && <p className="text-xs text-gray-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
-function MiniEquityChart({ curve }: { curve: number[] }) {
-  if (curve.length < 2) return null;
-  const min  = Math.min(...curve);
-  const max  = Math.max(...curve);
-  const range = max - min || 1;
-  const w = 400, h = 100;
-  const pts = curve.map((v, i) => {
-    const x = (i / (curve.length - 1)) * w;
-    const y = h - ((v - min) / range) * (h - 10) - 5;
-    return `${x},${y}`;
-  }).join(' ');
-  const isPositive = curve[curve.length - 1] >= curve[0];
-  const color = isPositive ? '#34d399' : '#f87171';
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-      <p className="text-xs text-gray-500 mb-3">Courbe d'équité</p>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-24" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polygon
-          points={`0,${h} ${pts} ${w},${h}`}
-          fill="url(#eqGrad)"
-        />
-        <polyline
-          points={pts}
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-        />
-      </svg>
-      <div className="flex justify-between text-xs text-gray-600 mt-1">
-        <span>${min.toFixed(0)}</span>
-        <span>${max.toFixed(0)}</span>
-      </div>
     </div>
   );
 }
@@ -242,45 +205,95 @@ export default function BacktestPage() {
                 </button>
 
                 {showTrades && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-t border-gray-800 bg-gray-800/50">
-                          {['#', 'Dir', 'Entry', 'Exit', 'PnL $', 'PnL %', 'R/R', 'Conf', 'Raison sortie'].map(h => (
-                            <th key={h} className="px-4 py-2 text-left text-gray-500 font-medium">{h}</th>
+                  <div>
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-t border-gray-800 bg-gray-800/50">
+                            {['#', 'Dir', 'Entry', 'Exit', 'PnL $', 'PnL %', 'R/R', 'Conf', 'Raison sortie'].map(h => (
+                              <th key={h} className="px-4 py-2 text-left text-gray-500 font-medium">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-800">
+                          {result.trade_list.map((t, i) => (
+                            <tr key={i} className={`hover:bg-gray-800/30 ${t.win ? '' : 'opacity-75'}`}>
+                              <td className="px-4 py-2 text-gray-500">{i + 1}</td>
+                              <td className="px-4 py-2">
+                                <span className={`px-1.5 py-0.5 rounded font-bold ${t.direction === 'BUY' ? 'text-emerald-400 bg-emerald-400/10' : 'text-red-400 bg-red-400/10'}`}>
+                                  {t.direction}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 font-mono text-gray-300">${t.entry_price.toLocaleString()}</td>
+                              <td className="px-4 py-2 font-mono text-gray-300">${t.exit_price.toLocaleString()}</td>
+                              <td className={`px-4 py-2 font-mono font-semibold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {t.pnl >= 0 ? '+' : ''}${t.pnl}
+                              </td>
+                              <td className={`px-4 py-2 font-mono ${t.pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct}%
+                              </td>
+                              <td className="px-4 py-2 font-mono text-gray-400">{t.rr_achieved}x</td>
+                              <td className="px-4 py-2 text-gray-400">{Math.round(t.confidence)}%</td>
+                              <td className="px-4 py-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                  t.exit_reason === 'TP'      ? 'bg-emerald-400/10 text-emerald-400' :
+                                  t.exit_reason === 'SL'      ? 'bg-red-400/10 text-red-400' :
+                                  'bg-gray-700 text-gray-400'
+                                }`}>{t.exit_reason}</span>
+                              </td>
+                            </tr>
                           ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800">
-                        {result.trade_list.map((t, i) => (
-                          <tr key={i} className={`hover:bg-gray-800/30 ${t.win ? '' : 'opacity-75'}`}>
-                            <td className="px-4 py-2 text-gray-500">{i + 1}</td>
-                            <td className="px-4 py-2">
-                              <span className={`px-1.5 py-0.5 rounded font-bold ${t.direction === 'BUY' ? 'text-emerald-400 bg-emerald-400/10' : 'text-red-400 bg-red-400/10'}`}>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile cards */}
+                    <div className="md:hidden p-4 space-y-3">
+                      {result.trade_list.map((t, i) => (
+                        <div key={i} className={`bg-gray-800/50 border rounded-xl p-4 space-y-2 ${t.win ? 'border-emerald-500/20' : 'border-red-500/20'}`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500">#{i + 1}</span>
+                              <span className={`px-1.5 py-0.5 rounded font-bold text-xs ${t.direction === 'BUY' ? 'text-emerald-400 bg-emerald-400/10' : 'text-red-400 bg-red-400/10'}`}>
                                 {t.direction}
                               </span>
-                            </td>
-                            <td className="px-4 py-2 font-mono text-gray-300">${t.entry_price.toLocaleString()}</td>
-                            <td className="px-4 py-2 font-mono text-gray-300">${t.exit_price.toLocaleString()}</td>
-                            <td className={`px-4 py-2 font-mono font-semibold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            </div>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              t.exit_reason === 'TP' ? 'bg-emerald-400/10 text-emerald-400' :
+                              t.exit_reason === 'SL' ? 'bg-red-400/10 text-red-400' :
+                              'bg-gray-700 text-gray-400'
+                            }`}>{t.exit_reason}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                              <p className="text-gray-500">Entry</p>
+                              <p className="font-mono text-gray-300">${t.entry_price.toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Exit</p>
+                              <p className="font-mono text-gray-300">${t.exit_price.toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">R/R</p>
+                              <p className="font-mono text-gray-400">{t.rr_achieved}x</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Conf</p>
+                              <p className="font-mono text-gray-400">{Math.round(t.confidence)}%</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between pt-2 border-t border-gray-700/50">
+                            <span className={`font-mono font-semibold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                               {t.pnl >= 0 ? '+' : ''}${t.pnl}
-                            </td>
-                            <td className={`px-4 py-2 font-mono ${t.pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            </span>
+                            <span className={`font-mono text-xs ${t.pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                               {t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct}%
-                            </td>
-                            <td className="px-4 py-2 font-mono text-gray-400">{t.rr_achieved}x</td>
-                            <td className="px-4 py-2 text-gray-400">{Math.round(t.confidence)}%</td>
-                            <td className="px-4 py-2">
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                t.exit_reason === 'TP'      ? 'bg-emerald-400/10 text-emerald-400' :
-                                t.exit_reason === 'SL'      ? 'bg-red-400/10 text-red-400' :
-                                'bg-gray-700 text-gray-400'
-                              }`}>{t.exit_reason}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

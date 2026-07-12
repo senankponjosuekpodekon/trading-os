@@ -8,24 +8,22 @@ News Router — NewsAPI + Sentiment NLP + RAG ingestion
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-import os
 import httpx
 import asyncio
-import time
 import json
+
+import config
+from utils.cache import get_cached, set_cached
+from utils.logger import get_logger
 
 router = APIRouter()
 
-NEWS_API_KEY    = os.getenv("NEWS_API_KEY", "")
+NEWS_API_KEY    = config.settings.news_api_key
 NEWS_BASE_URL   = "https://newsapi.org/v2"
 CACHE_TTL_SEC   = 900   # 15 min
-DATABASE_URL    = os.getenv(
-    "DATABASE_URL",
-    "postgresql://trading_user:trading_pass@localhost:5433/trading_os"
-)
+DATABASE_URL    = config.settings.database_url
 
-# Cache mémoire léger (clé → (timestamp, data))
-_cache: dict[str, tuple[float, any]] = {}
+logger = get_logger(__name__)
 
 # Mapping actif → mots-clés de recherche NewsAPI
 SYMBOL_KEYWORDS: dict[str, list[str]] = {
@@ -79,17 +77,12 @@ class SentimentResult(BaseModel):
 
 
 # ── Helpers ────────────────────────────────────────────────────
-def _cache_get(key: str):
-    if key in _cache:
-        ts, data = _cache[key]
-        if time.monotonic() - ts < CACHE_TTL_SEC:
-            return data
-        del _cache[key]
-    return None
+async def _cache_get(key: str):
+    return await get_cached(key)
 
 
-def _cache_set(key: str, data):
-    _cache[key] = (time.monotonic(), data)
+async def _cache_set(key: str, data):
+    await set_cached(key, data, ttl=CACHE_TTL_SEC)
 
 
 def _keywords_for(symbol: str) -> str:
@@ -120,7 +113,8 @@ async def _fetch_articles(symbol: str, limit: int = 10) -> list[dict]:
             r.raise_for_status()
             data = r.json()
             return data.get("articles", [])
-    except Exception:
+    except Exception as e:
+        logger.warning("newsapi_fetch_failed", symbol=symbol, error=str(e))
         return []
 
 
@@ -249,7 +243,7 @@ async def get_news_sentiment(req: NewsRequest) -> SentimentResult:
     Utilisé par scan.py pour enrichir le score de confiance.
     """
     cache_key = f"sentiment:{req.symbol}:{req.limit}"
-    cached = _cache_get(cache_key)
+    cached = await _cache_get(cache_key)
     if cached:
         return SentimentResult(**{**cached, "cached": True})
 
@@ -288,7 +282,7 @@ async def get_news_sentiment(req: NewsRequest) -> SentimentResult:
         "confidence_bonus": bonus,
         "articles":         [a.model_dump() for a in articles],
     }
-    _cache_set(cache_key, result)
+    await _cache_set(cache_key, result)
 
     # Ingestion RAG en arrière-plan (non bloquant)
     asyncio.create_task(_ingest_to_rag(raw_articles, req.symbol))
@@ -300,7 +294,7 @@ async def get_news_sentiment(req: NewsRequest) -> SentimentResult:
 async def get_articles(symbol: str = "crypto", limit: int = 10):
     """Liste les articles récents pour un actif (sans analyse sentiment)."""
     cache_key = f"articles:{symbol}:{limit}"
-    cached = _cache_get(cache_key)
+    cached = await _cache_get(cache_key)
     if cached:
         return {"symbol": symbol, "articles": cached, "cached": True}
 
@@ -319,7 +313,7 @@ async def get_articles(symbol: str = "crypto", limit: int = 10):
         }
         for a in raw[:limit]
     ]
-    _cache_set(cache_key, articles)
+    await _cache_set(cache_key, articles)
     return {"symbol": symbol, "articles": articles, "cached": False}
 
 

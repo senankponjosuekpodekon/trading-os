@@ -40,7 +40,7 @@ export default function JournalPage() {
 
   const { data: entries, isLoading, error: errorEntries, refetch } = useQuery<JournalEntry[]>({
     queryKey: ['journal'],
-    queryFn: async () => (await api.get('/journal?limit=50')).data,
+    queryFn: async () => (await api.get('/journal?limit=50')).data.data,
   });
 
   const { data: stats } = useQuery<{ total: number; avgGrade: number | null; emotions: Record<string, number> }>({
@@ -81,7 +81,7 @@ export default function JournalPage() {
         {create.isError && <ErrorBox message={(create.error as any)?.response?.data?.message ?? "Erreur lors de la sauvegarde."} />}
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
             <p className="text-xs text-gray-500 mb-1">Entrées</p>
             <p className="text-2xl font-bold text-white">{stats?.total ?? 0}</p>
@@ -122,7 +122,7 @@ export default function JournalPage() {
                 placeholder="Qu'est-ce qui s'est passé ? Qu'aurais-je pu faire différemment ?"
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 transition-colors resize-none" />
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-400 mb-1">Émotion</label>
                 <select value={form.emotion} onChange={e => setForm(v => ({ ...v, emotion: e.target.value }))}

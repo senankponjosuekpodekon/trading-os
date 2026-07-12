@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsEnum, MaxLength } from 'class-validator';
 
 export enum Direction {
   BUY  = 'BUY',
@@ -10,6 +10,7 @@ export class CreatePositionDto {
   portfolioId: string;
 
   @IsString()
+  @MaxLength(30)
   assetSymbol: string;
 
   @IsEnum(Direction)

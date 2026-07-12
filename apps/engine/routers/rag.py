@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import os
 import asyncio
+import hashlib
 
 router = APIRouter()
 
@@ -257,7 +258,25 @@ async def query_rag(req: QueryIn):
         if not req.generate:
             return {"question": req.question, "documents": docs, "answer": None}
 
-        # 3. Construire le contexte
+        # 3. Vérifier le cache de réponses
+        q_hash = hashlib.sha256(req.question.encode("utf-8")).hexdigest()
+        async with pool.acquire() as conn:
+            cached = await conn.fetchrow(
+                "SELECT answer, provider, model FROM rag_cache WHERE question_hash = $1", q_hash
+            )
+
+        if cached:
+            return {
+                "question":  req.question,
+                "answer":    cached["answer"],
+                "documents": docs,
+                "model":     cached["model"],
+                "provider":  cached["provider"],
+                "retrieved": len(docs),
+                "cached":    True,
+            }
+
+        # 4. Construire le contexte
         context = "\n\n".join(
             f"[{d['category'].upper()}] {d['title']}\n{d['content']}"
             for d in docs
@@ -276,17 +295,31 @@ Réponds en français, de façon concise et précise.
 
 === RÉPONSE ==="""
 
-        # 4. Appeler le LLM
-        from routers.llm import _call_llm, _effective_provider, _effective_model
-        answer = await _call_llm(prompt, max_tokens=500)
+        # 5. Appeler le LLM avec fallback local : Ollama -> OpenAI -> mock
+        from routers.llm import _call_llm_with_fallback
+        answer, provider_used, model_used = await _call_llm_with_fallback(prompt, max_tokens=500)
+
+        # 6. Sauvegarder la réponse dans le cache
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO rag_cache (question_hash, question, answer, provider, model)
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (question_hash) DO UPDATE SET
+                     answer = EXCLUDED.answer,
+                     provider = EXCLUDED.provider,
+                     model = EXCLUDED.model,
+                     created_at = now()""",
+                q_hash, req.question, answer, provider_used, model_used,
+            )
 
         return {
             "question":  req.question,
             "answer":    answer,
             "documents": docs,
-            "model":     _effective_model(),
-            "provider":  _effective_provider(),
+            "model":     model_used,
+            "provider":  provider_used,
             "retrieved": len(docs),
+            "cached":    False,
         }
 
     except Exception as e:

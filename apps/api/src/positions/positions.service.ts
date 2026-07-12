@@ -71,17 +71,39 @@ export class PositionsService {
     return position;
   }
 
-  async findByPortfolio(userId: string, portfolioId: string) {
+  async findByPortfolio(
+    userId: string,
+    portfolioId: string,
+    opts: { page: number; limit: number; sort?: string; status?: string } = { page: 1, limit: 20, sort: 'openedAt:desc' },
+  ) {
     const portfolio = await this.prisma.portfolio.findFirst({
       where: { id: portfolioId, userId },
     });
     if (!portfolio) throw new NotFoundException('Portfolio not found');
 
-    return this.prisma.position.findMany({
-      where: { portfolioId },
-      orderBy: { openedAt: 'desc' },
-      include: { asset: { select: { symbol: true, name: true } } },
-    });
+    const [field, dir] = (opts.sort || 'openedAt:desc').split(':');
+    const orderByField = ['openedAt', 'closedAt', 'createdAt', 'entryPrice'].includes(field) ? field : 'openedAt';
+    const orderBy: any = { [orderByField]: dir === 'asc' ? 'asc' : 'desc' };
+    const skip = (opts.page - 1) * opts.limit;
+
+    const where: any = { portfolioId };
+    if (opts.status) where.status = opts.status;
+
+    const [data, total] = await Promise.all([
+      this.prisma.position.findMany({
+        where,
+        skip,
+        take: opts.limit,
+        orderBy,
+        include: { asset: { select: { symbol: true, name: true } } },
+      }),
+      this.prisma.position.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: { page: opts.page, limit: opts.limit, total, totalPages: Math.ceil(total / opts.limit) },
+    };
   }
 
   async close(userId: string, positionId: string, exitPrice: number) {
@@ -126,7 +148,7 @@ export class PositionsService {
       if (!first) return { open: 0, closed: 0, totalPnl: 0, winRate: 0, positions: [] };
       resolvedId = first.id;
     }
-    const positions = await this.findByPortfolio(userId, resolvedId!);
+    const { data: positions } = await this.findByPortfolio(userId, resolvedId!, { page: 1, limit: 10_000, sort: 'openedAt:desc' });
     const open   = positions.filter(p => p.status === 'OPEN');
     const closed = positions.filter(p => p.status === 'CLOSED');
     const totalPnl = closed.reduce((sum, p) => sum + parseFloat((p.pnl ?? 0).toString()), 0);

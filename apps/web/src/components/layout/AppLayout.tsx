@@ -4,9 +4,10 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
+import { BottomNav } from './BottomNav';
 
 export function AppLayout({ children, title }: { children: React.ReactNode; title: string }) {
-  const { user, token, init } = useAuthStore();
+  const { user, init } = useAuthStore();
   const router = useRouter();
   const initialized = useRef(false);
   const [ready, setReady] = useState(false);
@@ -34,11 +35,14 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
 
   return (
     <div className="flex min-h-screen bg-gray-950">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Topbar title={title} />
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+      <div className="hidden md:block">
+        <Sidebar />
       </div>
+      <div className="flex-1 flex flex-col overflow-hidden pb-16 md:pb-0">
+        <Topbar title={title} />
+        <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
+      </div>
+      <BottomNav />
     </div>
   );
 }

@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -7,6 +8,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class SignalsService {
+  private readonly logger = new Logger(SignalsService.name);
   private engineUrl: string;
 
   constructor(
@@ -18,16 +20,62 @@ export class SignalsService {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
 
-  async findAll(limit = 50) {
-    return this.prisma.signal.findMany({
-      take: limit,
-      orderBy: { createdAt: 'desc' },
+  @Cron('0 6 * * *', { timeZone: 'UTC' })
+  async scheduledMorningScan() {
+    this.logger.log('CRON: lancement du scan matinal (06:00 UTC)');
+    await this._scanActiveAssets('1h');
+  }
+
+  @Cron('0 */4 * * *', { timeZone: 'UTC' })
+  async scheduledDayScan() {
+    this.logger.log('CRON: lancement du scan toutes les 4h');
+    await this._scanActiveAssets('1h');
+  }
+
+  private async _scanActiveAssets(timeframe: string) {
+    const assets = await this.prisma.asset.findMany({
       where: { isActive: true },
-      include: {
-        asset: { select: { symbol: true, name: true } },
-        strategy: { select: { name: true } },
-      },
+      select: { symbol: true },
     });
+    const symbols = assets.map(a => a.symbol);
+    if (!symbols.length) {
+      this.logger.warn('Aucun actif actif à scanner');
+      return;
+    }
+    return this.triggerScan(symbols, timeframe);
+  }
+
+  async findAll(opts: { page: number; limit: number; sort: string }) {
+    const [field, dir] = opts.sort.split(':');
+    const orderByField = ['createdAt', 'confidence', 'entryPrice'].includes(field) ? field : 'createdAt';
+    const orderBy: any = { [orderByField]: dir === 'asc' ? 'asc' : 'desc' };
+    const skip = (opts.page - 1) * opts.limit;
+
+    const where = { isActive: true };
+
+    const [data, total] = await Promise.all([
+      this.prisma.signal.findMany({
+        where,
+        skip,
+        take: opts.limit,
+        orderBy,
+        include: {
+          asset: { select: { symbol: true, name: true } },
+          strategy: { select: { name: true } },
+        },
+      }),
+      this.prisma.signal.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        page: opts.page,
+        limit: opts.limit,
+        total,
+        totalPages: Math.ceil(total / opts.limit),
+      },
+    };
   }
 
   async findByAsset(assetId: string) {
@@ -93,11 +141,13 @@ export class SignalsService {
         },
       });
       saved.push(signal);
-      this.notifications.pushGlobal(
-        'SIGNAL',
-        `Signal ${r.signal} — ${r.symbol}`,
-        `Confiance ${Math.round(r.confidence)}% | ${r.timeframe}`,
-      );
+      if (r.confidence >= 70) {
+        this.notifications.pushGlobal(
+          'SIGNAL',
+          `Signal ${r.signal} — ${r.symbol}`,
+          `Confiance ${Math.round(r.confidence)}% | ${r.timeframe}`,
+        );
+      }
     }
     return saved;
   }

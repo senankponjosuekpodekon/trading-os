@@ -78,7 +78,7 @@ export default function SignalsPage() {
 
   const { data: signals, isLoading } = useQuery<Signal[]>({
     queryKey: ['signals'],
-    queryFn: async () => (await api.get('/signals?limit=50')).data,
+    queryFn: async () => (await api.get('/signals?limit=50')).data.data,
     refetchInterval: 60_000,
   });
 

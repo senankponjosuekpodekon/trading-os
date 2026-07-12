@@ -3,14 +3,16 @@ from pydantic import BaseModel
 from typing import Optional
 import os
 
+from config import settings
+
 router = APIRouter()
 
 # ── Provider config ──────────────────────────────────────────
-LLM_PROVIDER    = os.getenv("LLM_PROVIDER", "openai").lower()   # "openai" | "ollama"
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL    = os.getenv("OPENAI_MODEL", "gpt-4o")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3.2")
+LLM_PROVIDER    = (settings.llm_provider or os.getenv("LLM_PROVIDER", "openai")).lower()   # "openai" | "ollama"
+OPENAI_API_KEY  = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL    = settings.openai_model or os.getenv("OPENAI_MODEL", "gpt-4o")
+OLLAMA_BASE_URL = settings.ollama_base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL    = settings.ollama_model or os.getenv("OLLAMA_MODEL", "llama3.2")
 
 # Auto-detect Ollama si OpenAI non configuré et provider = openai
 def _effective_provider() -> str:
@@ -171,6 +173,45 @@ async def _call_llm(prompt: str, max_tokens: int = 400) -> str:
 
     except Exception as e:
         return _mock_response(prompt, error=str(e))
+
+
+async def _call_llm_with_fallback(prompt: str, max_tokens: int = 400) -> tuple[str, str, str]:
+    """Appelle Ollama en priorité, puis OpenAI, puis le mock."""
+    try:
+        from openai import AsyncOpenAI
+    except Exception as e:
+        return _mock_response(prompt, error=str(e)), "mock", "mock"
+
+    # 1. Essayer Ollama (local) si configuré
+    if OLLAMA_BASE_URL:
+        try:
+            client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama")
+            response = await client.chat.completions.create(
+                model=OLLAMA_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=0.7,
+            )
+            return response.choices[0].message.content.strip(), "ollama", OLLAMA_MODEL
+        except Exception:
+            pass
+
+    # 2. Essayer OpenAI si configuré
+    if OPENAI_API_KEY:
+        try:
+            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            response = await client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=0.7,
+            )
+            return response.choices[0].message.content.strip(), "openai", OPENAI_MODEL
+        except Exception as e:
+            return _mock_response(prompt, error=str(e)), "mock", "mock"
+
+    # 3. Fallback mock
+    return _mock_response(prompt), "mock", "mock"
 
 
 def _mock_response(prompt: str, error: str = "") -> str:

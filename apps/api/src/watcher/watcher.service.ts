@@ -5,6 +5,8 @@ import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { PositionsService } from '../positions/positions.service';
 import { JournalService } from '../journal/journal.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { retryWithBackoff } from '../utils/retry';
 
 const BINANCE_PRICES = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -21,6 +23,7 @@ export class WatcherService {
     private positions: PositionsService,
     private journal: JournalService,
     private http: HttpService,
+    private notifications: NotificationsService,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -40,8 +43,19 @@ export class WatcherService {
     let prices: Record<string, number> = {};
 
     try {
-      const { data } = await firstValueFrom(
-        this.http.get<{ symbol: string; price: string }[]>(BINANCE_PRICES),
+      const data = await retryWithBackoff(
+        async () => {
+          const { data: resp } = await firstValueFrom(
+            this.http.get<{ symbol: string; price: string }[]>(BINANCE_PRICES, { timeout: 5000 }),
+          );
+          return resp;
+        },
+        {
+          maxRetries: 3,
+          baseDelayMs: 500,
+          onRetry: (attempt, err) =>
+            this.logger.warn(`Watcher: échec récupération prix Binance (tentative ${attempt}) — ${err.message}`),
+        },
       );
       prices = Object.fromEntries(
         data
@@ -49,7 +63,7 @@ export class WatcherService {
           .map(d => [d.symbol, parseFloat(d.price)]),
       );
     } catch (err) {
-      this.logger.warn('Watcher: impossible de récupérer les prix Binance');
+      this.logger.error('Watcher: impossible de récupérer les prix Binance après 3 tentatives');
       return;
     }
 
@@ -82,9 +96,18 @@ export class WatcherService {
       if (!result) continue;
 
       closed++;
+      const pnlNum = parseFloat(result.pnl);
       this.logger.log(
         `Watcher: ${pos.asset.symbol} ${triggered} @ ${livePrice} | PnL ${result.pnl}`,
       );
+
+      this.notifications.push({
+        userId: pos.portfolio.userId,
+        type: 'POSITION',
+        title: `${triggered} touché — ${pos.asset.symbol}`,
+        message: `Position ${pos.direction} fermée à ${livePrice} | PnL ${pnlNum > 0 ? '+' : ''}${pnlNum.toFixed(2)}`,
+        data: { positionId: pos.id, symbol: pos.asset.symbol, triggered, pnl: pnlNum },
+      });
 
       // Enregistrement automatique dans le journal (J19)
       try {

@@ -19,8 +19,20 @@ export class PositionsController {
   }
 
   @Get()
-  findByPortfolio(@Request() req: any, @Query('portfolioId') portfolioId: string) {
-    return this.positionsService.findByPortfolio(req.user.id, portfolioId);
+  findByPortfolio(
+    @Request() req: any,
+    @Query('portfolioId') portfolioId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('sort') sort?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.positionsService.findByPortfolio(req.user.id, portfolioId, {
+      page:   page   ? Math.max(1, parseInt(page, 10))   : 1,
+      limit:  limit  ? Math.min(100, Math.max(1, parseInt(limit, 10))) : 20,
+      sort:   sort   || 'openedAt:desc',
+      status,
+    });
   }
 
   @Get('live')

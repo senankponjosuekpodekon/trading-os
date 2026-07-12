@@ -8,7 +8,11 @@ import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Set
 
+from utils.http import retry_async
+from utils.logger import get_logger
+
 router = APIRouter()
+logger = get_logger(__name__)
 
 BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
 SYMBOLS_BINANCE   = [
@@ -44,20 +48,31 @@ async def price_broadcaster():
     async with httpx.AsyncClient(timeout=5) as client:
         while True:
             try:
-                resp = await client.get(
-                    BINANCE_PRICE_URL,
-                    params={"symbols": json.dumps(SYMBOLS_BINANCE)},
+                async def _fetch_prices():
+                    resp = await client.get(
+                        BINANCE_PRICE_URL,
+                        params={"symbols": json.dumps(SYMBOLS_BINANCE, separators=(',', ':'))},
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+
+                data = await retry_async(
+                    _fetch_prices,
+                    max_retries=3,
+                    base_delay=0.5,
+                    exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
+                    on_retry=lambda attempt, exc: logger.warning(
+                        "binance_price_retry", attempt=attempt, error=str(exc)
+                    ),
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    prices = {item["symbol"]: float(item["price"]) for item in data}
-                    _last_prices.update(prices)
-                    if _price_clients:
-                        await broadcast(_price_clients, {"type": "prices", "data": prices})
+                prices = {item["symbol"]: float(item["price"]) for item in data}
+                _last_prices.update(prices)
+                if _price_clients:
+                    await broadcast(_price_clients, {"type": "prices", "data": prices})
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("binance_price_failed", error=str(e))
             await asyncio.sleep(3)
 
 
