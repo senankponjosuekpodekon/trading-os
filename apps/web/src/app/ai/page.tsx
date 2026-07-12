@@ -23,12 +23,15 @@ interface AiHealth {
 }
 
 export default function AiPage() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'report' | 'explain'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'report' | 'explain' | 'knowledge'>('chat');
   const [report, setReport]       = useState<string | null>(null);
   const [explain, setExplain]     = useState<string | null>(null);
   const [customSignal, setCustomSignal] = useState({
     symbol: 'BTC/USDT', timeframe: '1h', signal: 'BUY',
     confidence: 75, explanation: '',
+  });
+  const [newDoc, setNewDoc] = useState({
+    title: '', category: 'general', content: '', metadata: '',
   });
 
   // ── Chat RAG ───────────────────────────────────────────────────
@@ -123,6 +126,24 @@ export default function AiPage() {
     onSuccess: (data) => setExplain(data.ai_explanation),
   });
 
+  const addDoc = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${ENGINE_URL}/rag/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newDoc.title,
+          category: newDoc.category,
+          content: newDoc.content,
+          metadata: newDoc.metadata ? JSON.parse(newDoc.metadata) : {},
+        }),
+      });
+      if (!res.ok) throw new Error('Échec ajout document');
+      return res.json();
+    },
+    onSuccess: () => setNewDoc({ title: '', category: 'general', content: '', metadata: '' }),
+  });
+
   const CATEGORIES = ['', 'indicateurs', 'smc', 'risk', 'brvm', 'deriv', 'trading'];
   const CAT_LABELS: Record<string, string> = {
     '': 'Tout', indicateurs: 'Indicateurs', smc: 'SMC', risk: 'Risk',
@@ -158,9 +179,10 @@ export default function AiPage() {
         {/* Onglets */}
         <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1">
           {([
-            { id: 'chat',    icon: MessageSquare, label: 'Chat RAG' },
-            { id: 'report',  icon: FileText,      label: 'Rapport hebdo' },
-            { id: 'explain', icon: Zap,           label: 'Signal' },
+            { id: 'chat',     icon: MessageSquare, label: 'Chat RAG' },
+            { id: 'report',   icon: FileText,      label: 'Rapport hebdo' },
+            { id: 'explain',  icon: Zap,           label: 'Signal' },
+            { id: 'knowledge', icon: BookOpen,    label: 'Base RAG' },
           ] as const).map(({ id, icon: Icon, label }) => (
             <button key={id} onClick={() => setActiveTab(id)}
               className={`flex items-center gap-2 flex-1 justify-center py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
@@ -301,6 +323,65 @@ export default function AiPage() {
                 <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-line">{report}</p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── TAB KNOWLEDGE ────────────────────────────────────────── */}
+        {activeTab === 'knowledge' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <BookOpen className="w-4 h-4 text-violet-400" />
+              <h2 className="text-white font-semibold">Enrichir la base RAG</h2>
+            </div>
+            <p className="text-gray-500 text-sm mb-4">
+              Ajoute un document à la base de connaissances de l’assistant. L’embedding sera calculé automatiquement.
+            </p>
+            <div className="space-y-3 mb-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Titre *</label>
+                  <input value={newDoc.title}
+                    onChange={e => setNewDoc(v => ({ ...v, title: e.target.value }))}
+                    placeholder="ex: Stratégie Wyckoff"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-violet-500" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Catégorie</label>
+                  <select value={newDoc.category}
+                    onChange={e => setNewDoc(v => ({ ...v, category: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-violet-500">
+                    {CATEGORIES.filter(c => c).map(c => <option key={c} value={c}>{CAT_LABELS[c]}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Contenu *</label>
+                <textarea rows={6}
+                  value={newDoc.content}
+                  onChange={e => setNewDoc(v => ({ ...v, content: e.target.value }))}
+                  placeholder="Colle ici le contenu pédagogique..."
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-violet-500 resize-none" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Métadonnées (JSON optionnel)</label>
+                <input value={newDoc.metadata}
+                  onChange={e => setNewDoc(v => ({ ...v, metadata: e.target.value }))}
+                  placeholder='{"source": "article"}'
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-violet-500" />
+              </div>
+            </div>
+            {addDoc.isError && (
+              <div className="text-red-400 text-sm mb-3">{addDoc.error instanceof Error ? addDoc.error.message : 'Erreur'}</div>
+            )}
+            {addDoc.isSuccess && (
+              <div className="text-emerald-400 text-sm mb-3">Document ajouté à la base RAG.</div>
+            )}
+            <button onClick={() => addDoc.mutate()} disabled={addDoc.isPending || !newDoc.title.trim() || !newDoc.content.trim()}
+              className="flex items-center gap-2 px-4 py-2 bg-violet-500 hover:bg-violet-400 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition-colors w-full justify-center">
+              {addDoc.isPending
+                ? <><RefreshCw className="w-4 h-4 animate-spin" />Indexation…</>
+                : <><BookOpen className="w-4 h-4" />Ajouter à la base</>}
+            </button>
           </div>
         )}
 
