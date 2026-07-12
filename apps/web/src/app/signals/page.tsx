@@ -11,6 +11,7 @@ const SCAN_SYMBOLS_GROUPS = [
   { label: 'Crypto', symbols: ['BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT','AVAX/USDT','ADA/USDT','DOT/USDT','LINK/USDT','MATIC/USDT','ATOM/USDT','LTC/USDT','XRP/USDT'] },
   { label: 'Forex',  symbols: ['EUR/USDT','GBP/USDT'] },
   { label: 'Métal',  symbols: ['PAXG/USDT'] },
+  { label: 'BRVM',   symbols: ['ONTBF','SGBF','BOABF','ETIT','SIVC','PALC','SOGC','SNTS','CIEC','NSIC','ORGT','BICC','CBIBF','ABJC','STAC'] },
 ];
 const ALL_SYMBOLS = SCAN_SYMBOLS_GROUPS.flatMap(g => g.symbols);
 const TIMEFRAMES  = ['15m', '1h', '4h', '1d'];

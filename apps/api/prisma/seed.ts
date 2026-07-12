@@ -25,6 +25,7 @@ async function main() {
   const forex  = await prisma.market.findUnique({ where: { name: 'Forex' } });
   const synth  = await prisma.market.findUnique({ where: { name: 'Synthetic' } });
   const commo  = await prisma.market.findUnique({ where: { name: 'Commodities' } });
+  const brvm   = await prisma.market.findUnique({ where: { name: 'BRVM' } });
 
   const assets = [
     { symbol: 'BTC/USDT',  name: 'Bitcoin',           marketId: crypto!.id, baseCurrency: 'USDT' },
@@ -40,6 +41,21 @@ async function main() {
     { symbol: 'V100',      name: 'Volatility 100 Index',marketId: synth!.id, baseCurrency: 'USD' },
     { symbol: 'BOOM1000',  name: 'Boom 1000 Index',    marketId: synth!.id,  baseCurrency: 'USD' },
     { symbol: 'CRASH1000', name: 'Crash 1000 Index',   marketId: synth!.id,  baseCurrency: 'USD' },
+    { symbol: 'ONTBF', name: 'ONATEL Burkina Faso', marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'SGBF',  name: 'Société Générale BF', marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'BOABF', name: 'Bank of Africa BF',   marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'ETIT',  name: 'Ecobank Transnational', marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'SIVC',  name: 'SICOGI',              marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'PALC',  name: 'Palm CI',             marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'SOGC',  name: 'SOGB',                marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'SNTS',  name: 'Sonatel',             marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'CIEC',  name: 'CIE',                 marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'NSIC',  name: 'NSIA Banque CI',      marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'ORGT',  name: 'Orange CI',           marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'BICC',  name: 'BICI CI',             marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'CBIBF', name: 'Coris Bank',          marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'ABJC',  name: 'Abidjan.net',         marketId: brvm!.id, baseCurrency: 'XOF' },
+    { symbol: 'STAC',  name: 'SOLIBRA',             marketId: brvm!.id, baseCurrency: 'XOF' },
   ];
 
   for (const a of assets) {

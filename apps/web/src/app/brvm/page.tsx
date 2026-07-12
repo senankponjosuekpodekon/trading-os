@@ -75,6 +75,38 @@ export default function BrvmPage() {
           ))}
         </div>
 
+        {/* Signaux actifs BUY / SELL */}
+        {(buys.length > 0 || sells.length > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {buys.map(q => (
+              <div key={q.symbol} className="bg-gray-900 border border-emerald-500/30 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-white font-bold">{q.symbol}</p>
+                    <p className="text-gray-500 text-xs">{q.name}</p>
+                  </div>
+                  <span className="flex items-center gap-1 text-emerald-400 text-sm font-bold"><TrendingUp className="w-4 h-4"/>BUY</span>
+                </div>
+                <p className="text-emerald-400 font-mono text-sm">{q.price.toLocaleString()} XOF</p>
+                <p className="text-gray-400 text-xs mt-1">{q.reasons}</p>
+              </div>
+            ))}
+            {sells.map(q => (
+              <div key={q.symbol} className="bg-gray-900 border border-red-500/30 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-white font-bold">{q.symbol}</p>
+                    <p className="text-gray-500 text-xs">{q.name}</p>
+                  </div>
+                  <span className="flex items-center gap-1 text-red-400 text-sm font-bold"><TrendingDown className="w-4 h-4"/>SELL</span>
+                </div>
+                <p className="text-red-400 font-mono text-sm">{q.price.toLocaleString()} XOF</p>
+                <p className="text-gray-400 text-xs mt-1">{q.reasons}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Top movers */}
         {movers && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

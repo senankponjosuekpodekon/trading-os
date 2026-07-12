@@ -18,6 +18,7 @@ from routers.smc import analyze_smc, smc_bonus
 from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
+from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
 import config
 from utils.cache import get_cached, set_cached
 from utils.logger import get_logger
@@ -496,10 +497,14 @@ async def scan_multi(req: ScanRequest):
     tf  = TF_MAP.get(req.timeframe, "1h")
     loop = asyncio.get_event_loop()
 
-    # 0. Cache lookup rapide : si toutes les features sont précalculées, retour immédiat
+    # 0. Séparer BRVM des autres marchés
+    brvm_symbols = [s for s in req.symbols if is_brvm_symbol(s)]
+    other_symbols = [s for s in req.symbols if s not in brvm_symbols]
+
+    # 0b. Cache lookup rapide pour les actifs non-BRVM
     cached_results = []
     missing_symbols = []
-    for sym in req.symbols:
+    for sym in other_symbols:
         cached = await get_cached(f"scan:{sym}:{req.timeframe}")
         if cached:
             cached_results.append({**cached, "cached": True})
@@ -534,7 +539,11 @@ async def scan_multi(req: ScanRequest):
     for r in computed_results:
         await set_cached(f"scan:{r['symbol']}:{req.timeframe}", r, ttl=WARMUP_TTL_SECONDS)
 
-    results = cached_results + computed_results
+    brvm_results = []
+    if brvm_symbols:
+        brvm_results = await analyze_brvm_symbols(brvm_symbols)
+
+    results = cached_results + computed_results + brvm_results
 
     # 3. Enrichissement sentiment news (en parallèle, non bloquant si NEWS_API_KEY absent)
     if config.settings.news_api_key:

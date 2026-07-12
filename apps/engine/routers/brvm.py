@@ -27,11 +27,14 @@ HEADERS = {
 }
 
 # Symboles BRVM les plus liquides
-TOP_SYMBOLS = [
+BRVM_SYMBOLS = [
     "ONTBF", "SGBF", "BOABF", "ETIT", "SIVC",
     "PALC", "SOGC", "SNTS", "CIEC", "NSIC",
     "ORGT", "BICC", "CBIBF", "ABJC", "STAC",
 ]
+
+# Alias legacy
+TOP_SYMBOLS = BRVM_SYMBOLS
 
 
 class BrvmQuote(BaseModel):
@@ -184,21 +187,27 @@ def _analyze_brvm_signal(quotes: List[dict]) -> List[dict]:
         score = 0
         reasons = []
 
-        if chg > 3:
-            score += 30
+        if chg > 5:
+            score += 40
             reasons.append(f"Forte hausse +{chg}%")
-        elif chg > 1:
-            score += 15
+        elif chg > 3:
+            score += 25
             reasons.append(f"Hausse +{chg}%")
-        elif chg < -3:
-            score -= 30
+        elif chg > 1:
+            score += 10
+            reasons.append(f"Relief hausse +{chg}%")
+        elif chg < -5:
+            score -= 40
             reasons.append(f"Forte baisse {chg}%")
-        elif chg < -1:
-            score -= 15
+        elif chg < -3:
+            score -= 25
             reasons.append(f"Baisse {chg}%")
+        elif chg < -1:
+            score -= 10
+            reasons.append(f"Relief baisse {chg}%")
 
         if vol > 10000:
-            score += 10 if score > 0 else -10
+            score += 20 if score > 0 else -20
             reasons.append(f"Volume élevé ({vol:,})")
 
         if score >= 25:
@@ -217,6 +226,56 @@ def _analyze_brvm_signal(quotes: List[dict]) -> List[dict]:
         })
 
     return sorted(results, key=lambda x: abs(x["score"]), reverse=True)
+
+
+async def analyze_brvm_symbols(symbols: Optional[List[str]] = None) -> List[dict]:
+    """Analyse les cours BRVM et retourne des résultats au format standard du scan."""
+    quotes = await fetch_brvm_quotes()
+    if not quotes:
+        quotes = _mock_brvm_quotes()
+
+    if symbols:
+        quotes = [q for q in quotes if q["symbol"] in symbols]
+
+    analyzed = _analyze_brvm_signal(quotes)
+    results = []
+    for q in analyzed:
+        price = q["price"]
+        signal = q["signal"]
+        # SL / TP classiques BRVM : 3% de risque, 5% premier objectif
+        sl = round(price * (0.97 if signal == "BUY" else 1.03), 2)
+        tp1 = round(price * (1.05 if signal == "BUY" else 0.95), 2)
+        tp2 = round(price * (1.10 if signal == "BUY" else 0.90), 2)
+        rr = round(abs(tp1 - price) / abs(price - sl), 2) if signal in ("BUY", "SELL") and price != sl else None
+
+        results.append({
+            "symbol":        q["symbol"],
+            "timeframe":     "1d",
+            "signal":        signal,
+            "confidence":    q["confidence"],
+            "entry_price":   round(price, 2),
+            "stop_loss":     sl,
+            "take_profit_1": tp1,
+            "take_profit_2": tp2,
+            "risk_reward":   rr,
+            "explanation":   q["reasons"] or "Neutre",
+            "indicators":    {
+                "close": price, "change_pct": q["change_pct"], "volume": q["volume"],
+            },
+            "price_action":  {},
+            "sr_zones":      {},
+            "patterns":      {},
+            "regime":        {},
+            "smc":           {},
+            "source":        "brvm",
+            "market":        "BRVM",
+            "currency":      "XOF",
+        })
+    return results
+
+
+def is_brvm_symbol(symbol: str) -> bool:
+    return symbol in BRVM_SYMBOLS
 
 
 @router.get("/brvm/quotes")
