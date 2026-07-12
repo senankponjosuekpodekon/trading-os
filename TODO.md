@@ -584,9 +584,40 @@ Phase D            → Multi-agents autonomes + exécution réelle
 
 ## Priorité d’implémentation proposée
 
+### BRVM — Spécificités actions UEMOA
+- Sur BRVM/actions, les SL/TP fixes ne sont pas la norme (contrairement au Forex/Deriv).
+- Les décisions d’entrée/sortie se font plutôt :
+  - À la publication des rapports (trimestriel / semestriel / annuel).
+  - Sur variations fortes avec volume (momentum).
+  - Sur changement de tendance sectorielle.
+- À étudier : adapter le modèle de signal BRVM pour rendre SL/TP optionnels et privilégier des **niveaux de sortie fondamentaux / événementiels**.
+
+### BRVM — Rapports émetteurs
+- ✅ Scraper personnalisé `brvm_reports.py` avec endpoints `/brvm/reports/*`.
+- ✅ Score fondamental intégré au scan BRVM (fraîcheur des rapports).
+- ✅ Onglet **Rapports** avec liste des émetteurs.
+- **À faire** : clic sur un émetteur → affichage de ses PDFs téléchargeables.
+- **À faire** : extraction automatique des indicateurs clés depuis les PDFs (revenus, résultat net, dividende, PER, ROE).
+
+### Suivi des positions ouvertes
+- **À faire** : quand une position est ouverte sur un actif, le système doit :
+  - Re-scanner régulièrement l’actif.
+  - Envoyer une alerte si le signal change (BUY → SELL/WATCH).
+  - Recalculer le PnL non réalisé et l’impact du nouveau signal.
+  - Notifier sur publication de rapport fondamental pour les actifs concernés.
+
+## Priorité d’implémentation mise à jour
+
 1. **Quick win** : prix live dans les cartes signaux + endpoint `/prices/latest`.
 2. **Quick win** : widget prix par marché (Deriv + dashboard).
 3. **Moyen** : simulation d’un signal spécifique (`/signals/{id}/simulate`).
 4. **Moyen** : templates / prompt IA pour création de stratégie.
-5. **Long** : extension des actifs (stocks, indices, commodities supplémentaires).
-6. **Long** : types de signaux avancés (multiple TP, trailing stop, pyramiding).
+5. **Moyen** : affichage des PDFs émetteurs + extraction d’indicateurs BRVM.
+6. **Moyen** : suivi des positions ouvertes avec alertes et impact.
+7. **Long** : extension des actifs (stocks, indices, commodities supplémentaires).
+8. **Long** : types de signaux avancés (multiple TP, trailing stop, pyramiding).
+
+**Déjà livré :**
+- Intégration des symboles BRVM dans le scan global.
+- Scraper rapports sociétés cotées et score fondamental.
+- Onglets Signaux / Rapports / Marché / Tous les titres sur la page BRVM.
