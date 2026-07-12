@@ -1,6 +1,7 @@
 'use client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, Globe, FileText } from 'lucide-react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Globe, FileText, Building2, LayoutList, BarChart3 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import axios from 'axios';
 
@@ -26,7 +27,7 @@ function Pct({ v }: { v: number }) {
 }
 
 export default function BrvmPage() {
-  const qc = useQueryClient();
+  const [tab, setTab] = useState<'signals' | 'reports' | 'market' | 'all'>('signals');
 
   const { data: scan, isLoading, refetch } = useQuery({
     queryKey: ['brvm-scan'],
@@ -46,6 +47,12 @@ export default function BrvmPage() {
     queryFn: async () => (await axios.post(`${ENGINE}/brvm/reports/scores`, symbols)).data as FundamentalScore[],
     enabled: symbols.length > 0,
     refetchInterval: 30 * 60_000,
+  });
+
+  const { data: issuers } = useQuery({
+    queryKey: ['brvm-issuers'],
+    queryFn: async () => (await axios.get(`${ENGINE}/brvm/reports/issuers`)).data as { code: string; name: string; slug: string; description?: string }[],
+    enabled: tab === 'reports',
   });
 
   const results: BrvmQuote[] = scan?.results ?? [];
@@ -91,40 +98,139 @@ export default function BrvmPage() {
           ))}
         </div>
 
-        {/* Signaux actifs BUY / SELL */}
-        {(buys.length > 0 || sells.length > 0) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {buys.map(q => (
-              <div key={q.symbol} className="bg-gray-900 border border-emerald-500/30 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <p className="text-white font-bold">{q.symbol}</p>
-                    <p className="text-gray-500 text-xs">{q.name}</p>
+        {/* Onglets */}
+        <div className="flex flex-wrap gap-2 border-b border-gray-800 pb-2">
+          {[
+            { id: 'signals', label: 'Signaux', icon: TrendingUp },
+            { id: 'reports', label: 'Rapports', icon: FileText },
+            { id: 'market',  label: 'Marché',  icon: BarChart3 },
+            { id: 'all',     label: 'Tous les titres', icon: LayoutList },
+          ].map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as any)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-semibold transition-colors ${
+                tab === t.id
+                  ? 'text-emerald-400 border-b-2 border-emerald-400 bg-gray-800/50'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <t.icon className="w-3.5 h-3.5" />{t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'signals' && (
+          <div className="space-y-5">
+            {/* Signaux actifs BUY / SELL */}
+            {(buys.length > 0 || sells.length > 0) && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {buys.map(q => (
+                  <div key={q.symbol} className="bg-gray-900 border border-emerald-500/30 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="text-white font-bold">{q.symbol}</p>
+                        <p className="text-gray-500 text-xs">{q.name}</p>
+                      </div>
+                      <span className="flex items-center gap-1 text-emerald-400 text-sm font-bold"><TrendingUp className="w-4 h-4"/>BUY</span>
+                    </div>
+                    <p className="text-emerald-400 font-mono text-sm">{q.price.toLocaleString()} XOF</p>
+                    <p className="text-gray-400 text-xs mt-1">{q.reasons}</p>
                   </div>
-                  <span className="flex items-center gap-1 text-emerald-400 text-sm font-bold"><TrendingUp className="w-4 h-4"/>BUY</span>
-                </div>
-                <p className="text-emerald-400 font-mono text-sm">{q.price.toLocaleString()} XOF</p>
-                <p className="text-gray-400 text-xs mt-1">{q.reasons}</p>
-              </div>
-            ))}
-            {sells.map(q => (
-              <div key={q.symbol} className="bg-gray-900 border border-red-500/30 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <p className="text-white font-bold">{q.symbol}</p>
-                    <p className="text-gray-500 text-xs">{q.name}</p>
+                ))}
+                {sells.map(q => (
+                  <div key={q.symbol} className="bg-gray-900 border border-red-500/30 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="text-white font-bold">{q.symbol}</p>
+                        <p className="text-gray-500 text-xs">{q.name}</p>
+                      </div>
+                      <span className="flex items-center gap-1 text-red-400 text-sm font-bold"><TrendingDown className="w-4 h-4"/>SELL</span>
+                    </div>
+                    <p className="text-red-400 font-mono text-sm">{q.price.toLocaleString()} XOF</p>
+                    <p className="text-gray-400 text-xs mt-1">{q.reasons}</p>
                   </div>
-                  <span className="flex items-center gap-1 text-red-400 text-sm font-bold"><TrendingDown className="w-4 h-4"/>SELL</span>
-                </div>
-                <p className="text-red-400 font-mono text-sm">{q.price.toLocaleString()} XOF</p>
-                <p className="text-gray-400 text-xs mt-1">{q.reasons}</p>
+                ))}
               </div>
-            ))}
+            )}
+
+            {buys.length === 0 && sells.length === 0 && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">
+                Aucun signal actif pour le moment. Les décisions BRVM sont souvent mensuelles/trimestrielles, liées aux publications de rapports.
+              </div>
+            )}
+
+            {/* Stratégies disponibles */}
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-white mb-2">Stratégies BRVM disponibles</h3>
+              <ul className="text-gray-400 text-xs space-y-1 list-disc list-inside">
+                <li><strong className="text-gray-300">Momentum + volume :</strong> signaux BUY/SELL sur les variations fortes accompagnées de volume.</li>
+                <li><strong className="text-gray-300">Event-driven :</strong> privilégier les titres ayant publié un rapport récemment (effet annonce).</li>
+                <li><strong className="text-gray-300">Mixte :</strong> un titre avec momentum positif + rapport récent voit son score et sa confiance augmentés.</li>
+              </ul>
+            </div>
           </div>
         )}
 
-        {/* Top movers */}
-        {movers && (
+        {tab === 'reports' && (
+          <div className="space-y-5">
+            {/* Fraîcheur des rapports émetteurs */}
+            {fScores && fScores.some((s: FundamentalScore) => s.score > 0) && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-blue-400 mb-3 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5" />Boost fondamental actif
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {fScores.filter((s: FundamentalScore) => s.score > 0).map((s: FundamentalScore) => (
+                    <div key={s.symbol} className="bg-gray-800/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white font-bold text-sm">{s.symbol}</span>
+                        <span className="text-xs font-mono text-blue-300">+{s.score}</span>
+                      </div>
+                      <p className="text-gray-500 text-xs mt-1">
+                        {s.latest_report_type?.toLowerCase().replace('_', ' ')} — {s.latest_report_date ? new Date(s.latest_report_date).toLocaleDateString('fr-FR') : '—'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Liste des émetteurs */}
+            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-800">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5" />Émetteurs BRVM
+                </h3>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 bg-gray-800/50">
+                    {['Code', 'Émetteur', 'Description'].map(h => (
+                      <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {!issuers && (
+                    <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-600 text-xs">
+                      <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />Chargement…
+                    </td></tr>
+                  )}
+                  {issuers?.map(i => (
+                    <tr key={i.slug} className="hover:bg-gray-800/30 transition-colors">
+                      <td className="px-4 py-2 text-gray-400 font-mono text-xs">{i.code}</td>
+                      <td className="px-4 py-2 text-white text-xs font-medium">{i.name}</td>
+                      <td className="px-4 py-2 text-gray-500 text-xs truncate max-w-xs">{i.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {tab === 'market' && movers && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
               <h3 className="text-sm font-semibold text-emerald-400 mb-3 flex items-center gap-1.5">
@@ -161,40 +267,8 @@ export default function BrvmPage() {
           </div>
         )}
 
-        {/* Fraîcheur des rapports émetteurs */}
-        {fScores && fScores.some((s: FundamentalScore) => s.score > 0) && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-blue-400 mb-3 flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5" />Rapports récents (boost fondamental)
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {fScores.filter((s: FundamentalScore) => s.score > 0).map((s: FundamentalScore) => (
-                <div key={s.symbol} className="bg-gray-800/50 rounded-lg p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-white font-bold text-sm">{s.symbol}</span>
-                    <span className="text-xs font-mono text-blue-300">+{s.score}</span>
-                  </div>
-                  <p className="text-gray-500 text-xs mt-1">
-                    {s.latest_report_type?.toLowerCase().replace('_', ' ')} — {s.latest_report_date ? new Date(s.latest_report_date).toLocaleDateString('fr-FR') : '—'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Stratégies disponibles */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-2">Stratégies BRVM disponibles</h3>
-          <ul className="text-gray-400 text-xs space-y-1 list-disc list-inside">
-            <li><strong className="text-gray-300">Momentum + volume :</strong> signaux BUY/SELL sur les variations fortes accompagnées de volume.</li>
-            <li><strong className="text-gray-300">Event-driven :</strong> privilégier les titres ayant publié un rapport récemment (effet annonce).</li>
-            <li><strong className="text-gray-300">Mixte :</strong> un titre avec momentum positif + rapport récent voit son score et sa confiance augmentés.</li>
-          </ul>
-        </div>
-
-        {/* Tableau complet */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        {tab === 'all' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 bg-gray-800/50">
@@ -227,6 +301,7 @@ export default function BrvmPage() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </AppLayout>
   );
