@@ -530,5 +530,63 @@ Phase D            → Multi-agents autonomes + exécution réelle
 - **SaaS plans** : Free | Starter 19$/mois | Pro 49$/mois | Fund 199$/mois — Stripe + webhooks
 
 
+## Réponses aux questions / propositions
 
-alternative.me fonctionne?
+### 1. Fear & Greed (alternative.me)
+- **Fonctionne** : `https://api.alternative.me/fng/` retourne 26 = Fear.
+- Endpoint engine `/scraper/fear-greed` actif : valeur + `signal` + `bonus`.
+
+### 2. Prix actuel dans les cartes signaux
+- La carte affiche déjà **Entrée** = prix de clôture au moment du signal.
+- **À faire** : ajouter un prix **live** (fetch Binance toutes les 3-5s) via le WebSocket `/ws/prices` ou un endpoint REST `/prices/latest`.
+
+### 3. Simuler un trade spécifique
+- Backtest global existe (`/backtest/run`).
+- **À faire** : endpoint `/signals/{id}/simulate` qui rejoue le trade d’un signal avec SL / TP1 / TP2 / timeout et renvoie PnL, R/R, drawdown.
+
+### 4. Plus d’actifs
+- **Actifs scannés actuels** : crypto majeurs, EUR/USD, GBP/USD, XAU/USD, WTI/USD.
+- **À ajouter** : indices US (SPY, QQQ, DIA), forex étendu (USD/JPY, USD/CHF, USD/CAD, AUD/USD), matières premières (argent, pétrole, gaz), altcoins sélectionnés.
+
+### 5. Comment fonctionne le backtest
+- Récupère les klines historiques (Binance / Twelve Data).
+- Pour chaque bougie, appelle `analyze_candles`.
+- Ouvre un trade si signal ≥ 40 et confiance ≥ seuil.
+- Sortie par TP (ATR×2), SL (ATR×1.5) ou timeout 24 bougies.
+- Métriques : win rate, PnL total, max drawdown, Sharpe ratio, profit factor, equity curve.
+
+### 6. Signaux d’achat / vente / décision par marché
+- **BRVM** : `/brvm/signals` — ✅ actif.
+- **Forex / métaux** : `/scan/multi` via Twelve Data — ✅ actif.
+- **Volatility Deriv** : `/deriv/multi-analyze` — ✅ actif.
+- **Stocks / indices US** : à ajouter via Twelve Data (plan payant pour grande couverture).
+
+### 7. Types de signaux
+- **Scalping** : 1m-15m, SL/TP courts, fréquence élevée.
+- **Swing** : 1h-4h, SL/TP moyens, principale cible actuelle.
+- **Position** : 1d, peu implémenté aujourd’hui.
+- **Bon signal** : score ≥ 40, confiance ≥ 50, avec confirmation de plusieurs couches (EMA, RSI, MACD, Price Action, S/R, SMC, sentiment news).
+- **Sorties** : SL, TP1, TP2, timeout, trailing stop.
+- **Plusieurs TP** : déjà calculés (TP1, TP2) ; à rendre configurable par stratégie.
+
+### 8. Création de stratégie via texte structuré
+- **Proposition** : DSL JSON + LLM.
+- L’utilisateur écrit une description en français, l’IA la transforme en JSON structuré (conditions d’entrée, filtres, SL/TP, timeframe).
+- Le DSL est exécuté/testé par le backtest avant sauvegarde.
+
+### 9. Templates / prompts pour créer une stratégie
+- Templates prédéfinis : **Trend Following EMA**, **Mean Reversion Bollinger**, **Breakout Volatilité**, **SMC Scalp**, **RSI Divergence**.
+- Prompt guidé : marché, timeframe, indicateurs, risque, SL/TP, conditions d’entrée/sortie.
+
+### 10. Prix des actifs par marché
+- **Page Deriv** manque les prix live.
+- **À faire** : widget “Prix du marché” alimenté par `/ws/prices` ou `/prices/latest`.
+
+## Priorité d’implémentation proposée
+
+1. **Quick win** : prix live dans les cartes signaux + endpoint `/prices/latest`.
+2. **Quick win** : widget prix par marché (Deriv + dashboard).
+3. **Moyen** : simulation d’un signal spécifique (`/signals/{id}/simulate`).
+4. **Moyen** : templates / prompt IA pour création de stratégie.
+5. **Long** : extension des actifs (stocks, indices, commodities supplémentaires).
+6. **Long** : types de signaux avancés (multiple TP, trailing stop, pyramiding).
