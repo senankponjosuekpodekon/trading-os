@@ -1,6 +1,6 @@
 'use client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, Globe } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, Globe, FileText } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import axios from 'axios';
 
@@ -10,6 +10,14 @@ interface BrvmQuote {
   symbol: string; name: string; price: number;
   change: number; change_pct: number; volume: number;
   signal?: string; confidence?: number; reasons?: string;
+}
+
+interface FundamentalScore {
+  symbol: string;
+  score: number;
+  latest_report_type?: string;
+  latest_report_date?: string;
+  slug?: string;
 }
 
 function Pct({ v }: { v: number }) {
@@ -30,6 +38,14 @@ export default function BrvmPage() {
     queryKey: ['brvm-movers'],
     queryFn: async () => (await axios.get(`${ENGINE}/brvm/top-movers`)).data,
     refetchInterval: 5 * 60_000,
+  });
+
+  const symbols = (scan?.results ?? []).map((r: BrvmQuote) => r.symbol);
+  const { data: fScores } = useQuery({
+    queryKey: ['brvm-fundamental', symbols],
+    queryFn: async () => (await axios.post(`${ENGINE}/brvm/reports/scores`, symbols)).data as FundamentalScore[],
+    enabled: symbols.length > 0,
+    refetchInterval: 30 * 60_000,
   });
 
   const results: BrvmQuote[] = scan?.results ?? [];
@@ -144,6 +160,38 @@ export default function BrvmPage() {
             </div>
           </div>
         )}
+
+        {/* Fraîcheur des rapports émetteurs */}
+        {fScores && fScores.some((s: FundamentalScore) => s.score > 0) && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-blue-400 mb-3 flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />Rapports récents (boost fondamental)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {fScores.filter((s: FundamentalScore) => s.score > 0).map((s: FundamentalScore) => (
+                <div key={s.symbol} className="bg-gray-800/50 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-white font-bold text-sm">{s.symbol}</span>
+                    <span className="text-xs font-mono text-blue-300">+{s.score}</span>
+                  </div>
+                  <p className="text-gray-500 text-xs mt-1">
+                    {s.latest_report_type?.toLowerCase().replace('_', ' ')} — {s.latest_report_date ? new Date(s.latest_report_date).toLocaleDateString('fr-FR') : '—'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stratégies disponibles */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-white mb-2">Stratégies BRVM disponibles</h3>
+          <ul className="text-gray-400 text-xs space-y-1 list-disc list-inside">
+            <li><strong className="text-gray-300">Momentum + volume :</strong> signaux BUY/SELL sur les variations fortes accompagnées de volume.</li>
+            <li><strong className="text-gray-300">Event-driven :</strong> privilégier les titres ayant publié un rapport récemment (effet annonce).</li>
+            <li><strong className="text-gray-300">Mixte :</strong> un titre avec momentum positif + rapport récent voit son score et sa confiance augmentés.</li>
+          </ul>
+        </div>
 
         {/* Tableau complet */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">

@@ -177,8 +177,9 @@ def _mock_brvm_quotes() -> List[dict]:
     return mock
 
 
-def _analyze_brvm_signal(quotes: List[dict]) -> List[dict]:
-    """Analyse basique : momentum + variation pour signaux BRVM."""
+def _analyze_brvm_signal(quotes: List[dict], fundamental_scores: Optional[dict] = None) -> List[dict]:
+    """Analyse : momentum + volume + score fondamental optionnel."""
+    fundamental_scores = fundamental_scores or {}
     results = []
     for q in quotes:
         chg = q["change_pct"]
@@ -209,6 +210,17 @@ def _analyze_brvm_signal(quotes: List[dict]) -> List[dict]:
         if vol > 10000:
             score += 20 if score > 0 else -20
             reasons.append(f"Volume élevé ({vol:,})")
+
+        f_score = fundamental_scores.get(q["symbol"], 0)
+        if f_score >= 20:
+            score += 15
+            reasons.append("Rapport récent < 7 jours")
+        elif f_score >= 10:
+            score += 8
+            reasons.append("Rapport récent < 30 jours")
+        elif f_score >= 5:
+            score += 4
+            reasons.append("Rapport récent < 90 jours")
 
         if score >= 25:
             signal = "BUY"
@@ -290,7 +302,7 @@ async def get_brvm_quotes():
 
 @router.post("/brvm/scan")
 async def scan_brvm(req: BrvmScanRequest):
-    """Scan BRVM avec signaux momentum."""
+    """Scan BRVM : momentum + volume + données fondamentales."""
     quotes = await fetch_brvm_quotes()
     if not quotes:
         quotes = _mock_brvm_quotes()
@@ -301,7 +313,16 @@ async def scan_brvm(req: BrvmScanRequest):
     if req.symbols:
         quotes = [q for q in quotes if q["symbol"] in req.symbols]
 
-    signals = _analyze_brvm_signal(quotes)
+    # Enrichissement fondamental : fraîcheur des rapports émetteurs
+    from routers.brvm_reports import fetch_fundamental_scores
+    symbols = [q["symbol"] for q in quotes]
+    try:
+        f_scores = await asyncio.wait_for(fetch_fundamental_scores(symbols), timeout=12.0)
+        fundamental_scores = {s.symbol: s.score for s in f_scores}
+    except Exception:
+        fundamental_scores = {}
+
+    signals = _analyze_brvm_signal(quotes, fundamental_scores)
     buys  = [s for s in signals if s["signal"] == "BUY"]
     sells = [s for s in signals if s["signal"] == "SELL"]
 
