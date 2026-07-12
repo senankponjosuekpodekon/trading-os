@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Brain, FileText, RefreshCw, Zap, MessageSquare, Send, BookOpen, Search, Trash2 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
@@ -22,7 +22,15 @@ interface AiHealth {
   ollama_url: string | null;
 }
 
+interface RagDoc {
+  id: number;
+  title: string;
+  category: string;
+  created_at: string;
+}
+
 export default function AiPage() {
+  const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'chat' | 'report' | 'explain' | 'knowledge'>('chat');
   const [report, setReport]       = useState<string | null>(null);
   const [explain, setExplain]     = useState<string | null>(null);
@@ -141,7 +149,20 @@ export default function AiPage() {
       if (!res.ok) throw new Error('Échec ajout document');
       return res.json();
     },
-    onSuccess: () => setNewDoc({ title: '', category: 'general', content: '', metadata: '' }),
+    onSuccess: () => {
+      setNewDoc({ title: '', category: 'general', content: '', metadata: '' });
+      qc.invalidateQueries({ queryKey: ['rag-documents'] });
+    },
+  });
+
+  const { data: docsList, isLoading: docsLoading } = useQuery<{ documents: RagDoc[]; count: number }>({
+    queryKey: ['rag-documents'],
+    queryFn: async () => {
+      const res = await fetch(`${ENGINE_URL}/rag/documents?limit=100`);
+      if (!res.ok) throw new Error('Impossible de charger les documents RAG');
+      return res.json();
+    },
+    enabled: activeTab === 'knowledge',
   });
 
   const CATEGORIES = ['', 'indicateurs', 'smc', 'risk', 'brvm', 'deriv', 'trading'];
@@ -382,6 +403,35 @@ export default function AiPage() {
                 ? <><RefreshCw className="w-4 h-4 animate-spin" />Indexation…</>
                 : <><BookOpen className="w-4 h-4" />Ajouter à la base</>}
             </button>
+
+            <div className="mt-6 border-t border-gray-800 pt-4">
+              <h3 className="text-white font-semibold text-sm mb-2 flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-violet-400" />
+                Documents indexés ({docsList?.count ?? 0})
+              </h3>
+              {docsLoading ? (
+                <div className="text-gray-500 text-sm">Chargement…</div>
+              ) : (
+                <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                  {docsList?.documents?.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between p-2.5 bg-gray-800 border border-gray-700 rounded-lg">
+                      <div className="min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{d.title}</p>
+                        <p className="text-xs text-gray-500">
+                          <span className="text-violet-400">{d.category}</span>
+                          <span className="mx-1">·</span>
+                          {new Date(d.created_at).toLocaleDateString('fr-FR')}
+                        </p>
+                      </div>
+                      <span className="text-xs text-gray-600 font-mono">#{d.id}</span>
+                    </div>
+                  ))}
+                  {!docsList?.documents?.length && (
+                    <div className="text-gray-500 text-sm">Aucun document dans la base.</div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
