@@ -4,9 +4,9 @@ import { TrendingUp, TrendingDown, Briefcase, Activity, ArrowUpRight, ArrowDownR
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuthStore } from '@/store/auth.store';
+import { useTradingStore } from '@/store/trading.store';
 import { api } from '@/lib/api';
 import { Portfolio, Signal, PortfolioSummary } from '@/types';
-import { useLivePrices } from '@/hooks/useLivePrices';
 import Link from 'next/link';
 
 function StatCard({ label, value, sub, trend, icon }: { label: string; value: string | React.ReactNode; sub?: string; trend?: 'up' | 'down' | 'neutral'; icon?: React.ReactNode }) {
@@ -41,7 +41,9 @@ const LIVE_SYMBOLS = [
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
-  const { prices, connected } = useLivePrices();
+  const prices    = useTradingStore(s => s.prices);
+  const connected = useTradingStore(s => s.wsConnected);
+  const signals   = useTradingStore(s => s.signals) as Signal[];
 
   const { data: portfolios } = useQuery<Portfolio[]>({
     queryKey: ['portfolios'],
@@ -54,12 +56,6 @@ export default function DashboardPage() {
     queryKey: ['positions-summary', portfolio?.id],
     queryFn: async () => (await api.get(`/positions/summary?portfolioId=${portfolio!.id}`)).data,
     enabled: !!portfolio?.id,
-  });
-
-  const { data: signals } = useQuery<Signal[]>({
-    queryKey: ['signals'],
-    queryFn: async () => (await api.get('/signals?limit=5')).data.data,
-    refetchInterval: 60_000,
   });
 
   const capital = portfolio ? parseFloat(portfolio.currentCapital) : 0;

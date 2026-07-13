@@ -229,11 +229,17 @@ def _analyze_brvm_signal(quotes: List[dict], fundamental_scores: Optional[dict] 
         else:
             signal = "WATCH"
 
+        # Normalisation : score max BRVM ≈ 75 (momentum 40 + volume 20 + fondamental 15)
+        # sans SMC ni Price Action (disponibles uniquement sur crypto/forex).
+        # On ramène sur 95 pour une confidence comparable aux autres marchés.
+        BRVM_SCORE_MAX = 75
+        confidence_normalized = min(95, round(abs(score) / BRVM_SCORE_MAX * 95))
+
         results.append({
             **q,
             "signal":     signal,
             "score":      score,
-            "confidence": min(abs(score), 90),
+            "confidence": confidence_normalized,
             "reasons":    " | ".join(reasons) or "Neutre",
         })
 

@@ -95,7 +95,11 @@ export class SignalsService {
       const { data } = await firstValueFrom(
         this.http.post(`${this.engineUrl}/scan/multi`, { symbols, timeframe }),
       );
-      return this.saveSignals(data.results);
+      const saved = await this.saveSignals(data.results);
+      // Pass 2 : enrichissement sentiment asynchrone (non bloquant)
+      // Met à jour confidence + potentiellement invalide le signal
+      setImmediate(() => this._enrichSentimentPass2(saved, data.results).catch(() => {}));
+      return { saved, portfolio_risk: data.portfolio_risk ?? null };
     } catch (e: any) {
       throw new Error(`Engine scan failed: ${e?.message}`);
     }
@@ -107,10 +111,15 @@ export class SignalsService {
 
     const saved: any[] = [];
     for (const r of results) {
+      // Ne pas persister les signaux encore en attente de confirmation hystérésis
       if (!r.signal || r.signal === 'NEUTRAL' || r.confidence < 50) continue;
+      if (r.signal_pending === true) continue;
 
       const asset = await this.prisma.asset.findUnique({ where: { symbol: r.symbol } });
       if (!asset) continue;
+
+      // Détecter si le sentiment est déjà enrichi ou encore en attente
+      const sentimentPresent = !!(r.news_sentiment || r.scraper_sentiment);
 
       const signal = await this.prisma.signal.create({
         data: {
@@ -126,11 +135,14 @@ export class SignalsService {
           riskReward: r.risk_reward,
           indicators: r.indicators,
           metadata: {
-            price_action: r.price_action,
-            sr_zones:     r.sr_zones,
-            patterns:     r.patterns,
-            regime:       r.regime,
-            smc:          r.smc,
+            price_action:      r.price_action,
+            sr_zones:          r.sr_zones,
+            patterns:          r.patterns,
+            regime:            r.regime,
+            smc:               r.smc,
+            news_sentiment:    r.news_sentiment    ?? null,
+            scraper_sentiment: r.scraper_sentiment ?? null,
+            sentiment_pending: !sentimentPresent,
           },
           explanation: r.explanation,
           expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
@@ -140,8 +152,14 @@ export class SignalsService {
           strategy: { select: { name: true } },
         },
       });
+      // Attacher la confidence technique (avant sentiment) pour le pass 2
+      (signal as any)._technical_confidence = r._confidence_before_sentiment ?? r.confidence;
+      (signal as any)._raw = r;
       saved.push(signal);
-      if (r.confidence >= 70) {
+
+      // Notifier seulement si le sentiment est déjà appliqué,
+      // sinon le pass 2 notifiera après validation
+      if (sentimentPresent && r.confidence >= 70) {
         this.notifications.pushGlobal(
           'SIGNAL',
           `Signal ${r.signal} — ${r.symbol}`,
@@ -150,5 +168,70 @@ export class SignalsService {
       }
     }
     return saved;
+  }
+
+  private async _enrichSentimentPass2(saved: any[], rawResults: any[]) {
+    // Regrouper les résultats bruts par symbole pour retrouver le sentiment final
+    const rawMap = new Map<string, any>(rawResults.map(r => [r.symbol, r]));
+
+    for (const signal of saved) {
+      const sym = signal.asset?.symbol;
+      if (!sym) continue;
+      const raw = rawMap.get(sym);
+      if (!raw) continue;
+
+      const meta = signal.metadata as any ?? {};
+      if (!meta.sentiment_pending) continue;  // déjà enrichi au pass 1
+
+      const hasSentiment = !!(raw.news_sentiment || raw.scraper_sentiment);
+      if (!hasSentiment) continue;  // pas de sentiment disponible, on laisse
+
+      // Confidence finale après sentiment
+      const newConf = raw.confidence;
+      const prevConf = signal.confidence;
+      const delta = Math.abs(newConf - prevConf);
+
+      // Si le sentiment invalide le signal (confidence tombe sous 50)
+      if (newConf < 50) {
+        await this.prisma.signal.update({
+          where: { id: signal.id },
+          data: {
+            isActive: false,
+            metadata: {
+              ...meta,
+              sentiment_pending:   false,
+              sentiment_invalidated: true,
+              news_sentiment:      raw.news_sentiment    ?? null,
+              scraper_sentiment:   raw.scraper_sentiment ?? null,
+            },
+          },
+        });
+        this.logger.warn(`Signal ${sym} invalidé par sentiment (${prevConf}→${newConf})`);
+        continue;
+      }
+
+      // Mise à jour confidence + metadata sentiment
+      await this.prisma.signal.update({
+        where: { id: signal.id },
+        data: {
+          confidence: newConf,
+          metadata: {
+            ...meta,
+            sentiment_pending:  false,
+            news_sentiment:     raw.news_sentiment    ?? null,
+            scraper_sentiment:  raw.scraper_sentiment ?? null,
+          },
+        },
+      });
+
+      // Notifier maintenant (confiance validée par sentiment)
+      if (newConf >= 70) {
+        this.notifications.pushGlobal(
+          'SIGNAL',
+          `Signal ${raw.signal} — ${sym}`,
+          `Confiance ${Math.round(newConf)}% | ${raw.timeframe}${delta >= 5 ? ` (±${Math.round(delta)}% sentiment)` : ''}`,
+        );
+      }
+    }
   }
 }

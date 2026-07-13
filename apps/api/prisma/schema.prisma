@@ -219,6 +219,59 @@ model Position {
   @@map("positions")
 }
 
+// ─── SIGNAL LOG (calibration pipeline) ──────────────────────
+// Enregistre chaque signal généré avec tous ses sous-scores,
+// puis met à jour l'outcome réel quand TP/SL est touché.
+
+enum SignalOutcome {
+  PENDING
+  WIN_TP1
+  WIN_TP2
+  LOSS_SL
+  EXPIRED
+}
+
+model SignalLog {
+  id              String        @id @default(cuid())
+  signalId        String?       @map("signal_id")
+  symbol          String
+  timeframe       String
+  signalType      SignalType    @map("signal_type")
+  confidence      Float
+  entryPrice      Decimal       @map("entry_price")
+  stopLoss        Decimal?      @map("stop_loss")
+  takeProfit1     Decimal?      @map("take_profit_1")
+  takeProfit2     Decimal?      @map("take_profit_2")
+  riskReward      Float?        @map("risk_reward")
+
+  // Sous-scores par couche (pour calibration régression logistique)
+  scoreTrend      Float?        @map("score_trend")
+  scorePA         Float?        @map("score_pa")
+  scoreSR         Float?        @map("score_sr")
+  scorePatterns   Float?        @map("score_patterns")
+  scoreRegime     Float?        @map("score_regime")
+  scoreSMC        Float?        @map("score_smc")
+  scoreMTF        Float?        @map("score_mtf")
+  scoreSentiment  Float?        @map("score_sentiment")
+  scoreTotal      Float         @map("score_total")
+  regime          String?
+  adx             Float?
+  market          String?       // CRYPTO | FOREX | METALS | BRVM
+
+  // Outcome — mis à jour par le job cron
+  outcome         SignalOutcome @default(PENDING)
+  outcomePrice    Decimal?      @map("outcome_price")
+  outcomeAt       DateTime?     @map("outcome_at")
+  barsToOutcome   Int?          @map("bars_to_outcome")
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  @@index([symbol, timeframe, createdAt(sort: Desc)])
+  @@index([outcome, createdAt(sort: Desc)])
+  @@index([market, signalType, outcome])
+  @@map("signal_logs")
+}
+
 // ─── JOURNAL ─────────────────────────────────────────────────
 
 model JournalEntry {

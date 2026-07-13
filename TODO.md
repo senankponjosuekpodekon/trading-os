@@ -9,9 +9,12 @@
 ```
 MVP (actuel)       → Signaux techniques + LLM + Paper trading
 Phase A (prochain) → Enrichissement par marché : on-chain, macro, tick stats
-Phase B            → ML scoring + feedback loop + pandas-ta migration
-Phase C            → Analyse asymétrique pré-listing + alpha on-chain
-Phase D            → Multi-agents autonomes + exécution réelle
+Phase A+           → Solidifier le moteur : Swing Detection, BOS Score, Session feature, SL liquidity-aware
+Phase A++          → Synthetic Market Engine + Unified Market Representation
+Phase B            → ML scoring + Feature Factory + Probability Engine + feedback loop
+Phase C            → Analyse asymétrique pré-listing + alpha on-chain + Backtesting scientifique (anti-overfitting)
+Phase D            → Multi-agents autonomes + Market Memory System + Self-Learning + exécution réelle
+Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timeline) + Data Pipeline scalable
 ```
 
 ---
@@ -65,23 +68,27 @@ Phase D            → Multi-agents autonomes + exécution réelle
 - [x] 🤖 ⚡ **Pagination API NestJS** ✅ — `/signals`, `/positions`, `/journal`
   - Ajouter `?page=&limit=&sort=` sur tous les endpoints liste
 
-- [ ] 🤖 ⚡ **Next.js optimisations**
-  - `staleTime` cohérent sur tous les `useQuery`
-  - `refetchOnWindowFocus: false` global dans QueryClient
-  - Lazy loading `Chart`, `Backtest` avec `dynamic(() => import(...))`
+- [x] 🤖 ⚡ **Next.js optimisations** ✅
+  - `staleTime: 60_000` + `refetchOnWindowFocus: false` globaux dans `Providers.tsx`
+  - Lazy loading `CandlestickChart` (`chart/page.tsx`) + `MiniEquityChart` (`backtest/page.tsx`) via `dynamic()` SSR:false ✅
+  - Pages Next.js (`/ai`, `/brvm`, `/deriv`) code-splitées automatiquement par route ✅
 
-- [ ] 🤖 ⚡ **Prefetch données critiques**
-  - Dashboard : prefetch prix + portfolio au layout level
-  - Signals : garder dernier scan en cache Redis 30s
+- [x] 🤖 ⚡ **Prefetch données critiques** ✅
+  - `AppLayout.tsx` : prefetch `portfolios` + `signals` dès que l'user est connu
+  - Cache mémoire Python dans `ws.py` pour `_last_prices` (update toutes les 3s)
 
-- [ ] 🤖 ⚡ **Vitesse signaux < 1 seconde**
-  - Migrer calculs techniques vers `pandas-ta` (remplace TA-Lib manuel)
-  - Paralléliser fetch multi-symboles avec `asyncio.gather`
-  - Pré-calculer features en background toutes les 30s → scan devient lookup
+- [x] 🤖 ⚡ **Vitesse signaux < 1 seconde** ✅
+  - `pandas-ta` déjà utilisé pour EMA/RSI/ATR/MACD/BB
+  - Fetch klines parallèle `asyncio.gather` + timeout 4s par symbole
+  - `ThreadPoolExecutor(max_workers=8)` pour analyses CPU
+  - Warmup background toutes les 30s → scan = lookup cache pour `ACTIVE_SYMBOLS`
+  - Scraper sentiment **fire-and-forget** (non-bloquant si cache froid)
+  - News API timeout 2s max
 
-- [ ] 🤖 **WebSocket stabilité**
-  - Reconnexion auto avec backoff exponentiel
-  - Heartbeat ping/pong côté client
+- [x] 🤖 **WebSocket stabilité** ✅
+  - `useLivePrices.ts` + `useNotifications.ts` : reconnexion auto backoff exponentiel (×1.5, max 60s)
+  - `/prices/latest` REST endpoint en secours si WS indisponible
+  - Heartbeat implicite via reconnexion sur `onclose`/`onerror`
 
 - [x] 🤖 **Séparation config/env** → `engine/config.py` centralisé (Pydantic Settings)
 
@@ -117,6 +124,23 @@ Phase D            → Multi-agents autonomes + exécution réelle
   - Endpoint : `GET /onchain/score/{symbol}` → retourne `asymmetric_score` + `signals[]`
   - Intégration dans `scan.py` : `confidence += onchain_bonus()`
 
+- [ ] 🤖 **`engine/routers/onchain_advanced.py`** — Couches on-chain complémentaires
+  - **Developer Activity** (GitHub API publique, gratuit)
+    - Commits actifs derniers 30j → `developer_score`
+    - 0 commits depuis 60j → `zombie_flag = True` → confidence désactivée
+    - Nouveau release majeur → signal positif fondamental
+  - **Smart Contract Activity** (Etherscan/Covalent API)
+    - Utilisateurs uniques en hausse mais prix flat → `asymmetry_flag` Phase C
+    - TVL protocole DeFi : corrélé via DefiLlama
+  - **Stablecoin Flow** (CryptoQuant)
+    - USDT entrant sur exchanges → pression acheteuse potentielle `+10 pts`
+  - **NVT Ratio** (CryptoQuant/Glassnode)
+    - NVT > 150 → surévalué réseau → `-15 pts`
+    - NVT < 30 → sous-utilisé / possible rebond fondamental
+  - **Whale Alert** proxy (Whale Alert API free tier)
+    - Mouvement > 1000 BTC/ETH : alerte contextuelle dans le signal
+    - Attention : filtrer les réorganisations internes d'exchanges
+
 - [ ] 🤖 **`engine/routers/tokenomics.py`** — Analyse tokenomics pré-signal
   - Fetch token unlock schedule (Token Unlocks API ou CoinGecko)
   - Upcoming unlock > 20% supply dans 30j → `danger_flag = True` → signal désactivé
@@ -147,6 +171,79 @@ Phase D            → Multi-agents autonomes + exécution réelle
   - Commerciaux extrêmement long + hedge funds extrêmement short → squeeze signal
   - Stocké en DB, affiché dans page Signals pour paires Forex
 
+#### 🟤 Synthetic Markets — Phase A++ (Deriv spécifique)
+
+> V75, Boom, Crash, Jump ne sont PAS des marchés réels — appliquer SMC/OB/On-chain dessus est une erreur fondamentale (Ch.16.5)
+
+- [ ] 🤖 **`engine/routers/synthetic_engine.py`** — Moteur statistique pour Deriv
+  - **Spike Features** :
+    - `spikes_last_1000_ticks`, `avg_spike_size`, `time_since_last_spike`
+    - Fréquence croissante de spikes → `spike_risk_flag`
+  - **Volatility Regime** : `LOW_VOL → ACCUMULATION → VOL_EXPANSION → SPIKE_RISK`
+  - **Distance aux extrêmes** : `distance_to_high = (current - last_high) / last_high` — zones d'extension
+  - **Autocorrelation** : `corr(price_t, price_t-1)` — mesure si le marché a une mémoire courte
+  - **Entropie** : désordre du marché → faible = plus prévisible, fort = chaos éviter
+  - **Bollinger Width z-score** : compression pré-expansion (clé pour V75)
+  - Endpoint : `GET /synthetic/analyze/{symbol}` → `{state, spike_probability, mean_reversion_prob, regime}`
+  - **Ne jamais utiliser** : macro, on-chain, COT, MVRV sur ces actifs
+
+- [ ] 🤖 **`engine/routers/boom_crash_model.py`** — Modèle événementiel Boom/Crash
+  - Boom/Crash ≠ trend following — ce sont des événements asymétriques rares
+  - Prédiction : `spike_risk_next_50_ticks` (probabilité événement extrême)
+  - Features : séquence de compression de ticks + tick velocity + ATR rolling
+  - Walk-forward obligatoire : ces séries peuvent sur-apprendre facilement
+  - Monte Carlo simple : 1000 simulations sur séquences de ticks
+
+- [ ] 🤖 **Séparation dans `scan.py` par type d'actif**
+  - Ajouter `asset_type: CRYPTO | FOREX | SYNTHETIC | BRVM | COMMODITY`
+  - Brancher pipeline différent selon le type :
+    - `SYNTHETIC` → `synthetic_engine.py` (stats pures)
+    - `CRYPTO` → `analyze_candles()` + `onchain.py`
+    - `FOREX` → `analyze_candles()` + forex calendar
+    - `BRVM` → scan BRVM + fondamentaux
+
+#### ⚙️ Engine — Refactorisation Architecture (Phase A+)
+
+> Solidifier les briques de base avant d'ajouter ML/Agents — cf. `recherche.md` Chapitres 2-7
+
+- [ ] 🤖 **`engine/indicators/swing.py`** — Swing Detection Engine
+  - Méthode Fractal (N bougies gauche/droite, configurable)
+  - Méthode Pivot avec comptage de bougies (robuste, moins lag)
+  - Méthode ATR-based (universelle multi-marché) : `movement > ATR * 1.5`
+  - Détecter HH, HL, LH, LL de manière algorithmique et traçable
+  - `SwingScore = (movement / ATR) + volume_factor + duration_factor`
+  - **Prérequis** pour BOS/CHoCH propres — c'est le fondement manquant
+
+- [ ] 🤖 **`bos_quality_score()` dans `price_action.py`**
+  - Score 0-100 : `break_distance_atr + ADX + volume_ratio + session + news_minutes`
+  - BOS interne vs BOS externe (par timeframe)
+  - `bos_score < 40` → signal NEUTRAL forcé (No Trade Engine)
+  - Remplace la détection binaire actuelle `bos: True/False`
+
+- [ ] 🤖 **Feature `session` dans `scan.py`**
+  - Calculer depuis UTC : Tokyo (00h-09h), London (07h-16h), New York (13h-22h)
+  - Overlaps : London/NY (13h-17h) = fenêtre haute probabilité → `+8 pts`
+  - Feature `minutes_after_session_open` pour le ML futur
+  - Coût : ~5 lignes de code, impact significatif immédiat
+
+- [ ] 🤖 **`displacement_ratio` dans `smc.py`** (Order Block validation)
+  - `OB_valid = displacement_after / ATR > 2.0 AND volume_ratio > 1.2`
+  - Tracker statut OB : `fresh / tested_once / mitigated`
+  - OB mitigé → retirer de la liste des zones actives
+  - Différence entre vrai OB institutionnel et zone arbitraire
+
+- [ ] 🤖 **`SL Liquidity-aware` dans `analyze_candles()`**
+  - Ne pas placer SL dans une zone EQL/EQH (zone de chasse)
+  - Si `sl_computed` est dans un cluster de liquidité → décaler au-delà
+  - Liquidity Stop : `sl = beyond_nearest_eql - buffer_atr * 0.3`
+  - Augmente mécaniquement le WR en évitant les stop hunts
+
+- [ ] 🤖 **TP Market-Adaptive lié à la liquidité**
+  - TP1 = EQH/EQL le plus proche (si signal BUY → prochaine zone de liquidité haussière)
+  - TP2 = PDH (Previous Day High) ou H4 liquidity target
+  - TP3 = Zone HTF (si forte tendance)
+  - Remplace les TP à `ATR × multiplicateur_fixe`
+
 #### 🟡 BRVM — Couche Fondamentaux Entreprises
 
 - [ ] 🤖 **`engine/scrapers/brvm_scraper.py`** — Robuste
@@ -174,12 +271,44 @@ Phase D            → Multi-agents autonomes + exécution réelle
 
 ---
 
+#### 🌐 Unified Market Representation — Phase A++ (Langage commun multi-marchés)
+
+> Ch.16.6 : Un BOS sur USDJPY, une accumulation de baleines sur BTC, une compression V75 = même concept : changement d'état du marché. L'IA doit apprendre ce concept universel, pas les labels spécifiques.
+
+- [ ] 🤖 **`engine/features/market_concept_layer.py`** — Concepts universels
+  - Transformer les features spécifiques en concepts abstraits cross-marchés :
+    - `ACCUMULATION_SCORE` : range+absorption+vol (Forex) / whale outflow (Crypto) / low variance (Synth)
+    - `EXPANSION_POTENTIAL` : ATR expansion / funding+vol (Crypto) / variance expansion (Synth)
+    - `LIQUIDITY_PRESSURE` : EQH/EQL/OB (Forex) / liquidation clusters (Crypto) / extreme stat zones (Synth)
+    - `IMBALANCE_SCORE` : acheteurs>vendeurs (Forex) / demand>supply (Crypto) / distribution inhabituelle (Synth)
+    - `MARKET_STRESS_INDEX` : volatilité + corrélations + spreads + funding + liquidations
+  - Sortie : vecteur universel `{trend, accumulation, expansion_energy, liquidity_pressure, stress}` → float 0-1
+  - Ce vecteur est identique pour BTC, USDJPY, V75 — comparaison cross-marché possible
+  - **Prérequis du Market Memory System** : sans représentation universelle, la similarité search est aveugle
+
+- [ ] 🤖 **`engine/features/market_embedding.py`** — Market State Vector
+  - Transformer le vecteur de concepts en `embedding vector(64-128)` — identité du marché
+  - Objectif : `BTC(t) ≈ USDJPY(t-90j)` si leur state vector est similaire
+  - Prépare le Market Memory System (Phase D) : pgvector + cosine similarity
+
+---
+
 ### 🧠 Phase B — Machine Learning & Feedback Loop
 
 > Condition : 500+ signaux enregistrés avec résultats réels dans le journal
 
-- [ ] 🤖 **`engine/ml/feature_store.py`** — Stocker les features brutes
-  - À chaque signal généré : sauvegarder les 50+ features numériques en DB
+- [ ] 🤖 **`engine/ml/feature_factory.py`** — Feature Factory indépendant
+  - Service séparé calculant toutes les features — consommé par ML, backtest, live, RAG
+  - **Niveau 1** Raw : `price, volume, spread, bid, ask`
+  - **Niveau 2** Calculées : `body_ratio, wick_ratio, ATR_percentile` (ATR vs percentile 2 ans)
+  - **Niveau 3** Structurelles : `BOS_score, BOS_age, CHoCH_probability, FVG_score, OB_score`
+  - **Niveau 4** Contextuelles : `session, minutes_after_open, news_distance, day_of_week, end_of_month`
+  - **Niveau 5** Meta : `confluence_score, trend_maturity, trend_fatigue` (RSI+volume+momentum divergence)
+  - `feature_confidence` : `{bos_score: 91, confidence: 98}` vs `{whale_score: 74, confidence: 52}`
+  - **Event Features** : encoder séquences `[Compression → Sweep → CHoCH → BOS → FVG]` pour Transformer futur
+
+- [ ] 🤖 **`engine/ml/feature_store.py`** — Stocker les features calculées
+  - À chaque signal généré : sauvegarder le vecteur complet Feature Factory en DB
   - Table `signal_features(signal_id, features_json, outcome, pnl)`
   - `outcome` renseigné automatiquement quand la position se ferme
   - C'est le dataset d'entraînement pour tous les modèles futurs
@@ -202,10 +331,42 @@ Phase D            → Multi-agents autonomes + exécution réelle
   - Gain vitesse ~3-5x sur le calcul des features
   - Ouvre accès à 130+ indicateurs supplémentaires sans code
 
+- [ ] 🤖 **Probability Engine complet** — Ch.17 (remplace le scoring linéaire actuel)
+  - **Direction Engine** (pondération multi-agents) :
+    - Régime 20% + Structure 25% + Liquidité 20% + Momentum 15% + Timing 10% + Macro 10%
+    - Sortie : `bullish_probability: float` (pas un score brut)
+  - **Séparer** `direction_probability` (marché va-t-il monter?) vs `trade_quality_probability` (ce trade est-il rentable?)
+    - Ex : direction BUY 78% mais RR=0.8 → trade_quality = 45% → signal REJECTED
+  - **Entry Engine** : Entry Zone (range) + Optimal Entry (point précis) basé sur OB/FVG/ATR
+  - **Target Engine** : TP1/TP2/TP3 avec probabilité individuelle `{price, rr, probability}`
+    - TP1 1:2 → 72%, TP2 1:4 → 46%, TP3 1:8 → 21%
+  - **Trailing Intelligence Engine** : SL déplacé sur structure (nouveau HL) + momentum + probabilité
+    - Si `confidence: 84% → 51%` → alerte dégradation signal
+  - Métrique cible : `Expectancy = (WR × AvgWin) - (LossRate × AvgLoss)` — pas win rate seul
+
 - [ ] 🤖 **Backtester ML** — valider edge du modèle
   - Walk-forward testing (pas de look-ahead bias)
   - Comparer ML signal vs technique seul sur historique
   - Métriques : Sharpe, win rate, profit factor, max drawdown
+
+- [ ] 🤖 **`engine/backtest/engine.py`** — Backtesting scientifique anti-overfitting (Ch.20)
+  - **Market Replay Engine** : simuler candle par candle, jamais de données futures
+  - Anti-lookahead strict : `current_close > previous_swing_high` — jamais `future_high` pour BOS
+  - **Séparation données** : 70% TRAIN / 20% VALIDATION / 10% TEST FINAL (intouchable)
+  - Entrée ambiguë (zone touche entrée + SL même bougie) → SL en premier (conservateur)
+  - Coûts réels : `{spread, commission, slippage}` configurables par marché
+  - Anti-overfitting : tester plages `ADX 25-35` pas valeurs précises `ADX > 27.4`
+  - **Walk-forward analysis** : Cycle 1 train 2018-2021/test 2022 → Cycle 2 train 2018-2022/test 2023 → etc.
+  - **Monte Carlo** N=1000 : mélanger ordre des trades → `{ruin_probability, max_drawdown_possible, worst_R}`
+  - **Survivorship Bias** : inclure actifs morts/délistés dans tests actions/crypto
+  - **Data Leakage check** : feature disponible à T? Bloquer `volume_journalier_total` si calculé après T
+  - **Test par régime** : ADX>30 / ADX<20 / ATR élevé / news event — modèle fonctionnel partout?
+  - **Test par actif** : USDJPY 65% vs BTC 52% vs V75 72% → système apprend "ce qui marche où"
+  - **Label multi-TP** : `{TP1_2R, TP2_4R, TP3_6R}` — dataset pour ML probabiliste
+  - Métriques : `expectancy`, `profit_factor`, `Sharpe`, `Sortino`, `Calmar`, `max_drawdown`
+  - **Calibration** : courbe — `confidence=80%` doit gagner ~80/100. Sinon Platt scaling / isotonic regression
+  - **Champion Model** : pool modèles → évaluation → champion → production → remplacement si drift
+  - **Concept Drift** : `FVG+BOS → continuation` peut devenir `FVG+BOS → piège` — surveillance continue
 
 ---
 
@@ -247,15 +408,34 @@ Phase D            → Multi-agents autonomes + exécution réelle
 
 > Architecture finale : chaque marché a ses propres agents spécialisés
 
-- [ ] 🤖 **Architecture multi-agents par marché**
+- [ ] 🤖 **Architecture multi-agents — 10 agents spécialisés**
   ```
-  Agent Macro        → surveille Fed, BCE, BIS, calendrier éco
-  Agent On-Chain     → surveille exchange flows, MVRV, whale moves
-  Agent Technique    → price action, SMC, indicators
-  Agent Sentiment    → news NLP, social, LunarCrush
-  Agent Risque       → position sizing, drawdown, corrélations
-  Agent Superviseur  → agrège tous les agents → décision finale
+  Agent 1 : Market Regime    → Bull/Bear/Range/Volatile + confidence
+  Agent 2 : Structure        → BOS/CHoCH/MSS/HH/HL/LH/LL scorés
+  Agent 3 : Liquidity        → EQH/EQL/Sweeps/Stop Runs + next target
+  Agent 4 : Smart Money      → OB/FVG/Breakers/IFVG + institutional_alignment
+  Agent 5 : Momentum         → MACD/ROC/RSI Slope/ATR Expansion
+  Agent 6 : Timing           → Session/Heure/Jour/News + best_window
+  Agent 7 : Macro            → FED/BCE/DXY/Taux/PMI + macro_bias
+  Agent 8 : On-chain         → Whale/Exchange Flow/TVL/Smart Money (crypto)
+  Agent 9 : Correlation      → DXY/VIX/Nikkei/S&P500 cross-market
+  Agent 10: Risk             → RR/Drawdown/Exposition → approved + position_size
   ```
+  - **Orchestrateur** : vote pondéré des agents → confiance finale
+  - Poids adaptatifs : évolue selon historique de performance par actif/timeframe
+  - **Devil's Advocate Agent** : cherche activement pourquoi le trade est mauvais
+    - Divergences oubliées, news imminentes, corrélations défavorables, RR insuffisant
+    - Si suffisamment d'arguments → réduit confiance ou bloque signal
+  - **Meta-Agent** (Phase D+) : apprend quel agent est le plus fiable dans quel contexte
+  - **Decision Trace** dans le signal : afficher arguments favorables + défavorables + agent le plus influent
+  - Modules activés/désactivés par type d'actif :
+    - Crypto → On-chain actif | Forex → Macro actif | BRVM → Fondamentaux | Deriv → Stats stochastiques
+
+- [ ] 🤖 **`engine/agents/`** — Extraction progressive depuis `scan.py`
+  - Phase immédiate : extraire `RegimeAgent` + `StructureAgent` comme modules `engine/agents/`
+  - Phase B : `LiquidityAgent` + `TimingAgent` (règle-basés)
+  - Phase C : `MacroAgent` + `OnChainAgent`
+  - Phase D : ML sur chaque agent + Meta-Agent
 
 - [ ] 🤖 **Exécution automatique paper → réel**
   - Mode paper → validé 3 mois → passage réel avec limite de capital
@@ -265,6 +445,60 @@ Phase D            → Multi-agents autonomes + exécution réelle
 - [ ] 🤖 **Continuous learning pipeline**
   - Chaque trade clôturé → features + résultat → re-entraînement auto
   - A/B testing stratégies → sélection darwiniste des meilleurs modèles
+
+- [ ] 🤖 **Self-Learning Market Memory Engine** — Ch.19 (différenciateur SaaS majeur)
+  - **Trade Journal automatique complet** : à chaque signal, snapshot features + contexte
+    - `{asset, timeframe, direction, entry, sl, tp[], probability, features_snapshot, session, macro_context}`
+    - Résultat : `{WIN/LOSS, max_extension, drawdown_before_profit, reason_failure: fake_breakout / no_liquidity}`
+  - **Pourquoi résultat seul insuffisant** : 2 BOS bullish peuvent avoir résultat opposé selon contexte (session, liquidité, volume)
+  - **Calibration dynamique des agents** : analyser quel agent était le plus prédictif → ajuster les poids
+    - Ex : sur USDJPY, Liquidity Agent 40% > Structure Agent 30% > Momentum 15%
+    - Ces poids évoluent automatiquement par actif + timeframe
+  - **Feedback Loop** : annoncé 80% → réel 55% → recalibrer → `80%` devient `55-60%` affiché
+  - **Hybrid AI** (pas RL pur) : ML + Rules + Memory — évite les 4 pièges du RL pur
+    - Peu de données (trading ≠ millions d'essais jeu vidéo)
+    - Marché non stationnaire (règles du passé ≠ règles du futur)
+    - Récompense retardée (plusieurs heures avant résultat)
+    - Sur-optimisation (apprend passé pas futur)
+  - **Market Memory Graph** : graphe `BOS → sweep → FVG fill → continuation` → révèle patterns les plus fiables
+
+- [ ] 🤖 **Market Memory System** — pgvector (différenciateur SaaS majeur)
+  - Extension pgvector sur PostgreSQL existant (zéro coût supplémentaire)
+  - Vectoriser chaque signal émis : `embedding vector(128)` = features niveau 3-5
+  - Similarity search cosine : trouver les N setups historiques les plus proches
+  - Enrichir le signal : "Setups similaires passés : 8/10 ont atteint TP1 (78%)"
+  - Mémoire par catégorie : setups, comportements par actif, réactions aux news, séquences
+  - UI : onglet "Précédents analogues" dans la carte signal → fonctionnalité plan Pro
+  - Architecture : `Market Data → Knowledge Graph → Feature Store → Foundation Model` (vision long terme)
+
+- [ ] 🤖 **Signal Object vivant** — Ch.17 + Ch.21 (entité dynamique, pas snapshot statique)
+  - Signal enrichi JSON :
+    ```json
+    {"asset": "USDJPY", "direction": "BUY", "status": "ACTIVE",
+     "entry_zone": [162.10, 162.25], "optimal_entry": 162.18, "stop_loss": 161.90,
+     "targets": [{"price": 162.80, "rr": 2, "probability": 72},
+                  {"price": 163.40, "rr": 4, "probability": 46}],
+     "confidence": 74, "invalidation_level": 161.90,
+     "agents": {"structural": 91, "liquidity": 86, "timing": 73, "macro": 65}}
+    ```
+  - **Bouton "Pourquoi ?"** : 5 raisons scorées — Structure 91/100, Liquidité 87/100, Historique 147 cas 71% WR
+  - **Bouton "Pourquoi PAS ?"** : risques — news dans 40min, volume faible, résistance proche, RR<minimum → WAIT
+  - **Timeline du signal** : 10h00 74% → 10h15 prix revient zone 79% → 10h45 momentum baisse 63% → 11h30 invalidé
+
+- [ ] 🤖 **Signal vivant** — recalcul dynamique post-émission
+  - Background task Python : à chaque clôture de bougie, recalculer score des signaux `ACTIVE`
+  - Alimenter `SignalLog` (déjà en DB Prisma) : `{signal_id, old_probability, new_probability, reason, ts}`
+  - Signal JSON évolue : `{status: ACTIVE, probability: 68, entry_valid: true, invalidation_probability: 32}`
+  - Frontend : afficher l'évolution de la probabilité dans la carte signal → confiance utilisateur accrue
+  - Invalider automatiquement si `execution_score < 40` (prix trop loin de la zone d'entrée)
+
+- [ ] 🤖 **Data Pipeline — Architecture scalable (Ch.18)**
+  - MVP immédiat : Redis Streams + Celery + WebSockets (pas besoin Kafka au début)
+  - Feature Store avec timestamp version : `{feature_name, value, timestamp, version}` — anti-data leakage
+  - **À ne pas faire maintenant** : Kafka/Redpanda/TimescaleDB/InfluxDB — trop complexe pour MVP
+  - **Monitoring Drift** : surveiller Data Drift (données changent) + Model Drift (perf baisse) + Concept Drift
+  - **Délai cible** : Crypto < 500ms | Forex < 5s | Synthetic selon stratégie
+  - **Model Registry** : MLflow ou W&B — versionner les modèles, savoir lequel est actif en production
 
 ---
 
@@ -352,31 +586,505 @@ Phase D            → Multi-agents autonomes + exécution réelle
   - Frontend : `api.ts` interceptor 401 → `POST /auth/refresh` + retry requête originale
   - Endpoints : `/auth/refresh`, `/auth/logout`, JWT `expiresIn` passé à `15m`
 
+### �️ Priorité 0 — Code Quality & Engineering Standards
+
+> Ces règles s'appliquent à **tout nouveau fichier** créé dans le projet, dès maintenant.
+
+#### Linting & Formatage
+- [ ] 🤖 **ESLint strict + Prettier** — frontend
+  - Règles : `@typescript-eslint/no-explicit-any`, `no-unused-vars`, `no-console` (warn)
+  - `import/order` automatique avec `prettier-plugin-tailwindcss`
+  - Pre-commit hook via `lint-staged` + `husky` : lint + format avant chaque commit
+- [ ] 🤖 **Ruff + Black** — Python engine
+  - `ruff check --fix` + `black` en CI
+  - Règles : `E501 max-line=100`, `F401 unused imports`, `B` (bugbear), `I` (isort)
+  - Pre-commit hook Python : `ruff + black` avant commit
+
+#### Modularité & Architecture
+- [ ] 🤖 **Barrel exports** dans chaque dossier `components/`, `hooks/`, `lib/`
+  - `index.ts` par dossier → import propre `import { SignalCard } from '@/components/signals'`
+- [ ] 🤖 **Séparation concerns Next.js** — règle stricte
+  - `page.tsx` = layout + data fetching uniquement (< 80 lignes)
+  - `components/[feature]/` = logique UI
+  - `hooks/use[Feature].ts` = logique métier
+  - `lib/[feature].ts` = utilitaires purs
+- [ ] 🤖 **Séparation concerns Python** — règle stricte
+  - `routers/` = endpoints HTTP uniquement
+  - `services/` = logique métier
+  - `indicators/` = calculs techniques purs
+  - `agents/` = agents IA
+  - `features/` = feature engineering
+  - `utils/` = utilitaires (cache, http, logger)
+
+#### Scalabilité & Performance Frontend
+- [ ] 🤖 **React.memo + useMemo + useCallback** systématiques sur composants lourds
+  - `SignalCard`, `CandlestickChart`, `MarketScanner`, `PortfolioRow` : mémoïsés
+  - Éviter re-renders inutiles sur mise à jour des prix live (store Zustand selector granulaire)
+- [ ] 🤖 **Zustand selectors atomiques** — ne pas souscrire au store entier
+  - `const price = useTradingStore(s => s.prices['BTC/USDT'])` au lieu de `s => s`
+  - Empêche re-render de tout composant quand un seul prix change
+- [ ] 🤖 **Virtualisation listes longues** — `@tanstack/react-virtual`
+  - Page Signaux (200+ signaux) → liste virtualisée
+  - Page Journal (historique long) → virtualisée
+  - Page BRVM "Tous les titres" → déjà `max-h` mais doit être virtualisée
+- [ ] 🤖 **Code splitting par route** — déjà partiel, compléter
+  - Toutes les pages lourdes : `dynamic(() => import(...), { ssr: false, loading: () => <Skeleton/> })`
+  - Cibler : `chart/`, `backtest/`, `ai/`, `deriv/`, futures : `scanner/`, `copilot/`, `memory/`
+- [ ] 🤖 **Image optimization** — `next/image` obligatoire, pas de `<img>` natif
+
+#### Scalabilité & Performance Python Engine
+- [ ] 🤖 **Semaphores par source API** — éviter burst et 429
+  - Binance : `asyncio.Semaphore(10)` — rapide, gratuit
+  - TwelveData : `asyncio.Semaphore(1)` — 1 req/s plan gratuit
+  - Glassnode/CryptoQuant : `asyncio.Semaphore(2)`
+- [ ] 🤖 **TTL Redis par catégorie** — revue et standardisation
+  - Klines Binance : 60s | Klines TwelveData : 300s | Features calculées : 30s
+  - On-chain : 300s | Sentiment news : 900s | BRVM quotes : 3600s
+  - Scan results : 30s | Fear & Greed : 3600s
+- [ ] 🤖 **Circuit breaker par source externe**
+  - Si source échoue 3× en 60s → skip automatique pendant 5min
+  - Logger + alerte interne → évite cascade d'erreurs en production
+- [ ] 🤖 **Pagination côté Python Engine** sur tous les endpoints liste
+  - `GET /signals?page=1&limit=50`, `GET /scan/history?limit=100`
+  - Jamais retourner de liste non bornée
+
+#### Responsivité
+- [ ] 🤖 **Breakpoints Tailwind standardisés** — `sm:640 md:768 lg:1024 xl:1280`
+  - Chaque nouvelle page doit être validée sur : 375px (iPhone SE), 768px (iPad), 1280px (desktop)
+  - Règle : tester mobile **en premier** (Mobile First)
+- [ ] 🤖 **Touch targets ≥ 44px** sur mobile — boutons, liens, onglets
+- [ ] 🤖 **Tableaux → Cards automatique** sur `< 768px` — pattern existant à étendre aux nouvelles pages
+  - Scanner page, Copilot page, Memory page : cards sur mobile
+
+#### Gestion efficace des ressources
+- [ ] 🤖 **Cleanup systématique des effets React**
+  - Tout `useEffect` avec WS/interval/timeout : `return () => cleanup()`
+  - `TradingStoreProvider.tsx` : pattern déjà bon → à dupliquer partout
+- [ ] 🤖 **AbortController sur fetch** — annuler les requêtes si composant démonté
+  - `useEffect(() => { const ctrl = new AbortController(); fetch(url, { signal: ctrl.signal }); return () => ctrl.abort(); })`
+- [ ] 🤖 **Fermeture propre des connexions Python**
+  - WS Deriv : `on_disconnect` handler → cleanup subscriptions
+  - Pools asyncio : bounded `ThreadPoolExecutor` avec shutdown sur SIGTERM
+- [ ] 🤖 **Limiter le volume de données WebSocket**
+  - Ne pusher que les diffs (`{symbol, price, delta}`) pas les objets complets
+  - Batch updates : regrouper les updates de prix toutes les 500ms côté serveur
+
+#### Chargement & Vitesse
+- [ ] 🤖 **Skeleton loaders sur toutes les nouvelles pages** — pas de flash blanc
+  - Pattern : `if (loading) return <PageSkeleton />` avant tout render
+- [ ] 🤖 **Optimistic UI** sur mutations critiques
+  - Ouvrir/fermer position : UI update immédiat, rollback si erreur
+  - Lancer scan : spinner inline sur le bouton, pas de page freeze
+- [ ] 🤖 **Prefetch intelligent** — charger les données probables avant navigation
+  - Hover sur "Chart" → prefetch klines de l'actif sélectionné
+  - Hover sur signal → prefetch détails du signal
+- [ ] 🤖 **SWR / TanStack Query staleTime par type de donnée**
+  - Prix live : `staleTime: 0` (toujours frais via WS)
+  - Signaux : `staleTime: 30_000`
+  - Historique backtest : `staleTime: 300_000`
+  - Données BRVM : `staleTime: 3_600_000`
+
+### 🔐 Sécurité avancée
+
+> Ce qui est ✅ = déjà fait. Le reste est à implémenter avant mise en production.
+
+#### API & Réseau
+- [ ] 🤖 **Helmet.js** — headers HTTP sécurisés (NestJS)
+  - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Strict-Transport-Security`
+  - `Content-Security-Policy` strict : bloquer inline scripts non autorisés
+- [ ] 🤖 **CORS strict** — whitelist domaines uniquement
+  - Dev : `localhost:3000` | Prod : domaine SaaS uniquement (pas `origin: *`)
+- [ ] 🤖 **Protection CSRF** — routes mutantes (POST/PUT/DELETE)
+  - Double-submit cookie pattern ou `csurf` middleware NestJS
+  - Frontend : header `X-Requested-With` sur toutes les mutations
+- [ ] 🤖 **Protection XSS** — sanitiser sorties affichées
+  - `sanitize-html` / `dompurify` sur champs libres (journal, notes user)
+  - `dangerouslySetInnerHTML` interdit sans sanitisation dans Next.js
+- [ ] 🤖 **Vigilance `prisma.$queryRaw`** — SQL Injection
+  - Toujours utiliser `Prisma.sql` template tag, jamais interpolation directe
+- [ ] 🤖 **Variables d'environnement** — audit complet
+  - `.env.example` à jour avec toutes les clés documentées (sans valeurs réelles)
+  - En production : secrets manager (Doppler / GitHub Secrets / Vault)
+  - Jamais de secret dans code source, logs ou réponses API
+- [ ] 🤖 **HTTPS obligatoire en production**
+  - Nginx : redirect HTTP → HTTPS automatique
+  - `HSTS` via Helmet + Nginx | Certificats Let's Encrypt auto-renouvelés (certbot)
+
+#### Authentification & Autorisation
+- [x] 🤖 **JWT + Refresh token rotation** ✅
+- [x] 🤖 **Rate limiting brute force** ✅ (10 req/min sur `/auth/login`)
+- [ ] 🤖 **2FA TOTP**
+  - `speakeasy` (Node) → QR code + vérification 6 chiffres
+  - 10 backup codes à usage unique, hashés en DB
+  - Obligatoire si compte avec trades réels
+- [ ] 🤖 **Row Level Security (RLS) — PostgreSQL**
+  - Isolation des données user au niveau DB (pas uniquement ORM) — critique multi-tenant
+  - Tables concernées : `signals`, `positions`, `journal_entries`, `strategies`, `portfolios`
+  - Policy : `USING (user_id = current_setting('app.current_user_id')::uuid)`
+- [ ] 🤖 **Scopes d'autorisation par plan**
+  - Middleware NestJS `@RequiresPlan('pro')` sur routes avancées (on-chain, synthetic, memory)
+  - Vérification plan en DB (pas dans le JWT — évite tokens périmés)
+
+#### Données sensibles
+- [ ] 🤖 **Chiffrement données sensibles en DB**
+  - Tokens Deriv / clés API stockées par user → `AES-256-GCM` avant insert
+  - Clé de chiffrement dans `.env` uniquement (jamais en DB)
+- [ ] 🤖 **Logs sans données sensibles**
+  - Masquer emails, IPs, tokens dans tous les logs structurés
+  - Pattern : `{userId: '***', action: 'login'}` — jamais email en clair
+
+---
+
+### 🚨 Error Handling systématique
+
+> Objectif : zéro erreur silencieuse, zéro crash non géré, toujours un message utilisateur utile.
+
+#### Backend NestJS
+- [x] 🤖 **Global exception filter** ✅ — `AllExceptionsFilter`
+- [ ] 🤖 **Codes d'erreur internes standardisés** — réponse JSON uniforme
+  ```json
+  { "statusCode": 400, "error": "VALIDATION_FAILED",
+    "message": "confidence must be a number", "timestamp": "...", "path": "/signals" }
+  ```
+  - Codes : `AUTH_INVALID_TOKEN`, `PLAN_LIMIT_EXCEEDED`, `SIGNAL_NOT_FOUND`, `RATE_LIMITED`
+  - Frontend mappe les codes → messages sans parser le texte brut
+- [ ] 🤖 **`ValidationPipe` global strict**
+  - `whitelist: true` (strip champs inconnus) + `forbidNonWhitelisted: true`
+  - `@IsEnum()`, `@IsNumber({ min: 0, max: 100 })` sur chaque DTO nouveau
+- [ ] 🤖 **Timeout sur toutes les requêtes Prisma**
+  - `prisma.$transaction([...], { timeout: 5000 })` — évite locks infinis
+- [ ] 🤖 **Sentry / Glitchtip** — monitoring erreurs production
+  - Alertes sur erreurs 500 répétées, timeouts récurrents
+  - `@sentry/nestjs` + `sentry-sdk` Python (ou Glitchtip self-hosted)
+
+#### Engine Python
+- [ ] 🤖 **Structured error responses** — toujours `{success, data, error}` en JSON
+  ```python
+  return {"success": False, "error": "BINANCE_RATE_LIMIT", "retry_after": 60}
+  ```
+- [ ] 🤖 **Exception hierarchy** — classes d'erreur par domaine
+  ```python
+  class DataSourceError(Exception): ...
+  class BinanceError(DataSourceError): ...
+  class RateLimitError(DataSourceError): ...
+  ```
+  - Catcher sélectivement — jamais `except Exception` aveugle sans log
+- [ ] 🤖 **Dead Letter Queue pour tâches background**
+  - Tâche échouée → retry 3× → log + alerte → DLQ
+  - Évite perte silencieuse de résolutions d'outcomes (`resolveOutcomes`)
+
+#### Frontend Next.js
+- [ ] 🤖 **Error boundaries par section** — pas seulement global
+  - `<ErrorBoundary>` local sur Scanner, Chart, Copilot, OnChain, Memory
+  - Fallback par widget — un composant cassé ne crashe pas toute la page
+- [ ] 🤖 **Toast notifications d'erreur** — feedback utilisateur immédiat
+  - Mutation qui échoue → toast rouge | WS perdu → toast jaune "Reconnexion..."
+  - Hook centralisé `useToast()` + `<Toaster>` dans layout
+- [ ] 🤖 **Empty states sur toutes les pages**
+  - Jamais de liste vide sans message : icône + texte + bouton d'action
+  - "Aucun signal détecté — Lancer un scan" | "Aucune position ouverte"
+
+---
+
+### 🔔 Notifications — Système complet
+
+> Actuellement : SSE basique sur signaux + SL/TP. Objectif : multi-canal, intelligent, non-intrusif.
+
+#### Architecture
+- [ ] 🤖 **`notifications` table DB**
+  - Schéma : `id, userId, type, title, body, data(JSON), readAt, createdAt`
+  - Types : `SIGNAL_NEW`, `SIGNAL_INVALIDATED`, `PRICE_ALERT`, `SL_HIT`, `TP_HIT`, `NEWS_HIGH_IMPACT`, `PLAN_LIMIT`, `SIGNAL_DEGRADED`
+  - Endpoints : `GET /notifications?unread=true&limit=20` + `PATCH /notifications/:id/read` + `PATCH /notifications/read-all`
+- [ ] 🤖 **Badge compteur non-lus dans le header**
+  - Push via WebSocket existant ou polling 30s
+  - `<BellIcon>` avec badge rouge animé
+
+#### Canaux
+- [x] 🤖 **SSE** ✅ — signaux + SL/TP déjà actifs
+- [ ] 🤖 **Web Push (PWA)** — notification navigateur même app fermée
+  - `web-push` (Node) + Service Worker Next.js
+  - Permission après 1ère connexion réussie
+  - Payload : `{title: "BTC BUY 82%", body: "Entrée: 104200-104500", url: "/chart/BTC"}`
+- [ ] 🤖 **Telegram Bot**
+  - `node-telegram-bot-api` + commandes `/alerts on|off`, `/status`
+  - Lier compte via code temporaire 6 chiffres (expire 10min)
+  - Format : `📈 BTC/USDT BUY | Confiance: 82% | SL: 103100 | TP1: 105800`
+- [ ] 🤖 **Email**
+  - `Resend API` (gratuit 3000/mois) ou `nodemailer`
+  - Digest quotidien : résumé signaux + performances du jour
+  - Alerte immédiate : SL touché sur position ouverte
+- [ ] 🤖 **In-app Notification Center**
+  - Bell dropdown chronologique + mark-as-read + lien vers signal/position concerné
+
+#### Intelligence
+- [ ] 🤖 **Filtre anti-spam** — qualité > quantité
+  - Notifier seulement si `Opportunity Score > seuil_user` (configurable)
+  - Max N notifications/heure par canal (1 / 3 / 5 / illimité selon plan)
+  - Regroupement : 3 signaux en 30s → 1 notif groupée
+- [ ] 🤖 **Page `/settings/notifications`**
+  - Toggle par type + par canal + quiet hours (`from: 22:00, to: 07:00`)
+  - Seuil minimum confiance pour recevoir une alerte (ex: ≥ 70%)
+- [ ] 🤖 **Notification dégradation signal**
+  - Confidence descend sous seuil → "⚠ Signal BTC en dégradation (58%)"
+  - Signal invalidé → "❌ USDJPY BUY invalidé — structure cassée"
+
+---
+
+### 🗄️ Base de données — Gestion efficace
+
+#### Index
+- [ ] 🤖 **Audit et création des index manquants**
+  - `signals(userId, createdAt DESC)` — queries dashboard les plus fréquentes
+  - `positions(userId, status, createdAt DESC)` — portfolio queries
+  - `refresh_tokens(tokenHash)` — lookup auth (unique + index)
+  - `notifications(userId, readAt, createdAt DESC)` — non-lus par user
+  - `market_features(symbol, timestamp DESC)` — future feature store
+  - Règle : tout champ utilisé dans `WHERE` ou `ORDER BY` fréquent → index obligatoire
+
+#### Migrations
+- [ ] 🤖 **Stratégie de migration stricte** — jamais `prisma db push` en production
+  - Dev : `prisma db push` OK | Staging/Prod : `prisma migrate deploy` uniquement
+  - Chaque migration nommée : `add_notifications_table`, `add_signal_logs_index`
+  - CI/CD : `prisma migrate deploy` automatique avant chaque déploiement
+- [ ] 🤖 **Migrations backward-compatible** — zéro downtime
+  - Ajouter colonne nullable d'abord → déployer code → puis `NOT NULL`
+  - Jamais renommer directement : ajouter nouvelle → migrer data → supprimer ancienne
+
+#### Connection Pooling
+- [ ] 🤖 **PgBouncer** — pool de connexions
+  - Sans pooler : chaque requête = 1 connexion PostgreSQL (limite ~100)
+  - `transaction mode` : pool partagé tous workers — critique dès >10 users simultanés
+  - Config : `max_client_conn=100`, `default_pool_size=20`
+- [ ] 🤖 **`connection_limit` dans `DATABASE_URL` Prisma**
+  - `?connection_limit=10&pool_timeout=10` — évite saturation sur pics
+
+#### Performance requêtes
+- [ ] 🤖 **`EXPLAIN ANALYZE`** sur les requêtes critiques avant production
+  - Scanner query + dashboard stats : Seq Scan → Index Scan, objectif < 50ms
+- [ ] 🤖 **Pagination curseur** sur grandes tables (préférer au `OFFSET`)
+  - `WHERE id > last_cursor ORDER BY id LIMIT 50` sur `signal_logs`, `notifications`
+  - `OFFSET 10000` scanne 10000 lignes inutilement
+- [ ] 🤖 **Archivage automatique** — données froides
+  - `signal_logs` > 6 mois → table archive / partition par trimestre
+  - `notifications` lues > 30 jours → soft-delete puis purge mensuelle
+
+#### Maintenance & Résilience
+- [ ] 🤖 **Soft-delete pattern** — données utilisateur
+  - Ne jamais `DELETE` physiquement positions/signaux/journal → `deletedAt: DateTime?`
+  - Permet audit trail, récupération erreur, analytics complets
+- [ ] 🤖 **Backup automatique** — compléter le déploiement existant
+  - `pg_dump` quotidien → compressé → upload S3/Backblaze B2
+  - Rétention : 7 jours glissants + 1 snapshot/semaine sur 1 mois
+  - **Test de restauration mensuel** — un backup non testé n'est pas un backup
+- [ ] 🤖 **Read replicas** (Phase D — forte charge)
+  - Séparer lectures (analytics, memory search) des écritures
+  - Prisma `replicaUrl` pour les `findMany` de reporting
+
+---
+
 ### 🟡 Priorité 2 — Qualité prod
 
-#### Tests
-- [x] 🤖 **Tests NestJS** ✅ — infrastructure démarrée
-  - `auth.service.spec.ts` : register, login, refresh rotation, reuse detection, token invalide, token expiré (9 tests ✅)
-  - `positions.service.spec.ts` : open, close, SL trigger, TP trigger, drawdown block (4 tests ✅)
-  - `watcher.service.spec.ts` : fermeture auto correcte BUY/SELL, journal auto (3 tests ✅)
-  - `signals.service.spec.ts` : filtrage par confiance, pagination (3 tests ✅)
-  - Objectif : 30+ tests → continuer d'ajouter des cas edge
+#### Tests — État actuel ✅
+- [x] 🤖 **Tests NestJS** ✅ — 9+4+3+3 = 19 tests
+- [x] 🤖 **Tests Python Engine** ✅ — 71 tests
+- [x] 🤖 **Tests Next.js** ✅ — 16 tests
+- **Total actuel : ~106 tests**
 
-- [x] 🤖 **Tests Python Engine** (élargissement) ✅
-  - `test_scan.py` : `analyze_candles` sur séries BUY/SELL + no data
-  - `test_news_scraper.py` : sentiment heuristic, aggregate, hash
-  - `test_regime.py` : trending/ranging/volatile + bonus/filtre
-  - `test_risk.py` : sizing, targets, ajustements régime, plafonnements
-  - **Total : 71 tests passent**
+---
 
-- [x] 🤖 **Tests Next.js** ✅ (étendus)
-  - Auth login/register : render, submit success, validation error
-  - ErrorBoundary : fallback UI quand enfant throw
-  - Dashboard : render avec data, skeleton loading, error state
-  - Signals : empty state, liste, scan mutation
-  - Portfolio : render + fetch data, switch historique
-  - Setup Jest + React Testing Library + ts-jest
-  - **Total : 16 tests passent**
+### 🧪 Tests unitaires — Stratégie complète
+
+> Règle fondamentale : **tester le comportement, pas l'implémentation**. Un test qui casse à chaque refactoring est inutile.
+> Objectif : **couverture > 80%** sur toutes les couches critiques. Priorité sur les chemins métier.
+
+#### Philosophie & Outillage
+- [ ] 🤖 **Pyramid de tests** — respecter la hiérarchie
+  - 70% **Unitaires** : fonctions pures, services isolés (rapides, nombreux)
+  - 20% **Intégration** : service + DB (Prisma in-memory / test DB)
+  - 10% **E2E** : flux utilisateur complet (lents, peu nombreux)
+- [ ] 🤖 **Coverage reporting** — activer et surveiller
+  - NestJS : `jest --coverage` → rapport HTML dans `coverage/`
+  - Python : `pytest --cov=. --cov-report=html`
+  - Next.js : `jest --coverage`
+  - **Seuil minimum** : `branches: 70, functions: 80, lines: 80` dans `jest.config`
+  - CI bloque si coverage descend sous le seuil
+
+---
+
+#### 🐍 Python Engine — Tests à ajouter
+
+##### `test_swing.py` — SwingDetectionEngine (à créer avec le module)
+- [ ] `detect_swing_highs()` : série haussière → 3 HH détectés
+- [ ] `detect_swing_lows()` : série baissière → 3 LL détectés
+- [ ] `detect_bos()` : cassure confirmée = `BOS_BULL` | non-cassure = `None`
+- [ ] `detect_choch()` : CHoCH après tendance baissière → renversement détecté
+- [ ] `bos_quality_score()` : BOS avec fort volume → score > 70 | BOS faible → score < 40
+- [ ] Série plate (range) → aucun swing détecté
+- [ ] Séries trop courtes (< 10 bougies) → `None` sans crash
+
+##### `test_synthetic_engine.py` — Synthetic Market Engine (à créer)
+- [ ] `spike_features()` : 34 spikes dans 1000 ticks → `{spikes: 34, avg_size: X, time_since: Y}`
+- [ ] `volatility_regime()` : ATR très bas + BB étroite → `LOW_VOL`
+- [ ] `volatility_regime()` : ATR expansion → `VOL_EXPANSION`
+- [ ] `volatility_regime()` : spikes fréquents → `SPIKE_RISK`
+- [ ] `autocorrelation()` : série avec forte corrélation t/t-1 → valeur > 0.7
+- [ ] `entropy()` : série aléatoire → entropie haute | série structurée → entropie basse
+- [ ] `distance_to_extreme()` : prix à -15% du haut → `-0.15`
+- [ ] Actif non-synthétique passé par erreur → exception `WrongAssetTypeError`
+
+##### `test_probability_engine.py` — Probability Engine (à créer)
+- [ ] `direction_engine()` : tous agents bullish → probability > 75%
+- [ ] `direction_engine()` : agents mixtes → probability 45-55%
+- [ ] `trade_quality_probability()` : direction 78% + RR 0.8 → quality < 50% → REJECTED
+- [ ] `trade_quality_probability()` : direction 65% + RR 4.0 → quality > 60% → ACCEPTED
+- [ ] `entry_zone()` : OB + FVG proches → zone cohérente sans contradiction
+- [ ] `tp_targets()` : 3 niveaux retournés avec `{price, rr, probability}` chacun
+- [ ] `tp_targets()` : probabilité TP3 < probabilité TP1 toujours
+- [ ] `trailing_sl()` : nouveau HL créé → SL mis à jour sous nouveau HL
+
+##### `test_feature_factory.py` — Feature Factory (à créer)
+- [ ] `compute_level1()` : OHLCV → features brutes correctes (body_ratio, wick_ratio)
+- [ ] `compute_level2()` : ATR percentile calculé sur 252 bougies historiques
+- [ ] `compute_level3()` : BOS détecté → `bos_score > 0` | pas de BOS → `bos_score = 0`
+- [ ] `compute_level4()` : timestamp 10h30 London → `session = "LONDON"`, `session_score > 0`
+- [ ] Anti-lookahead : aucun feature de niveau 4 n'utilise de données après le timestamp
+- [ ] `feature_vector()` : retourne dict avec exactement les N features attendus (pas de clé manquante)
+
+##### `test_market_concept_layer.py` — Unified Market Representation (à créer)
+- [ ] `accumulation_score()` Forex : range + absorption + volume → score > 70
+- [ ] `accumulation_score()` Crypto : whale outflow + exchange reserve baisse → score > 70
+- [ ] `accumulation_score()` Synthetic : low variance regime → score > 60
+- [ ] Les 3 marchés avec même contexte → scores comparables (même ordre de grandeur)
+- [ ] `market_stress_index()` : funding élevé + volatilité haute + liquidations → stress > 80
+- [ ] Vecteur universel : toutes les clés présentes (`trend, accumulation, expansion_energy, liquidity_pressure, stress`)
+- [ ] Valeurs toujours entre 0.0 et 1.0
+
+##### `test_backtesting.py` — Backtesting Engine (à créer)
+- [ ] Anti-lookahead : BOS calculé sur bougie t n'utilise jamais de données de t+1
+- [ ] `market_replay()` : 100 bougies rejoué séquentiellement → état identique à live candle par candle
+- [ ] SL touché avant TP dans même bougie → `LOSS` (pas `WIN`)
+- [ ] Coûts appliqués : spread + commission déduits du P&L
+- [ ] Walk-forward : cycle 1 test set = données inconnues du train set (pas d'overlap)
+- [ ] Monte Carlo N=100 : distribution résultats non-identique à chaque run (aléatoire)
+- [ ] `calibration_score()` : prédictions 80% gagnent entre 75-85% → calibration OK
+- [ ] `calibration_score()` : prédictions 80% gagnent 50% → calibration FAIL
+
+##### `test_scan.py` — Compléments (tests existants à étendre)
+- [ ] `analyze_candles()` sur actif `SYNTHETIC` → pipeline synthétique appelé (pas SMC)
+- [ ] `analyze_candles()` sur actif `CRYPTO` → on-chain bonus appliqué si data dispo
+- [ ] `analyze_candles()` sur actif `FOREX` → macro calendar factor appliqué
+- [ ] `regime_filter()` : signal BUY en régime BEAR_STRONG → `allowed = False`
+- [ ] `regime_filter()` : signal NEUTRAL toujours autorisé (quelque soit le régime)
+- [ ] Anti-repaint : dernière bougie non-clôturée exclue du calcul
+- [ ] Cache Redis : 2ème appel identique dans le TTL → résultat identique sans re-calcul
+
+##### `test_risk.py` — Compléments (tests existants à étendre)
+- [ ] `sl_liquidity_aware()` : SL classique tombe sur zone EQL → SL décalé en-dessous
+- [ ] `tp_linked_to_liquidity()` : TP1 aligné sur prochain EQH détecté
+- [ ] Position size : capital 10000 + risk 1% + SL 50 pips → lot size correct
+- [ ] Plafonnement : position size jamais > 5% du capital quelles que soient les entrées
+
+---
+
+#### 🏗️ NestJS API — Tests à ajouter
+
+##### `signal-outcome.service.spec.ts` — SignalLog (nouveau)
+- [ ] `logSignal()` : signal NEUTRAL → aucun log créé
+- [ ] `logSignal()` : signal BUY avec tous les champs → `signalLog.create` appelé avec les bons params
+- [ ] `resolveOutcomes()` : TP1 atteint avant SL → outcome `WIN_TP1`
+- [ ] `resolveOutcomes()` : SL atteint avant TP → outcome `LOSS_SL`
+- [ ] `resolveOutcomes()` : TP2 atteint → outcome `WIN_TP2`
+- [ ] `resolveOutcomes()` : symbole non-Binance + âge > 5j → outcome `EXPIRED`
+- [ ] `resolveOutcomes()` : N bougies sans résultat → outcome `EXPIRED`
+- [ ] `getStats()` : 10 WIN_TP1 + 5 LOSS_SL → `win_rate_tp1 = 67%`
+
+##### `notifications.service.spec.ts` (à créer avec le module)
+- [ ] `create()` : crée notification avec `readAt = null`
+- [ ] `markAsRead()` : met à jour `readAt` avec timestamp
+- [ ] `markAllRead()` : met `readAt` sur toutes les notifs non-lues du user
+- [ ] `getUnread()` : retourne uniquement celles où `readAt = null`
+- [ ] `shouldNotify()` filtre anti-spam : même type < 5min → `false`
+- [ ] `shouldNotify()` quiet hours actives → `false`
+- [ ] `shouldNotify()` `opportunityScore < seuil_user` → `false`
+
+##### `signals.service.spec.ts` — Compléments
+- [ ] `scan()` : rate limit dépassé → erreur `RATE_LIMITED` (pas 500)
+- [ ] `scan()` : engine down → erreur gracieuse avec message clair
+- [ ] `findAll()` : pagination curseur correcte — `lastId` retourne suite correcte
+- [ ] `findAll()` : filtre `market=CRYPTO` → uniquement signaux crypto
+
+##### `portfolios.service.spec.ts` — Compléments
+- [ ] `openPosition()` : RR < 1.0 → rejeté avec erreur `RR_TOO_LOW`
+- [ ] `openPosition()` : drawdown > 10% → bloqué par `DrawdownGuard`
+- [ ] `openPosition()` : position déjà ouverte sur même actif → erreur `DUPLICATE_POSITION`
+- [ ] `closePosition()` : position inexistante → `NotFoundException`
+
+---
+
+#### ⚛️ Next.js — Tests à ajouter
+
+##### `SignalCard.spec.tsx` — Nouveau composant enrichi
+- [ ] Render avec signal `ACTIVE` → badge vert visible
+- [ ] Render avec signal `INVALIDATED` → badge rouge + card grisée
+- [ ] `entry_zone` affichée → deux valeurs visibles (range)
+- [ ] TP1/TP2/TP3 avec probabilités → 3 lignes affichées
+- [ ] Clic "Pourquoi ?" → section raisons scorées s'expand
+- [ ] Clic "Pourquoi PAS ?" → section risques s'expand
+- [ ] `React.memo` : prix change mais signal inchangé → pas de re-render (test avec `renderCount`)
+
+##### `useTradingStore.spec.ts` — Store Zustand
+- [ ] `setPrice()` : mise à jour d'un seul symbole → autres symboles inchangés
+- [ ] `fetchSignals()` : appel en cours → deuxième appel ignoré (`signalsLoading = true`)
+- [ ] `fetchSignals()` : cache valide (< 30s) → pas de nouveau fetch réseau
+- [ ] `fetchSignals()` : force=true → fetch même si cache valide
+- [ ] `setSignals()` : met à jour `signalsFetchedAt` avec timestamp actuel
+
+##### `useScanner.spec.ts` (à créer avec la page)
+- [ ] Polling 30s : après 30s → nouveau fetch déclenché
+- [ ] Filtres locaux : `market=CRYPTO` → résultats filtrés sans nouveau fetch réseau
+- [ ] Tri par `Opportunity Score` → premier résultat a le score le plus élevé
+- [ ] Composant démonté → polling arrêté (cleanup vérifié)
+
+##### `SyntheticRegimeCard.spec.tsx` (à créer avec la page)
+- [ ] `LOW_VOL` → couleur bleue + texte "Faible volatilité"
+- [ ] `SPIKE_RISK` → couleur rouge + alerte visible
+- [ ] `spike_probability = 0.78` → jauge à 78%
+- [ ] Actif CRYPTO passé par erreur → message d'erreur "Marché non synthétique"
+
+##### `MarketScanner.spec.tsx` (à créer avec la page)
+- [ ] 0 résultats → empty state "Aucune opportunité détectée"
+- [ ] Tri par Opportunity Score → ordre décroissant vérifié
+- [ ] Filtre FOREX sélectionné → seuls les signaux FOREX affichés
+- [ ] Loading state → skeleton visible (pas de flash blanc)
+
+---
+
+#### 🔗 Tests d'intégration — À ajouter
+
+- [ ] 🤖 **`scan → signalLog → resolveOutcomes`** — flux complet
+  - Lancer un scan → vérifier `SignalLog` créé → simuler prix → vérifier outcome mis à jour
+- [ ] 🤖 **`auth → refresh → logout`** — flux token
+  - Register → login → refresh → vérifier ancien token révoqué → logout → vérifier tous révoqués
+- [ ] 🤖 **`openPosition → watcher → closePosition`** — flux paper trading
+  - Ouvrir position BUY → simuler prix SL → vérifier position fermée + journal créé
+- [ ] 🤖 **`notification → canaux`** — flux notification
+  - Signal créé confiance > 70 → vérifier `notifications` table + SSE envoyé
+
+---
+
+#### ⚙️ CI / CD Tests
+- [ ] 🤖 **GitHub Actions / CI pipeline**
+  - Sur chaque PR : `pytest`, `jest`, `tsc --noEmit`, `ruff check`, `eslint`
+  - Build Docker en CI → détecter les erreurs de build avant déploiement
+  - Coverage check : PR bloquée si coverage descend
+- [ ] 🤖 **Test database isolée**
+  - NestJS tests : `DATABASE_URL` pointe sur DB test (pas prod)
+  - `beforeEach` : reset DB avec fixtures minimales
+  - `afterAll` : cleanup complet
+- [ ] 🤖 **Mocks standardisés**
+  - `__mocks__/prisma.ts` — mock Prisma réutilisable dans tous les `.spec.ts`
+  - `__mocks__/redis.ts` — mock Redis pour les tests engine
+  - `fixtures/signals.ts`, `fixtures/positions.ts` — données de test réutilisables
 
 #### Resilience
 - [x] 🤖 **Retry avec backoff exponentiel + jitter** ✅
@@ -450,10 +1158,7 @@ Phase D            → Multi-agents autonomes + exécution réelle
   - Features par plan : nombre scans/h, marchés accessibles, presale scanner (Pro+)
   - Stripe intégration : `POST /billing/checkout`, webhooks paiement
 
-- [ ] 🤖 **Refresh token rotation**
-  - Access token 15min + Refresh token 7j en cookie httpOnly
-  - Rotation à chaque refresh (invalidation ancien token)
-  - Blacklist tokens révoqués en Redis
+- [x] 🤖 **Refresh token rotation** ✅ — déjà implémenté (voir section Sécurité MVP)
 
 - [ ] 🤖 **Audit trail**
   - Table `audit_logs(userId, action, entity, entityId, metadata, timestamp)`
@@ -492,6 +1197,176 @@ Phase D            → Multi-agents autonomes + exécution réelle
 - [ ] 🤖 **Heatmap marchés** — vue globale état on-chain par actif
 - [ ] 👤 **Application mobile** — React Native ou PWA (futur)
 
+### 🗺️ Nouvelles Pages & Composants — Carte complète
+
+> Chaque page suit le pattern : `page.tsx` (< 80 lignes) + `components/[feature]/` + `hooks/use[Feature].ts`
+> Chaque page : skeleton loader + error boundary + responsive mobile first + dynamic import si lourde
+
+#### Phase A — Pages prioritaires (court terme)
+
+- [ ] 🤖 **`/app/scanner/page.tsx`** — Market Scanner global
+  - Vue unifiée tous marchés (Crypto, Forex, Synthetic, BRVM)
+  - Composants :
+    - `components/scanner/ScannerFilters.tsx` — filtres marché / timeframe / confiance
+    - `components/scanner/ScannerTable.tsx` — liste triée par `Opportunity Score` (virtualisée)
+    - `components/scanner/ScannerCard.tsx` — version card mobile du row
+    - `components/scanner/MarketGroupTabs.tsx` — onglets CRYPTO / FOREX / SYNTHETIC / BRVM
+  - Hook : `hooks/useScanner.ts` — fetch + polling 30s + filtres locaux
+  - Performance : `React.memo` sur `ScannerCard`, pagination virtualisée `@tanstack/react-virtual`
+
+- [ ] 🤖 **`/app/synthetic/page.tsx`** — Synthetic Markets (Deriv V75/Boom/Crash)
+  - Composants :
+    - `components/synthetic/SyntheticRegimeCard.tsx` — état `LOW_VOL / EXPANSION / SPIKE_RISK`
+    - `components/synthetic/SpikeRiskGauge.tsx` — jauge visuelle probabilité spike
+    - `components/synthetic/VolatilityTimeline.tsx` — historique régimes
+    - `components/synthetic/BoomCrashAlert.tsx` — alerte événement extrême imminent
+  - Hook : `hooks/useSyntheticEngine.ts` — GET `/synthetic/analyze/{symbol}`
+  - **Ne pas afficher** : SMC, Order Blocks, On-chain sur cette page — pipeline différent
+
+- [ ] 🤖 **`/app/onchain/page.tsx`** — On-Chain Dashboard Crypto
+  - Composants :
+    - `components/onchain/FearGreedMeter.tsx` — Fear & Greed index (existe en partie)
+    - `components/onchain/FundingRateTable.tsx` — funding rates top actifs
+    - `components/onchain/OpenInterestChart.tsx` — OI + liquidations
+    - `components/onchain/WhaleAlertFeed.tsx` — transferts > seuil (LunarCrush/CryptoQuant)
+    - `components/onchain/MVRVGauge.tsx` — MVRV Z-score zone
+    - `components/onchain/ExchangeFlowCard.tsx` — entrées/sorties exchanges
+  - Hook : `hooks/useOnchain.ts` — staleTime 300s
+
+- [ ] 🤖 **`/app/economic-calendar/page.tsx`** — Calendrier économique
+  - Composants :
+    - `components/calendar/EventList.tsx` — NFP, CPI, FOMC, BCE triés par date/impact
+    - `components/calendar/EventImpactBadge.tsx` — HIGH / MEDIUM / LOW coloré
+    - `components/calendar/CountdownTimer.tsx` — "prochain event HIGH dans Xh Xmin"
+    - `components/calendar/EventFilter.tsx` — filtre par devise / impact / période
+  - Hook : `hooks/useEconomicCalendar.ts` — staleTime 3600s (données statiques journalières)
+
+#### Phase A+ / A++ — Pages architecture avancée
+
+- [ ] 🤖 **`/app/chart/[symbol]/page.tsx`** — Chart intelligent annoté (refactor du chart existant)
+  - Upgrade vers route dynamique `[symbol]`
+  - Composants nouveaux :
+    - `components/chart/StructureAnnotations.tsx` — HH/HL/LH/LL sur le graphique
+    - `components/chart/LiquidityZones.tsx` — EQH/EQL/OB/FVG layers
+    - `components/chart/ScenarioProjection.tsx` — flèches `Entry → TP1 → TP2` sur chart
+    - `components/chart/SignalTimeline.tsx` — timeline probabilité sous le graphique
+    - `components/chart/ChartControls.tsx` — toggle par layer (structure / liquidité / niveaux)
+  - Hook : `hooks/useChartAnnotations.ts` — calcule les annotations depuis signal actif
+
+- [ ] 🤖 **Refactor `components/signals/SignalCard.tsx`** — Signal Object vivant complet
+  - Remplacer la card actuelle par le format enrichi
+  - Sous-composants :
+    - `SignalCardHeader.tsx` — symbol + direction + status badge `ACTIVE/WAIT/APPROACHING/INVALIDATED`
+    - `SignalCardEntryZone.tsx` — range zone + point optimal
+    - `SignalCardTargets.tsx` — TP1/TP2/TP3 avec RR + probabilité individuelle
+    - `SignalCardAgentScores.tsx` — mini barres Structure / Liquidité / Timing / Macro
+    - `SignalCardWhyButton.tsx` — expand "Pourquoi ?" avec 5 raisons scorées
+    - `SignalCardWhyNotButton.tsx` — expand "Pourquoi PAS ?" avec facteurs risque
+    - `SignalCardProbabilityTimeline.tsx` — mini sparkline évolution confiance
+  - `React.memo` obligatoire — carte re-renders uniquement si signal change
+
+#### Phase B — Pages ML & Backtesting
+
+- [ ] 🤖 **`/app/backtest/page.tsx`** — Backtesting Engine (upgrade de l'existant)
+  - Composants nouveaux :
+    - `components/backtest/WalkForwardResults.tsx` — cycles train/test avec résultats par cycle
+    - `components/backtest/MonteCarloChart.tsx` — distribution 1000 simulations
+    - `components/backtest/CalibrationCurve.tsx` — probabilité annoncée vs réelle
+    - `components/backtest/RegimeBreakdown.tsx` — performance par régime (trend/range/volatile)
+    - `components/backtest/AssetBreakdown.tsx` — performance par actif
+    - `components/backtest/ChampionModelBadge.tsx` — modèle actif + version + accuracy
+
+- [ ] 🤖 **`/app/features/page.tsx`** — Feature Factory Inspector (debug/dev)
+  - Vue des features calculées en temps réel pour un actif donné
+  - Composants :
+    - `components/features/FeatureGrid.tsx` — grille niveau 1-5 avec valeurs actuelles
+    - `components/features/MarketConceptVector.tsx` — vecteur universel `{trend, accumulation, ...}` visualisé
+  - Utile pour calibration et debugging, accès réservé admin
+
+#### Phase D — Pages autonomie & mémoire
+
+- [ ] 🤖 **`/app/memory/page.tsx`** — Market Memory System
+  - Composants :
+    - `components/memory/SimilarSituationsFeed.tsx` — top 5 analogues historiques pour signal actif
+    - `components/memory/MarketMemoryCard.tsx` — situation passée : asset + date + context + outcome
+    - `components/memory/SimilarityScore.tsx` — badge % similarité + résultat historique
+    - `components/memory/MemorySearchBar.tsx` — "Cherche des situations similaires à BTC aujourd'hui"
+  - Hook : `hooks/useMarketMemory.ts` — POST `/memory/similar` → nearest neighbor search pgvector
+  - Performance : résultats paginés (top 10) + `staleTime: 60_000`
+
+- [ ] 🤖 **`/app/copilot/page.tsx`** — Trading Copilot (AI Conversation Layer)
+  - Composants :
+    - `components/copilot/CopilotChat.tsx` — interface conversation avec contexte marché live
+    - `components/copilot/CopilotContextBar.tsx` — actif sélectionné + régime actuel visible
+    - `components/copilot/CopilotSuggestions.tsx` — questions pré-définies rapides
+    - `components/copilot/CopilotSignalReference.tsx` — affiche le signal référencé dans la réponse
+  - Dynamic import + `ssr: false` — lourde
+  - Hook : `hooks/useCopilot.ts` — stream SSE ou WebSocket vers endpoint LLM
+
+- [ ] 🤖 **`/app/performance/page.tsx`** — Performance & Statistiques utilisateur
+  - Composants :
+    - `components/performance/WinRateGauge.tsx` — WR global + par marché
+    - `components/performance/ExpectancyCard.tsx` — expectancy par configuration
+    - `components/performance/BehaviorProfile.tsx` — "Vous coupez vos gagnants trop tôt"
+    - `components/performance/BestSetups.tsx` — top setups par WR + RR (London+BOS+RR>4)
+    - `components/performance/OutcomeTimeline.tsx` — WIN/LOSS/EXPIRED dans le temps
+
+#### Composants partagés à créer (cross-pages)
+
+- [ ] 🤖 **`components/ui/PageSkeleton.tsx`** — skeleton générique réutilisable par page
+- [ ] 🤖 **`components/ui/OpportunityScore.tsx`** — affichage score étoiles + valeur numérique
+- [ ] 🤖 **`components/ui/ProbabilityBar.tsx`** — barre de probabilité colorée (rouge→vert)
+- [ ] 🤖 **`components/ui/RegimeBadge.tsx`** — badge `TRENDING_BULL / RANGE / VOLATILE`
+- [ ] 🤖 **`components/ui/AssetTypeBadge.tsx`** — badge `CRYPTO / FOREX / SYNTHETIC / BRVM`
+- [ ] 🤖 **`components/ui/ConfidenceGauge.tsx`** — gauge circulaire animée pour confidence
+- [ ] 🤖 **`components/ui/RRRatioBadge.tsx`** — badge `1:2`, `1:4`, `1:8` colorés
+- [ ] 🤖 **`components/ui/TimeAgo.tsx`** — "il y a 3min" avec mise à jour automatique
+- [ ] 🤖 **`components/ui/LiveDot.tsx`** — point vert animé "LIVE" / rouge "OFFLINE"
+- [ ] 🤖 **`components/layout/ModeToggle.tsx`** — switch Débutant / Professionnel (persisté en localStorage)
+
+### 🎯 Trading Copilot UX — Ch.21 (Phase D+)
+
+> Différence produit fondamentale : ne pas vendre des signaux — vendre un **copilote de décision**.
+
+- [ ] 🤖 **Market Scanner — Ranking Engine**
+  - `Opportunity Score = Probability × RR × Market_Quality × Timing`
+  - 65% prob + RR 1:8 > 80% prob + RR 1:2 — logique asymétrique
+  - Vue unifiée : Forex ⭐⭐⭐ | Crypto ⭐⭐⭐⭐⭐ | Synthetic ⭐⭐⭐⭐ — top 3 asymétries du jour
+
+- [ ] 🤖 **Signal Card enrichie** — entrée zone + point optimal + TPs probabilistes
+  - Afficher `entry_zone` (range) + `optimal_entry` (point) + SL + TP1/TP2/TP3 chacun avec leur RR et probabilité
+  - Status badge : `ACTIVE / WAIT / APPROACHING / INVALIDATED`
+
+- [ ] 🤖 **Graphique intelligent annoté** — TradingView Lightweight Charts
+  - Annotations auto : structure HH/HL, zones EQH/EQL, OB demand, FVG, projection scénario
+  - Scénario visuel : `Current price → Entry Zone → TP1 → TP2`
+
+- [ ] 🤖 **"Pourquoi ce trade ?" + "Pourquoi PAS ?"** — AI Decision Trace
+  - Bouton `Pourquoi ?` : 5 raisons scorées + historique analogues (N cas, X% WR)
+  - Bouton `Pourquoi PAS ?` : facteurs risque — news imminentes, RR insuffisant, résistance proche
+  - Réponse : `WAIT` si trop de facteurs négatifs
+
+- [ ] 🤖 **Timeline du signal** — évolution probabilité en temps réel
+  - Log `{timestamp, probability, reason}` à chaque recalcul
+  - Affichage courbe probabilité dans la carte signal
+
+- [ ] 🤖 **Mode débutant / professionnel**
+  - Débutant : `BUY USDJPY ⭐⭐⭐⭐ | Risque: Modéré | Attendre: 162.20`
+  - Pro : BOS_score 91, liquidity_swept, FVG 64% fill, Order Flow delta+, confidence 78.4%
+
+- [ ] 🤖 **AI Conversation Layer — Market Copilot** (Ch.18 + Ch.21)
+  - L'utilisateur demande : "Analyse BTC maintenant / Compare avec 2021 / Pourquoi ce signal ?"
+  - L'IA utilise données live + mémoire historique + modèles — pas un chatbot classique
+  - Différence produit : analyste connecté au marché en temps réel
+
+- [ ] 🤖 **Risk Management Dashboard**
+  - `{capital, risk_per_trade, daily_loss, current_exposure}`
+  - Alerte corrélation : "4 positions USD corrélées → risque réel supérieur au risque apparent"
+  - Profil comportemental : "Vous coupez vos gagnants trop tôt. Vos meilleurs setups : London + BOS + RR>4"
+
+- [ ] 🤖 **Alert Engine intelligent** — max 3-5 alertes/jour haute asymétrie (pas 200 spam)
+  - Canaux : Web push + Telegram + Email — filtré par `Opportunity Score > seuil`
+
 ---
 
 ## ✅ Terminé
@@ -528,6 +1403,26 @@ Phase D            → Multi-agents autonomes + exécution réelle
 - **Circuit breaker** : si Binance/TwelveData échoue 3× → skip 5min, évite cascade d'erreurs en prod
 - **Mobile** : tables → cards sur <768px, bottom nav bar, charts adaptatifs
 - **SaaS plans** : Free | Starter 19$/mois | Pro 49$/mois | Fund 199$/mois — Stripe + webhooks
+- **Confidence vs probabilité** : `confidence` actuel = score de règles (0-95), PAS une probabilité calibrée. Renommer `signal_score` ou calibrer via backtest. Ne jamais présenter comme "72% de chance de gagner".
+- **Score architecture** : `market_score × setup_score × execution_score` = score multiplicatif cible (recherche.md Ch.5)
+- **Feature Factory** : extraire tous les calculs de `scan.py` vers `engine/features/` — prerequis pour ML multi-modèles
+- **Market Memory** : pgvector déjà dans le stack (RAG) → réutilisable pour similarity search sur signaux historiques
+- **Signal vivant** : `SignalLog` en DB Prisma non alimenté — activer recalcul dynamique = quick win fort
+- **Architecture Engine** : `scan.py` = proto-orchestrateur monolithique → extraire vers `engine/agents/` progressivement
+- **SL Liquidity-aware** : SL actuel à `ATR × fixe` peut tomber en zone de chasse → décaler au-delà des EQL/EQH
+- **Backtesting anti-lookahead** : toujours utiliser `current_close > previous_swing_high` jamais `future_high` pour BOS
+- **Synthetic Markets** : V75/Boom/Crash ≠ marchés réels — pipeline séparé obligatoire. SMC/OB/On-chain = erreur sur ces actifs.
+- **Unified Market Representation** : normaliser BOS(Forex) = whale_accumulation(Crypto) = compression(V75) = `ACCUMULATION_SCORE`
+- **Probability Engine** : séparer `direction_probability` (marché) vs `trade_quality_probability` (ce trade spécifique)
+- **Walk-forward** : ne jamais tester sur données d'entraînement. Cycle progressif 2018→2026. TEST FINAL intouchable.
+- **Monte Carlo** : mélanger ordre des 100 trades N=1000× → ruin probability + max drawdown scenario
+- **Concept Drift** : FVG+BOS peut passer de setup fiable à piège selon le régime macro — surveiller en continu
+- **Trading Copilot** : vendre un copilote de décision, pas des signaux. "Pourquoi ?" + "Pourquoi PAS ?" = différenciation produit.
+- **Opportunity Score** : `Probability × RR × Market_Quality × Timing` — un trade 65%/RR:8 > 80%/RR:1.5
+- **Mode débutant/pro** : même moteur, deux interfaces — stratégique pour acquisition et rétention
+- **MVP recommandé (Ch.22)** : USDJPY + BTC + V75 — représente Forex + Crypto + Synthetic — Rules + Stats avant ML
+- **RL pur dangereux** : peu de données, non-stationnaire, reward retardé, overfitting passé → Hybrid AI obligatoire
+- **Data Leakage critique** : à 10h, utiliser uniquement données disponibles avant 10h — volume journalier total interdit
 
 
 ## Réponses aux questions / propositions
@@ -578,9 +1473,11 @@ Phase D            → Multi-agents autonomes + exécution réelle
 - Templates prédéfinis : **Trend Following EMA**, **Mean Reversion Bollinger**, **Breakout Volatilité**, **SMC Scalp**, **RSI Divergence**.
 - Prompt guidé : marché, timeframe, indicateurs, risque, SL/TP, conditions d’entrée/sortie.
 
-### 10. Prix des actifs par marché
-- **Page Deriv** manque les prix live.
-- **À faire** : widget “Prix du marché” alimenté par `/ws/prices` ou `/prices/latest`.
+### 10. Prix des actifs par marché ✅
+- [x] **Page Deriv** : widget BTC/ETH/EUR/Gold live via `useLivePrices` + indicateur `LIVE`/`OFF`
+- [x] **Page Signaux** : prix actuel live dans chaque carte + delta % vs entrée
+- [x] **Dashboard** : grille 8 actifs live (BTC/ETH/SOL/BNB/AVAX/XRP/EUR/Gold)
+- [x] **Topbar** : BTC/ETH en continu
 
 ## Priorité d’implémentation proposée
 
@@ -606,18 +1503,48 @@ Phase D            → Multi-agents autonomes + exécution réelle
   - Recalculer le PnL non réalisé et l’impact du nouveau signal.
   - Notifier sur publication de rapport fondamental pour les actifs concernés.
 
-## Priorité d’implémentation mise à jour
+## État MVP — Juillet 2026 ✅
 
-1. **Quick win** : prix live dans les cartes signaux + endpoint `/prices/latest`.
-2. **Quick win** : widget prix par marché (Deriv + dashboard).
-3. **Moyen** : simulation d’un signal spécifique (`/signals/{id}/simulate`).
-4. **Moyen** : templates / prompt IA pour création de stratégie.
-5. **Moyen** : affichage des PDFs émetteurs + extraction d’indicateurs BRVM.
-6. **Moyen** : suivi des positions ouvertes avec alertes et impact.
-7. **Long** : extension des actifs (stocks, indices, commodities supplémentaires).
-8. **Long** : types de signaux avancés (multiple TP, trailing stop, pyramiding).
+### Livré — MVP complet
+- [x] Prix live toutes pages (signaux, deriv, dashboard, topbar) + `/prices/latest` REST
+- [x] WebSocket reconnexion auto backoff ×1.5 max 60s
+- [x] `refetchOnWindowFocus: false` + `staleTime: 60s` globaux dans `Providers.tsx`
+- [x] Prefetch portfolios + signaux au layout level (`AppLayout`)
+- [x] Lazy loading `CandlestickChart` + `MiniEquityChart` via `dynamic()`
+- [x] Pagination signaux (12/page) + portfolio historique (10/page) avec ←/→
+- [x] Tableaux BRVM scrollables hauteur fixe + `thead sticky`
+- [x] Badge notif SSE + backoff exponentiel
+- [x] Scraper BRVM rapports + score fondamental
+- [x] Onglets BRVM : Signaux / Rapports / Marché / Tous les titres
+- [x] Intégration symboles BRVM dans scan global
 
-**Déjà livré :**
-- Intégration des symboles BRVM dans le scan global.
-- Scraper rapports sociétés cotées et score fondamental.
-- Onglets Signaux / Rapports / Marché / Tous les titres sur la page BRVM.
+### Prochaines priorités — Phase A
+1. **Moyen** : PDFs émetteurs BRVM — clic → liste PDF téléchargeables
+2. **Moyen** : extraction indicateurs PDFs BRVM (revenus, résultat net, PER, ROE)
+3. **Moyen** : suivi positions ouvertes — re-scan + alerte si signal change
+4. **Moyen** : simulation signal (`/signals/{id}/simulate` → PnL, R/R, drawdown)
+5. **Phase A** : on-chain crypto (Fear & Greed ✅, Funding Rate, OI, MVRV)
+6. **Phase A** : BRVM fondamentaux entreprises (P/E, dividende, ROE — bfin.brvm.org)
+7. **Phase A** : tick stats Deriv (ATR z-score, BB width, Monte Carlo)
+8. **Long** : YOLO patterns visuels, DeFi arbitrage, ML scoring
+
+### YOLO — Détection visuelle de patterns chartistes (Long terme)
+- **Idée** : utiliser un modèle YOLO (v8/v11) entraîné sur des captures de graphiques pour détecter automatiquement des patterns visuels.
+- **Patterns cibles** : tête-épaules, drapeau, triangle, double sommet/creux, pinbar, engulfing, order blocks, FVG, zones de support/résistance.
+- **Intégration** : les patterns détectés deviennent un signal supplémentaire dans le moteur de décision (comme le momentum ou les rapports fondamentaux).
+- **Ce que YOLO n'est PAS** : un prédicteur de prix ni le cœur du système — juste un composant visuel complémentaire.
+- **Prérequis** : collecte d'images de charts annotées, entraînement, puis endpoint `/analyze/visual` dans l'engine.
+- **Priorité** : long terme, après les fondamentaux et le suivi de positions.
+
+### UX — Pagination et hauteurs de défilement ✅
+- [x] **Signaux** : pagination client `PAGE_SIZE=12`, contrôles ←/→, compteur `X–Y sur N`
+- [x] **Portfolio historique** : pagination `HIST_PAGE_SIZE=10`, IIFE pattern, contrôles ←/→
+- [x] **BRVM "Tous les titres"** : `max-h-[600px] overflow-y-auto` + `thead sticky top-0`
+- [x] **BRVM "Reports" émetteurs** : `max-h-[500px] overflow-y-auto` + `thead sticky top-0`
+
+### Crypto DeFi & Arbitrage (Long terme)
+- **Idée** : détecter des opportunités d'arbitrage entre DEX (Uniswap, PancakeSwap, etc.) ou entre CEX et DEX.
+- **Données nécessaires** : prix on-chain en temps réel, frais de gaz, liquidité des pools.
+- **Approches** : arbitrage triangulaire, arbitrage cross-chain, flash loans.
+- **Complexité** : élevée — nécessite intégration Web3 (ethers.js / wagmi) et accès aux données on-chain.
+- **Priorité** : long terme, à planifier après la stabilisation du moteur de signaux.

@@ -1,10 +1,37 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 import pandas as pd
 import numpy as np
 
 router = APIRouter()
+
+
+@router.get("/klines")
+async def get_klines(
+    symbol:   str = Query(..., description="Symbole interne ex: EUR/USD, VIX75/USD"),
+    interval: str = Query("1h"),
+    limit:    int = Query(300, le=500),
+):
+    """Retourne les klines OHLCV pour n'importe quel actif via la chaîne de fallback scan.py."""
+    from routers.scan import (
+        fetch_binance_klines, fetch_twelvedata_klines,
+        fetch_yfinance_klines, fetch_deriv_klines, TF_MAP,
+    )
+    tf = TF_MAP.get(interval, interval)
+    df = await fetch_binance_klines(symbol, tf)
+    if df is None:
+        df = await fetch_deriv_klines(symbol, tf)
+    if df is None:
+        df = await fetch_twelvedata_klines(symbol, tf)
+    if df is None:
+        df = await fetch_yfinance_klines(symbol, tf)
+    if df is None or len(df) < 2:
+        raise HTTPException(status_code=404, detail=f"Aucune donnée pour {symbol} / {interval}")
+    # Trier par time croissant et supprimer les doublons
+    df = df.sort_values("time").drop_duplicates(subset=["time"]).tail(limit)
+    klines = df[["time","open","high","low","close","volume"]].to_dict(orient="records")
+    return {"symbol": symbol, "interval": interval, "klines": klines}
 
 
 class Candle(BaseModel):

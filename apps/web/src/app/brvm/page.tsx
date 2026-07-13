@@ -203,9 +203,10 @@ export default function BrvmPage() {
                   <Building2 className="w-3.5 h-3.5" />Émetteurs BRVM
                 </h3>
               </div>
+              <div className="max-h-[500px] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-800 bg-gray-800/50">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-gray-800 bg-gray-900">
                     {['Code', 'Émetteur', 'Description'].map(h => (
                       <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
                     ))}
@@ -226,6 +227,7 @@ export default function BrvmPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -269,9 +271,11 @@ export default function BrvmPage() {
 
         {tab === 'all' && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+          <div className="max-h-[600px] overflow-y-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-800 bg-gray-800/50">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-gray-800 bg-gray-900">
                 {['Symbole', 'Nom', 'Prix (XOF)', 'Variation', 'Volume', 'Signal', 'Raisons'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
                 ))}
@@ -300,6 +304,8 @@ export default function BrvmPage() {
               ))}
             </tbody>
           </table>
+          </div>
+          </div>
         </div>
         )}
       </div>

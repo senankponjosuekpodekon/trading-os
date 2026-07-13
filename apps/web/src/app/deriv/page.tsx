@@ -1,8 +1,9 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, Activity, AlertCircle, BarChart2, CheckSquare, Square } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, Activity, AlertCircle, BarChart2, CheckSquare, Square, Wifi, WifiOff } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { useTradingStore } from '@/store/trading.store';
 import axios from 'axios';
 
 const ENGINE = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
@@ -72,7 +73,16 @@ function SignalChip({ signal, size = 'sm' }: { signal: string; size?: 'sm' | 'lg
   return <span className={`flex items-center font-bold text-gray-500 ${cls}`}><Minus className={size === 'lg' ? 'w-5 h-5' : 'w-3 h-3'} />WAIT</span>;
 }
 
+const MARKET_TICKERS = [
+  { key: 'BTCUSDT', label: 'BTC' },
+  { key: 'ETHUSDT', label: 'ETH' },
+  { key: 'EURUSDT', label: 'EUR/USD' },
+  { key: 'PAXGUSDT', label: 'Gold' },
+];
+
 export default function DerivPage() {
+  const prices    = useTradingStore(s => s.prices);
+  const connected = useTradingStore(s => s.wsConnected);
   const [stake, setStake]         = useState(1);
   const [duration, setDuration]   = useState(5);
   const [result, setResult]       = useState<ScalpResponse | null>(null);
@@ -110,6 +120,27 @@ export default function DerivPage() {
   return (
     <AppLayout title="Deriv Indices">
       <div className="space-y-4">
+
+        {/* Prix live marchés de référence */}
+        <div className="flex flex-wrap items-center gap-2">
+          {MARKET_TICKERS.map(({ key, label }) => {
+            const price = prices[key];
+            return (
+              <div key={key} className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg">
+                <span className="text-xs text-gray-500 font-medium">{label}</span>
+                <span className="text-sm font-mono font-semibold text-white">
+                  {price ? `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                </span>
+                <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+              </div>
+            );
+          })}
+          <div className="flex items-center gap-1.5 px-2 text-xs ml-auto" title={connected ? 'Flux live actif' : 'Déconnecté'}>
+            {connected
+              ? <><Wifi className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">LIVE</span></>
+              : <><WifiOff className="w-3.5 h-3.5 text-gray-600" /><span className="text-gray-600">OFF</span></>}
+          </div>
+        </div>
 
         {/* Status bar */}
         <div className={`flex items-center gap-3 p-3 rounded-xl border text-sm ${

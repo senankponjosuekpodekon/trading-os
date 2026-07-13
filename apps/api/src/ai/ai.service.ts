@@ -28,6 +28,13 @@ export class AiService {
     return data;
   }
 
+  async reviewPosition(positionData: any): Promise<any> {
+    const { data } = await firstValueFrom(
+      this.http.post(`${this.engineUrl}/llm/review-position`, positionData),
+    );
+    return data;
+  }
+
   async health(): Promise<any> {
     const { data } = await firstValueFrom(
       this.http.get(`${this.engineUrl}/llm/health`),

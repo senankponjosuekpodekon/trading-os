@@ -64,11 +64,17 @@ def detect_regime(
     atr_val = float(atr_raw.ewm(span=14, adjust=False).mean().iloc[-1])
     atr_pct = (atr_val / close_val * 100) if close_val > 0 else 0
 
+    # Percentile ATR relatif à l'historique de l'actif (top 10% = VOLATILE pour CET actif)
+    # Évite que Forex (ATR% ~0.1%) ne soit jamais VOLATILE avec un seuil absolu global
+    atr_pct_series = (atr_raw / close * 100).dropna()
+    atr_percentile = float(atr_pct_series.rank(pct=True).iloc[-1]) if len(atr_pct_series) >= 20 else 0.5
+    is_volatile = atr_pct >= atr_volatile_threshold_pct or atr_percentile >= 0.90
+
     above_ema200 = close_val > ema200_val
 
-    if atr_pct >= atr_volatile_threshold_pct:
+    if is_volatile:
         regime = "VOLATILE"
-        desc   = f"Marché volatile (ATR {atr_pct:.2f}%) — tailles réduites recommandées"
+        desc   = f"Marché volatile (ATR {atr_pct:.2f}%, percentile {atr_percentile:.0%}) — tailles réduites recommandées"
     elif adx_val >= adx_trend_threshold:
         if plus_di_val > minus_di_val and above_ema200:
             regime = "TRENDING_BULL"
@@ -89,6 +95,7 @@ def detect_regime(
         "plus_di":        round(plus_di_val, 2),
         "minus_di":       round(minus_di_val, 2),
         "atr_pct":        round(atr_pct, 2),
+        "atr_percentile": round(atr_percentile, 2),
         "ema200":         round(ema200_val, 4),
         "above_ema200":   above_ema200,
         "description":    desc,

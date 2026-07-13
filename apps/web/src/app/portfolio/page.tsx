@@ -3,11 +3,12 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   TrendingUp, TrendingDown, X, Plus, AlertCircle, RefreshCw,
-  Calculator, Zap, History, Activity,
+  Calculator, Zap, History, Activity, ChevronLeft, ChevronRight, Bot,
 } from 'lucide-react';
 import axios from 'axios';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
+import { useTradingStore } from '@/store/trading.store';
 import { Portfolio, PortfolioSummary, Position, Signal } from '@/types';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
@@ -50,7 +51,12 @@ export default function PortfolioPage() {
   const [riskCalc,    setRiskCalc]    = useState<any>(null);
   const [riskPct,     setRiskPct]     = useState('1.0');
   const [calcLoading, setCalcLoading] = useState(false);
+  const [histPage,    setHistPage]    = useState(0);
+  const [formError,   setFormError]   = useState<string | null>(null);
+  const [aiReview,    setAiReview]    = useState<{ positionId: string; text: string; pnl: number | null } | null>(null);
   const qc = useQueryClient();
+
+  const HIST_PAGE_SIZE = 10;
 
   const calcRisk = async () => {
     if (!form.entryPrice || !form.stopLoss || !portfolio) return;
@@ -94,11 +100,8 @@ export default function PortfolioPage() {
     refetchInterval: 30_000,
   });
 
-  // Signaux actifs pour paper trading (J16)
-  const { data: signals } = useQuery<Signal[]>({
-    queryKey: ['signals'],
-    queryFn: async () => (await api.get('/signals?limit=10')).data.data,
-  });
+  // Signaux actifs depuis le store global
+  const signals = useTradingStore(s => s.signals) as Signal[];
 
   const activeSignals = signals?.filter(s => s.signal !== 'NEUTRAL') ?? [];
 
@@ -122,6 +125,13 @@ export default function PortfolioPage() {
     },
   });
 
+  const reviewWithAI = useMutation({
+    mutationFn: (positionId: string) => api.post(`/ai/review/position/${positionId}`, {}),
+    onSuccess: (res, positionId) => {
+      setAiReview({ positionId, text: res.data.ai_review, pnl: res.data.pnl ?? null });
+    },
+  });
+
   const openFromSignal = useMutation({
     mutationFn: (signalId: string) => api.post(`/positions/from-signal/${signalId}`, {}),
     onSuccess: () => {
@@ -133,13 +143,22 @@ export default function PortfolioPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!portfolio) return;
+    const entry = parseFloat(form.entryPrice);
+    const qty   = parseFloat(form.quantity);
+    const cost  = entry * qty;
+    const avail = parseFloat(portfolio.currentCapital);
+    if (cost > avail) {
+      setFormError(`Capital insuffisant : coût estimé $${cost.toLocaleString('en-US', { maximumFractionDigits: 2 })} > disponible $${avail.toLocaleString('en-US', { maximumFractionDigits: 2 })}. Réduisez la quantité ou utilisez le Risk Engine.`);
+      return;
+    }
     openPosition.mutate({
       portfolioId: portfolio.id,
       assetSymbol: form.assetSymbol,
       direction: form.direction,
-      entryPrice: parseFloat(form.entryPrice),
-      quantity: parseFloat(form.quantity),
+      entryPrice: entry,
+      quantity: qty,
       stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : undefined,
       takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : undefined,
     });
@@ -230,7 +249,19 @@ export default function PortfolioPage() {
         {/* Formulaire manuel */}
         {showForm && (
           <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
-            <h3 className="text-sm font-semibold text-white">Ouvrir une position manuellement</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Ouvrir une position manuellement</h3>
+              {form.entryPrice && form.quantity && (
+                <span className="text-xs text-gray-400">
+                  Coût estimé : <span className={`font-mono font-semibold ${
+                    parseFloat(form.entryPrice) * parseFloat(form.quantity) > parseFloat(portfolio?.currentCapital ?? '0')
+                      ? 'text-red-400' : 'text-white'
+                  }`}>${(parseFloat(form.entryPrice) * parseFloat(form.quantity)).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+                  {' / '}${parseFloat(portfolio?.currentCapital ?? '0').toLocaleString('en-US', { maximumFractionDigits: 2 })} dispo
+                </span>
+              )}
+            </div>
+            {formError && <ErrorBox message={formError} />}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-400 mb-1">Actif</label>
@@ -473,25 +504,48 @@ export default function PortfolioPage() {
         )}
 
         {/* Onglet HISTORIQUE */}
-        {tab === 'history' && (
+        {tab === 'history' && (() => {
+          const closed = summary?.positions?.filter((p: Position) => p.status === 'CLOSED') ?? [];
+          const totalPages = Math.ceil(closed.length / HIST_PAGE_SIZE);
+          const paginated  = closed.slice(histPage * HIST_PAGE_SIZE, (histPage + 1) * HIST_PAGE_SIZE);
+          return (
+          <div className="space-y-3">
+            {closed.length > HIST_PAGE_SIZE && (
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs text-gray-500">
+                  {histPage * HIST_PAGE_SIZE + 1}–{Math.min((histPage + 1) * HIST_PAGE_SIZE, closed.length)} sur {closed.length} trades
+                </span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setHistPage(p => Math.max(0, p - 1))} disabled={histPage === 0}
+                    className="p-1.5 rounded-lg bg-gray-900 border border-gray-800 text-gray-400 hover:text-white disabled:opacity-30 transition-colors">
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-xs text-gray-400 px-2">{histPage + 1} / {totalPages}</span>
+                  <button onClick={() => setHistPage(p => Math.min(totalPages - 1, p + 1))} disabled={(histPage + 1) * HIST_PAGE_SIZE >= closed.length}
+                    className="p-1.5 rounded-lg bg-gray-900 border border-gray-800 text-gray-400 hover:text-white disabled:opacity-30 transition-colors">
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
             {/* Desktop table */}
             <div className="hidden md:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800 bg-gray-800/50">
-                    {['Actif', 'Dir.', 'Entrée', 'Sortie', 'PnL $', 'PnL %', 'Date'].map(h => (
+                    {['Actif', 'Dir.', 'Entrée', 'Sortie', 'PnL $', 'PnL %', 'Date', ''].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
-                  {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').length === 0 && (
+                  {paginated.length === 0 && (
                     <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-600">
                       <History className="w-8 h-8 inline mb-2 block mx-auto" />Aucun trade clôturé
                     </td></tr>
                   )}
-                  {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').map((p: Position) => {
+                  {paginated.map((p: Position) => {
                     const pnl = parseFloat(String(p.pnl ?? 0));
                     const pct = parseFloat(String(p.pnlPercent ?? 0));
                     return (
@@ -511,6 +565,18 @@ export default function PortfolioPage() {
                         <td className="px-4 py-3 text-gray-600 text-xs">
                           {p.closedAt ? new Date(p.closedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
                         </td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => reviewWithAI.mutate(p.id)}
+                            disabled={reviewWithAI.isPending}
+                            title="Analyse IA du trade"
+                            className="flex items-center gap-1 px-2 py-1 text-xs text-purple-400 border border-purple-400/20 rounded-lg hover:bg-purple-400/10 disabled:opacity-40 transition-colors">
+                            {reviewWithAI.isPending && reviewWithAI.variables === p.id
+                              ? <RefreshCw className="w-3 h-3 animate-spin" />
+                              : <Bot className="w-3 h-3" />}
+                            IA
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -520,13 +586,13 @@ export default function PortfolioPage() {
 
             {/* Mobile cards */}
             <div className="md:hidden p-4 space-y-3">
-              {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').length === 0 && (
+              {paginated.length === 0 && (
                 <div className="flex flex-col items-center gap-2 text-gray-600 py-8">
                   <History className="w-8 h-8" />
                   <p>Aucun trade clôturé</p>
                 </div>
               )}
-              {summary?.positions?.filter((p: Position) => p.status === 'CLOSED').map((p: Position) => {
+              {paginated.map((p: Position) => {
                 const pnl = parseFloat(String(p.pnl ?? 0));
                 const pct = parseFloat(String(p.pnlPercent ?? 0));
                 return (
@@ -557,14 +623,63 @@ export default function PortfolioPage() {
                       <span className={`font-mono text-xs ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
                       </span>
+                      <button
+                        onClick={() => reviewWithAI.mutate(p.id)}
+                        disabled={reviewWithAI.isPending}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-purple-400 border border-purple-400/20 rounded-lg hover:bg-purple-400/10 disabled:opacity-40 transition-colors">
+                        {reviewWithAI.isPending && reviewWithAI.variables === p.id
+                          ? <RefreshCw className="w-3 h-3 animate-spin" />
+                          : <Bot className="w-3 h-3" />}
+                        Analyse IA
+                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
           </div>
-        )}
+          </div>
+          );
+        })()}
       </div>
+
+      {/* Modal analyse IA */}
+      {aiReview && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setAiReview(null)}>
+          <div className="bg-gray-900 border border-purple-500/30 rounded-2xl max-w-2xl w-full flex flex-col" style={{ maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <Bot className="w-5 h-5 text-purple-400" />
+                <span className="text-white font-semibold">Analyse IA du trade</span>
+              </div>
+              <button onClick={() => setAiReview(null)} className="text-gray-500 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* PnL badge */}
+            {aiReview.pnl !== null && (
+              <div className={`mx-6 mt-4 shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold ${
+                aiReview.pnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+              }`}>
+                {aiReview.pnl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                PnL : {aiReview.pnl >= 0 ? '+' : ''}${aiReview.pnl.toFixed(2)}
+              </div>
+            )}
+            {/* Contenu scrollable */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <pre className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap font-sans break-words">{aiReview.text}</pre>
+            </div>
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-800 shrink-0">
+              <button onClick={() => setAiReview(null)}
+                className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg text-sm transition-colors">
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

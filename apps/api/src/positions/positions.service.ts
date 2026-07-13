@@ -134,7 +134,7 @@ export class PositionsService {
       }),
       this.prisma.portfolio.update({
         where: { id: position.portfolioId },
-        data: { currentCapital: { increment: proceeds + pnl } },
+        data: { currentCapital: { increment: proceeds } },
       }),
     ]);
 
@@ -211,15 +211,30 @@ export class PositionsService {
     if (!portfolio) throw new NotFoundException('No portfolio found');
 
     const capital    = parseFloat(portfolio.currentCapital.toString());
-    const riskAmt    = capital * 0.01;
+    const riskPct    = 0.01;  // 1% risque par défaut
+    const riskAmt    = capital * riskPct;
     const entryPrice = signal.entryPrice ? parseFloat(signal.entryPrice.toString()) : null;
     if (!entryPrice) throw new BadRequestException('Signal has no entry price');
 
     const slPrice = signal.stopLoss ? parseFloat(signal.stopLoss.toString()) : null;
-    const slDist  = slPrice ? Math.abs(entryPrice - slPrice) : entryPrice * 0.01;
-    const qty     = parseFloat((riskAmt / slDist).toFixed(6));
-    const cost    = entryPrice * qty;
-    if (cost > capital) throw new BadRequestException('Insufficient capital');
+    const slDist  = slPrice ? Math.abs(entryPrice - slPrice) : entryPrice * 0.015;
+
+    // Sizing par SL-distance (méthode standard)
+    let qty = parseFloat((riskAmt / slDist).toFixed(6));
+    let cost = entryPrice * qty;
+
+    // Safety cap : le coût ne peut pas dépasser 20% du capital disponible.
+    // Se produit quand le SL est très serré (slDist petite -> qty explose).
+    // Dans ce cas on redimensionne la position sur la limite de coût.
+    const MAX_COST_RATIO = 0.20;
+    if (cost > capital * MAX_COST_RATIO) {
+      cost = capital * MAX_COST_RATIO;
+      qty  = parseFloat((cost / entryPrice).toFixed(6));
+    }
+
+    if (cost > capital) throw new BadRequestException(
+      `Capital insuffisant : coût estimé $${cost.toFixed(2)} > capital disponible $${capital.toFixed(2)}`
+    );
 
     const [position] = await this.prisma.$transaction([
       this.prisma.position.create({

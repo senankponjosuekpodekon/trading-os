@@ -1,12 +1,16 @@
 import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { SignalsService } from './signals.service';
+import { SignalOutcomeService } from './signal-outcome.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('signals')
 @UseGuards(JwtAuthGuard)
 export class SignalsController {
-  constructor(private signalsService: SignalsService) {}
+  constructor(
+    private signalsService: SignalsService,
+    private outcomeService: SignalOutcomeService,
+  ) {}
 
   @Get()
   findAll(
@@ -25,5 +29,10 @@ export class SignalsController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   triggerScan(@Body() body: { symbols: string[]; timeframe?: string }) {
     return this.signalsService.triggerScan(body.symbols, body.timeframe ?? '1h');
+  }
+
+  @Get('stats')
+  getStats(@Query('market') market?: string) {
+    return this.outcomeService.getStats(market);
   }
 }

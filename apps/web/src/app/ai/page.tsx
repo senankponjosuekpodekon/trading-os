@@ -100,19 +100,42 @@ export default function AiPage() {
       const positions = summary?.positions ?? [];
       const closed = positions.filter((p: any) => p.status === 'CLOSED');
       const wins   = closed.filter((p: any) => parseFloat(p.pnl ?? 0) > 0);
-      const trades = closed.map((p: any) => ({
-        symbol:    p.asset?.symbol,
-        direction: p.direction,
-        pnl:       parseFloat(p.pnl ?? 0),
-        pnl_pct:   parseFloat(p.pnlPercent ?? 0),
-      }));
+      const trades = closed.map((p: any) => {
+        const entry = parseFloat(p.entryPrice ?? 0);
+        const qty   = parseFloat(p.quantity ?? 0);
+        const sl    = p.stopLoss   ? parseFloat(p.stopLoss)   : null;
+        const tp    = p.takeProfit ? parseFloat(p.takeProfit) : null;
+        const cost  = parseFloat((entry * qty).toFixed(2));
+        const pnl   = parseFloat(p.pnl ?? 0);
+        const pnlPct = parseFloat(p.pnlPercent ?? 0);
+        return {
+          symbol:      p.asset?.symbol,
+          direction:   p.direction,
+          entry_price: entry,
+          exit_price:  p.exitPrice ? parseFloat(p.exitPrice) : null,
+          quantity:    qty,
+          cost,
+          stop_loss:   sl,
+          take_profit: tp,
+          pnl,
+          pnl_pct:     pnlPct,
+          max_gain:    tp   ? parseFloat((Math.abs(tp - entry) * qty).toFixed(2)) : null,
+          max_loss:    sl   ? parseFloat((Math.abs(entry - sl) * qty).toFixed(2)) : null,
+          opened_at:   p.openedAt,
+          closed_at:   p.closedAt,
+        };
+      });
       const best  = trades.length ? trades.reduce((a: any, b: any) => a.pnl > b.pnl ? a : b) : null;
       const worst = trades.length ? trades.reduce((a: any, b: any) => a.pnl < b.pnl ? a : b) : null;
+      const totalCost = trades.reduce((s: number, t: any) => s + t.cost, 0);
+      const capitalInfo = summary?.capital ?? null;
 
       const { data } = await api.post('/ai/weekly-report', {
         trades,
         win_rate:    closed.length ? (wins.length / closed.length) * 100 : 0,
         total_pnl:   trades.reduce((s: number, t: any) => s + t.pnl, 0),
+        total_cost:  totalCost,
+        capital:     capitalInfo,
         best_trade:  best,
         worst_trade: worst,
         language:    'fr',

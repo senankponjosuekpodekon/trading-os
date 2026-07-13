@@ -42,6 +42,21 @@ export interface Drawing {
   p2?: { time: number; price: number };
 }
 
+export interface IndicatorSeries {
+  ema20?:  { time: number; value: number }[];
+  ema50?:  { time: number; value: number }[];
+  bbUpper?: { time: number; value: number }[];
+  bbLower?: { time: number; value: number }[];
+  rsi?:    { time: number; value: number }[];
+}
+
+export interface PriceLevel {
+  price: number;
+  color: string;
+  label: string;
+  style?: 'solid' | 'dashed';
+}
+
 interface Props {
   data:         OHLCBar[];
   markers?:     ChartMarker[];
@@ -50,6 +65,9 @@ interface Props {
   activeTool?:  DrawingTool;
   drawings?:    Drawing[];
   onDrawingsChange?: (d: Drawing[]) => void;
+  indicators?:  IndicatorSeries;
+  levels?:      PriceLevel[];
+  showRsi?:     boolean;
 }
 
 const DRAWING_COLORS: Record<DrawingTool, string> = {
@@ -67,9 +85,14 @@ export function CandlestickChart({
   activeTool    = 'pointer',
   drawings      = [],
   onDrawingsChange,
+  indicators    = {},
+  levels        = [],
+  showRsi       = true,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const rsiContainerRef = useRef<HTMLDivElement>(null);
   const chartRef     = useRef<IChartApi | null>(null);
+  const rsiChartRef  = useRef<IChartApi | null>(null);
   const candleRef    = useRef<ISeriesApi<'Candlestick'> | null>(null);
   // Map drawing id → series references for cleanup
   const drawingSeriesRef = useRef<Map<string, ISeriesApi<any>[]>>(new Map());
@@ -169,7 +192,12 @@ export function CandlestickChart({
       borderUpColor: '#34d399', borderDownColor: '#f87171',
       wickUpColor: '#34d399', wickDownColor: '#f87171',
     });
-    candleSeries.setData(data.map(b => ({
+    // Trier par time croissant et supprimer les doublons (yfinance/TwelveData peuvent en produire)
+    const seen = new Set<number>();
+    const cleanData = [...data]
+      .sort((a, b) => (a.time as number) - (b.time as number))
+      .filter(b => { const t = b.time as number; if (seen.has(t)) return false; seen.add(t); return true; });
+    candleSeries.setData(cleanData.map(b => ({
       time: b.time as any, open: b.open, high: b.high, low: b.low, close: b.close,
     })));
     candleRef.current = candleSeries;
@@ -181,17 +209,94 @@ export function CandlestickChart({
         color: '#6b7280', priceFormat: { type: 'volume' }, priceScaleId: 'vol',
       });
       chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-      volSeries.setData(data.map(b => ({
+      volSeries.setData(cleanData.map(b => ({
         time: b.time as any, value: b.volume,
         color: b.close >= b.open ? '#34d39940' : '#f8717140',
       })));
     }
 
+    // ── Indicateurs overlay ──────────────────────────────────────
+    if (indicators.ema20 && indicators.ema20.length > 0) {
+      const s = chart.addSeries(LineSeries, {
+        color: '#f59e0b', lineWidth: 1, priceLineVisible: false,
+        lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      s.setData(indicators.ema20 as any);
+    }
+    if (indicators.ema50 && indicators.ema50.length > 0) {
+      const s = chart.addSeries(LineSeries, {
+        color: '#818cf8', lineWidth: 1, priceLineVisible: false,
+        lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      s.setData(indicators.ema50 as any);
+    }
+    if (indicators.bbUpper && indicators.bbUpper.length > 0) {
+      const sUp = chart.addSeries(LineSeries, {
+        color: '#6b7280', lineWidth: 1, lineStyle: LineStyle.Dashed,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      sUp.setData(indicators.bbUpper as any);
+    }
+    if (indicators.bbLower && indicators.bbLower.length > 0) {
+      const sDn = chart.addSeries(LineSeries, {
+        color: '#6b7280', lineWidth: 1, lineStyle: LineStyle.Dashed,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      sDn.setData(indicators.bbLower as any);
+    }
+
+    // ── Niveaux Entry / SL / TP ─────────────────────────────────
+    levels.forEach(lv => {
+      candleSeries.createPriceLine({
+        price:          lv.price,
+        color:          lv.color,
+        lineWidth:      1,
+        lineStyle:      lv.style === 'dashed' ? LineStyle.Dashed : LineStyle.Solid,
+        axisLabelVisible: true,
+        title:          lv.label,
+      });
+    });
+
     chart.timeScale().fitContent();
     renderDrawings(chart, drawings);
 
+    // ── RSI chart ────────────────────────────────────────────────
+    if (showRsi && indicators.rsi && indicators.rsi.length > 0 && rsiContainerRef.current) {
+      const rsiChart = createChart(rsiContainerRef.current, {
+        layout: { background: { type: ColorType.Solid, color: '#111827' }, textColor: '#9ca3af' },
+        grid:   { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+        crosshair: { mode: CrosshairMode.Normal },
+        rightPriceScale: { borderColor: '#374151', scaleMargins: { top: 0.1, bottom: 0.1 } },
+        timeScale: { borderColor: '#374151', timeVisible: true, secondsVisible: false },
+        width:  rsiContainerRef.current.clientWidth,
+        height: 100,
+      });
+      rsiChartRef.current = rsiChart;
+
+      const rsiSeries = rsiChart.addSeries(LineSeries, {
+        color: '#a78bfa', lineWidth: 1,
+        priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: true,
+      });
+      rsiSeries.setData(indicators.rsi as any);
+      // Lignes 30/70
+      rsiSeries.createPriceLine({ price: 70, color: '#f8717160', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '70' });
+      rsiSeries.createPriceLine({ price: 30, color: '#34d39960', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '30' });
+      rsiSeries.createPriceLine({ price: 50, color: '#6b728060', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' });
+
+      // Synchroniser les timescales
+      chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
+      });
+      rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) chart.timeScale().setVisibleLogicalRange(range);
+      });
+      rsiChart.timeScale().fitContent();
+    }
+
     const ro = new ResizeObserver(() => {
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+      if (rsiContainerRef.current && rsiChartRef.current)
+        rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth });
     });
     ro.observe(containerRef.current);
 
@@ -199,9 +304,10 @@ export function CandlestickChart({
       ro.disconnect();
       chart.remove();
       chartRef.current = null;
+      if (rsiChartRef.current) { rsiChartRef.current.remove(); rsiChartRef.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, markers, height, showVolume]);
+  }, [data, markers, height, showVolume, indicators, levels, showRsi]);
 
   // Re-render drawings when they change
   useEffect(() => {
@@ -250,19 +356,31 @@ export function CandlestickChart({
     activeTool === 'trendline' ? 'cursor-crosshair' :
     'cursor-crosshair';
 
+  const hasRsi = showRsi && (indicators.rsi?.length ?? 0) > 0;
+
   return (
-    <div className="relative">
-      {activeTool !== 'pointer' && pendingRef.current && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 text-xs text-yellow-400 bg-gray-900/80 border border-yellow-400/30 px-3 py-1 rounded-full pointer-events-none">
-          Cliquez sur le deuxième point…
+    <>
+      <div className="relative">
+        {activeTool !== 'pointer' && pendingRef.current && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 text-xs text-yellow-400 bg-gray-900/80 border border-yellow-400/30 px-3 py-1 rounded-full pointer-events-none">
+            Cliquez sur le deuxième point…
+          </div>
+        )}
+        <div
+          ref={containerRef}
+          style={{ width: '100%', height }}
+          className={cursorClass}
+          onClick={handleClick}
+        />
+      </div>
+      {hasRsi && (
+        <div className="border-t border-gray-800">
+          <div className="flex items-center gap-2 px-3 pt-1 pb-0">
+            <span className="text-[10px] font-medium text-violet-400">RSI(14)</span>
+          </div>
+          <div ref={rsiContainerRef} style={{ width: '100%', height: 100 }} />
         </div>
       )}
-      <div
-        ref={containerRef}
-        style={{ width: '100%', height }}
-        className={cursorClass}
-        onClick={handleClick}
-      />
-    </div>
+    </>
   );
 }

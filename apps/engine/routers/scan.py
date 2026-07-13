@@ -19,23 +19,53 @@ from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
 from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
+from routers.portfolio_risk import analyze_portfolio_risk, get_cluster
 import config
 from utils.cache import get_cached, set_cached
 from utils.logger import get_logger
 from utils.http import retry_async
 
 logger = get_logger(__name__)
-_executor = ThreadPoolExecutor(max_workers=4)
+_executor = ThreadPoolExecutor(max_workers=8)
 
 # Actifs précalculés en background
 ACTIVE_SYMBOLS = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "AVAX/USDT",
     "ADA/USDT", "XRP/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT",
-    "EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "WTI/USD",
+    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD",
+    "XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD",
+    "VIX75/USD", "VIX25/USD", "VIX10/USD",
+    "BOOM1000/USD", "CRASH1000/USD",
 ]
-WARMUP_TIMEFRAMES = ["1h", "4h"]
-WARMUP_INTERVAL_SECONDS = 30
-WARMUP_TTL_SECONDS = 45
+
+# Actifs Binance prioritaires → scan rapide (Binance = gratuit, sans limite)
+BINANCE_PRIORITY_SYMBOLS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
+    "AVAX/USDT", "XRP/USDT", "LINK/USDT", "ADA/USDT",
+    "DOT/USDT", "MATIC/USDT",
+]
+
+# Timeframes par catégorie
+WARMUP_TIMEFRAMES_FAST  = ["15m", "1h"]       # Binance prioritaire — cycle 60s
+WARMUP_TIMEFRAMES_SLOW  = ["1h", "4h"]        # non-Binance — cycle 5 min
+
+WARMUP_INTERVAL_FAST    = 60                   # secondes — Binance prioritaire
+WARMUP_INTERVAL_SLOW    = 300                  # secondes — Forex/Deriv/Commodités
+WARMUP_TTL_FAST         = 90                   # TTL cache pour actifs rapides
+WARMUP_TTL_SLOW         = 360                  # TTL cache pour actifs lents
+
+# Compat legacy
+WARMUP_TIMEFRAMES        = WARMUP_TIMEFRAMES_SLOW
+WARMUP_INTERVAL_SECONDS  = WARMUP_INTERVAL_FAST
+WARMUP_TTL_SECONDS       = WARMUP_TTL_FAST
+
+# Hystérésis flip-flop : mémoire d'état par (symbol, timeframe)
+# Structure : { "BTC/USDT:1h": {"signal": "BUY", "count": 2, "ts": <monotonic>} }
+# Un signal est «hystérésis-confirmé» seulement après 2 scans consécutifs dans la même direction.
+# Bande morte asymmétrique : repasser NEUTRAL exige score < 25, pas juste < 40.
+_signal_state: dict[str, dict] = {}
+_HYSTERESIS_CONFIRM = 2   # scans consécutifs pour confirmer
+_HYSTERESIS_TTL     = 3600  # réinitialise l'état après 1h sans scan
 
 router = APIRouter()
 
@@ -66,11 +96,75 @@ SYMBOL_TO_TWELVEDATA = {
     "AUD/USD": "AUD/USD",
     "USD/CHF": "USD/CHF",
     "USD/CAD": "USD/CAD",
+    "NZD/USD": "NZD/USD",
     "XAU/USD": "XAU/USD",
     "XAG/USD": "XAG/USD",
+    "WTI/USD": "WTI/USD",
+    "BRENT/USD": "BRENT/USD",
+}
+
+# Symboles disponibles via yfinance (fallback gratuit, sans clé API)
+# Utilisé quand Twelve Data n'est pas configuré OU pour commodités/VIX
+SYMBOL_TO_YFINANCE = {
+    "EUR/USD":   "EURUSD=X",
+    "GBP/USD":   "GBPUSD=X",
+    "USD/JPY":   "JPY=X",
+    "AUD/USD":   "AUDUSD=X",
+    "USD/CHF":   "CHF=X",
+    "USD/CAD":   "CAD=X",
+    "NZD/USD":   "NZDUSD=X",
+    "XAU/USD":   "GC=F",      # Gold Futures
+    "XAG/USD":   "SI=F",      # Silver Futures
+    "WTI/USD":   "CL=F",      # WTI Crude Oil Futures
+    "BRENT/USD": "BZ=F",      # Brent Crude Futures
+}
+
+# Conversion timeframe interne → yfinance interval
+TF_TO_YF: dict = {
+    "1m": "1m",  "5m": "5m",  "15m": "15m",
+    "1h": "1h",  "4h": "1h",   "1d": "1d",   # yfinance n'a pas 4h natif
+}
+
+# Période yfinance selon le timeframe (pour obtenir ~300 bougies)
+TF_TO_YF_PERIOD: dict = {
+    "1m": "7d", "5m": "60d", "15m": "60d",
+    "1h": "730d", "4h": "730d", "1d": "5y",
 }
 
 TWELVE_DATA_API_KEY = config.settings.twelve_data_api_key
+DERIV_API_TOKEN     = config.settings.deriv_api_token
+
+_CACHE_TTL_YF    = 300  # yfinance : cache 5 min
+_CACHE_TTL_DERIV = 60   # Deriv : cache 1 min
+
+# Mapping symboles internes → identifiants API Deriv
+SYMBOL_TO_DERIV = {
+    # Volatility Indices
+    "VIX10/USD":   "R_10",
+    "VIX25/USD":   "R_25",
+    "VIX50/USD":   "R_50",
+    "VIX75/USD":   "R_75",
+    "VIX100/USD":  "R_100",
+    # Boom & Crash
+    "BOOM300/USD":   "BOOM300",
+    "BOOM500/USD":   "BOOM500",
+    "BOOM1000/USD":  "BOOM1000",
+    "CRASH300/USD":  "CRASH300",
+    "CRASH500/USD":  "CRASH500",
+    "CRASH1000/USD": "CRASH1000",
+    # Jump Indices
+    "JUMP10/USD":  "JD10",
+    "JUMP25/USD":  "JD25",
+    "JUMP50/USD":  "JD50",
+    "JUMP75/USD":  "JD75",
+    "JUMP100/USD": "JD100",
+}
+
+# Conversion timeframe → granularité Deriv en secondes
+TF_TO_DERIV_GRANULARITY: dict = {
+    "1m": 60, "5m": 300, "15m": 900,
+    "1h": 3600, "4h": 14400, "1d": 86400,
+}
 
 # Conversion timeframe interne → Twelve Data
 TF_TO_TD: dict = {
@@ -79,6 +173,16 @@ TF_TO_TD: dict = {
 }
 
 TF_MAP = {"1m":"1m","5m":"5m","15m":"15m","1h":"1h","4h":"4h","1d":"1d"}
+
+# Durée en ms de chaque timeframe — utilisé pour détecter la bougie non clôturée
+TF_TO_MS: dict[str, int] = {
+    "1m":    60_000,
+    "5m":   300_000,
+    "15m":  900_000,
+    "1h":  3_600_000,
+    "4h": 14_400_000,
+    "1d": 86_400_000,
+}
 
 
 class ScanRequest(BaseModel):
@@ -110,7 +214,9 @@ _http_client: Optional[httpx.AsyncClient] = None
 _klines_cache: dict = {}  # key -> (timestamp, df)
 _CACHE_TTL = 60  # secondes
 _CACHE_TTL_TD = 300  # Twelve Data: 5min (limite 800 req/jour sur plan gratuit)
-_TD_SEMAPHORE = asyncio.Semaphore(1)  # Twelve Data : un appel à la fois pour éviter le 429
+_TD_SEMAPHORE   = asyncio.Semaphore(1)  # Twelve Data : un appel à la fois pour éviter le 429
+_TD_MIN_DELAY   = 1.2   # secondes entre 2 appels Twelve Data (~50 req/min sur plan gratuit)
+_td_last_call   = 0.0   # timestamp monotonic du dernier appel
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -147,9 +253,15 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
     }
 
     async def _do_fetch():
+        global _td_last_call
         async with _TD_SEMAPHORE:
+            # Respecter le délai minimum entre deux appels Twelve Data
+            elapsed = time.monotonic() - _td_last_call
+            if elapsed < _TD_MIN_DELAY:
+                await asyncio.sleep(_TD_MIN_DELAY - elapsed)
             client = _get_http_client()
             r = await client.get(url, params=params)
+            _td_last_call = time.monotonic()
             r.raise_for_status()
             return r.json()
 
@@ -171,10 +283,149 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
         for col in ["open", "high", "low", "close"]:
             df[col] = df[col].astype(float)
         df["volume"] = df.get("volume", pd.Series([0.0] * len(df))).astype(float)
-        df["time"] = pd.to_datetime(df["time"]).astype(int) // 10**9
+        df["time"] = pd.to_datetime(df["time"]).map(lambda t: int(t.timestamp()))
         _klines_cache[cache_key] = (time.monotonic(), df)
         return df
     except Exception:
+        return None
+
+
+async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
+    """Fetch OHLCV depuis l'API Deriv WebSocket — pour les indices synthétiques (V75, Boom/Crash, Jump)."""
+    import websockets, json as _json
+    deriv_sym = SYMBOL_TO_DERIV.get(symbol)
+    if not deriv_sym:
+        return None
+
+    granularity = TF_TO_DERIV_GRANULARITY.get(interval, 3600)
+    cache_key   = f"deriv:{deriv_sym}:{granularity}:{limit}"
+    now = time.monotonic()
+    if cache_key in _klines_cache:
+        ts, df = _klines_cache[cache_key]
+        if now - ts < _CACHE_TTL_DERIV:
+            return df
+
+    ws_url = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+    payload = {
+        "ticks_history": deriv_sym,
+        "adjust_start_time": 1,
+        "count": limit,
+        "end": "latest",
+        "granularity": granularity,
+        "style": "candles",
+    }
+
+    try:
+        async with websockets.connect(ws_url, ping_interval=None) as ws:
+            await ws.send(_json.dumps(payload))
+            raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+            data = _json.loads(raw)
+
+        if "error" in data or "candles" not in data:
+            return None
+
+        candles_raw = data["candles"]
+        df = pd.DataFrame([
+            {
+                "time":   c["epoch"],
+                "open":   float(c["open"]),
+                "high":   float(c["high"]),
+                "low":    float(c["low"]),
+                "close":  float(c["close"]),
+                "volume": 0.0,
+            }
+            for c in candles_raw
+        ])
+        _klines_cache[cache_key] = (time.monotonic(), df)
+        return df
+    except Exception as exc:
+        logger.warning("deriv_klines_error", symbol=symbol, error=str(exc))
+        return None
+
+
+async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
+    """Fetch OHLCV via yfinance — fallback gratuit pour Forex, commodités."""
+    import datetime as _dt
+    yf_sym = SYMBOL_TO_YFINANCE.get(symbol)
+    if not yf_sym:
+        return None
+
+    yf_interval = TF_TO_YF.get(interval, "1h")
+    cache_key   = f"yf:{yf_sym}:{yf_interval}:{limit}"
+    now = time.monotonic()
+    if cache_key in _klines_cache:
+        ts, df = _klines_cache[cache_key]
+        if now - ts < _CACHE_TTL_YF:
+            return df
+
+    # Calculer la fenêtre start/end pour obtenir ~limit bougies
+    # yfinance limite les données intraday : 7j max pour <=1h, 60j pour <=1h sur Forex
+    _interval_seconds = {
+        "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "1d": 86400,
+    }
+    seconds_per_bar = _interval_seconds.get(yf_interval, 3600)
+    # On demande limit*1.5 barres pour absorber les gaps week-end/nuit
+    needed_seconds = int(seconds_per_bar * limit * 1.5)
+    # Plafond selon les limites yfinance par intervalle
+    _max_seconds = {
+        "1m": 7 * 86400, "5m": 60 * 86400, "15m": 60 * 86400,
+        "1h": 730 * 86400, "1d": 5 * 365 * 86400,
+    }
+    max_sec = _max_seconds.get(yf_interval, 730 * 86400)
+    window  = min(needed_seconds, max_sec)
+    end_dt   = _dt.datetime.utcnow()
+    start_dt = end_dt - _dt.timedelta(seconds=window)
+
+    try:
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        def _download():
+            ticker = yf.Ticker(yf_sym)
+            df_raw = ticker.history(
+                start=start_dt.strftime("%Y-%m-%d"),
+                end=(end_dt + _dt.timedelta(days=1)).strftime("%Y-%m-%d"),
+                interval=yf_interval,
+                auto_adjust=True,
+                actions=False,
+            )
+            return df_raw
+        df_raw = await loop.run_in_executor(_executor, _download)
+        if df_raw is None or df_raw.empty:
+            return None
+        # Normaliser l'index → secondes Unix entières
+        # datetime64[s, tz] : astype int64 = secondes (pas ns) → ne pas diviser
+        # datetime64[ns, tz] : astype int64 = nanosecondes → diviser par 1e9
+        # Méthode robuste : utiliser .timestamp() sur chaque Timestamp
+        times = df_raw.index.map(lambda t: int(t.timestamp()))
+        df = pd.DataFrame({
+            "time":   times.values,
+            "open":   df_raw["Open"].astype(float).values,
+            "high":   df_raw["High"].astype(float).values,
+            "low":    df_raw["Low"].astype(float).values,
+            "close":  df_raw["Close"].astype(float).values,
+            "volume": df_raw["Volume"].astype(float).values,
+        })
+        # Pour 4h : rééchantillonner depuis 1h
+        if interval == "4h" and yf_interval == "1h":
+            df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+            df = df.set_index("time").resample("4h").agg(
+                open=("open", "first"), high=("high", "max"),
+                low=("low", "min"),   close=("close", "last"),
+                volume=("volume", "sum")
+            ).dropna().reset_index()
+            df["time"] = df["time"].map(lambda t: int(t.timestamp()))
+        # Trier, déduplicquer, limiter
+        df = (df.sort_values("time")
+                .drop_duplicates(subset=["time"])
+                .dropna(subset=["close"])
+                .tail(limit)
+                .reset_index(drop=True))
+        if len(df) < 2:
+            return None
+        _klines_cache[cache_key] = (time.monotonic(), df)
+        return df
+    except Exception as exc:
+        logger.warning("yfinance_error", symbol=symbol, error=str(exc))
         return None
 
 
@@ -215,13 +466,35 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
         ])
         for col in ["open","high","low","close","volume"]:
             df[col] = df[col].astype(float)
+        # Exclure la dernière bougie si elle n'est pas encore clôturée (anti-repaint)
+        candle_ms = TF_TO_MS.get(interval, 3_600_000)
+        now_ms = int(_time.time() * 1000)
+        if len(df) > 1 and int(df["time"].iloc[-1]) + candle_ms > now_ms:
+            df = df.iloc[:-1].reset_index(drop=True)
         _klines_cache[cache_key] = (_time.monotonic(), df)
         return df
     except Exception:
         return None
 
 
-def analyze_candles(symbol: str, timeframe: str, df: pd.DataFrame) -> dict:
+# Hiérarchie 3-TF : pour chaque LTF (timeframe d'exécution), définit quel TF intermédiaire
+# et quel TF supérieur sont utilisés pour la confluence.
+# Format : LTF -> (MTF, HTF)
+_TF_HIERARCHY: dict[str, tuple[str, str]] = {
+    "5m":  ("1h",  "4h"),
+    "15m": ("1h",  "4h"),
+    "1h":  ("4h",  "1d"),
+    "4h":  ("1d",  "1d"),   # fallback si 4h est lui-même LTF
+}
+
+
+def analyze_candles(
+    symbol: str,
+    timeframe: str,
+    df: pd.DataFrame,
+    htf_regime: Optional[dict] = None,   # régime TF supérieur (HTF2 = top)
+    mtf_regime: Optional[dict] = None,   # régime TF intermédiaire (HTF1)
+) -> dict:
     if len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data"}
 
@@ -266,80 +539,96 @@ def analyze_candles(symbol: str, timeframe: str, df: pd.DataFrame) -> dict:
     score = 0
     reasons = []
 
-    # EMA alignment
+    # ── Couche 1 : Momentum/Trend (EMA + RSI + MACD groupés, plafond ±50) ──
+    # Les trois mesurent la même dimension (momentum directionnel).
+    # On les regroupe pour éviter qu'une tendance simple sature le score avant
+    # d'atteindre les couches Price Action / SMC qui apportent une info différente.
+    trend_raw = 0.0
+    trend_reasons: list[str] = []
+
+    # EMA : signal structurel fort (alignement long terme)
     if e20_v and e50_v and e200_v:
         if e20_v > e50_v > e200_v and c_val > e200_v:
-            score += 40
-            reasons.append("EMA bullish alignment + above 200")
+            trend_raw += 2.0
+            trend_reasons.append("EMA bullish alignment + above 200")
         elif e20_v < e50_v < e200_v and c_val < e200_v:
-            score -= 40
-            reasons.append("EMA bearish alignment + below 200")
+            trend_raw -= 2.0
+            trend_reasons.append("EMA bearish alignment + below 200")
         elif e20_v > e50_v:
-            score += 20
-            reasons.append("EMA20 > EMA50 bullish")
+            trend_raw += 1.0
+            trend_reasons.append("EMA20 > EMA50 bullish")
         elif e20_v < e50_v:
-            score -= 20
-            reasons.append("EMA20 < EMA50 bearish")
+            trend_raw -= 1.0
+            trend_reasons.append("EMA20 < EMA50 bearish")
+    elif e20_v and e50_v:
+        if e20_v > e50_v:
+            trend_raw += 1.0
+            trend_reasons.append("EMA20 > EMA50 bullish")
+        elif e20_v < e50_v:
+            trend_raw -= 1.0
+            trend_reasons.append("EMA20 < EMA50 bearish")
 
-    # RSI
+    # RSI : confirmation momentum
     if rsi_v:
         if 50 <= rsi_v <= 65:
-            score += 20
-            reasons.append(f"RSI bullish zone ({rsi_v:.1f})")
+            trend_raw += 1.0
+            trend_reasons.append(f"RSI bullish zone ({rsi_v:.1f})")
         elif 35 <= rsi_v <= 50:
-            score -= 20
-            reasons.append(f"RSI bearish zone ({rsi_v:.1f})")
+            trend_raw -= 1.0
+            trend_reasons.append(f"RSI bearish zone ({rsi_v:.1f})")
         elif rsi_v > 70:
-            score -= 10
-            reasons.append(f"RSI overbought ({rsi_v:.1f})")
+            trend_raw -= 0.5
+            trend_reasons.append(f"RSI overbought ({rsi_v:.1f})")
         elif rsi_v < 30:
-            score += 10
-            reasons.append(f"RSI oversold ({rsi_v:.1f})")
+            trend_raw += 0.5
+            trend_reasons.append(f"RSI oversold ({rsi_v:.1f})")
 
-    # Volume
+    # MACD : crossover prioritaire, momentum secondaire
+    if macd_v is not None and macd_sig_v is not None and macd_hist_v is not None:
+        if macd_hist_v > 0 and macd_prev_hist is not None and macd_prev_hist <= 0:
+            trend_raw += 1.0
+            trend_reasons.append(f"MACD bullish crossover ({macd_v:.4f})")
+        elif macd_hist_v < 0 and macd_prev_hist is not None and macd_prev_hist >= 0:
+            trend_raw -= 1.0
+            trend_reasons.append(f"MACD bearish crossover ({macd_v:.4f})")
+        elif macd_hist_v > 0 and macd_v > 0:
+            trend_raw += 0.5
+            trend_reasons.append("MACD bullish momentum")
+        elif macd_hist_v < 0 and macd_v < 0:
+            trend_raw -= 0.5
+            trend_reasons.append("MACD bearish momentum")
+
+    # Conversion trend_raw → score plafonné à ±50
+    trend_contribution = max(-50, min(50, int(trend_raw * 12)))
+    score += trend_contribution
+    reasons += trend_reasons
+
+    # Volume : amplificateur (indépendant du cluster trend)
     if vol_r and vol_r > 1.3:
         score += 10 if score > 0 else -10
         reasons.append(f"Volume spike x{vol_r:.1f}")
 
-    # ATR (volatility check)
+    # ATR : info contextuelle uniquement (pas de score)
     if atr_v and c_val > 0:
         atr_pct = (atr_v / c_val) * 100
         if atr_pct > 0.3:
             reasons.append(f"ATR OK ({atr_pct:.2f}%)")
 
-    # ── MACD (J20) ──
-    if macd_v is not None and macd_sig_v is not None and macd_hist_v is not None:
-        # Crossover bullish : MACD vient de passer au-dessus du signal
-        if macd_hist_v > 0 and macd_prev_hist is not None and macd_prev_hist <= 0:
-            score += 20
-            reasons.append(f"MACD bullish crossover ({macd_v:.4f})")
-        # Crossover bearish
-        elif macd_hist_v < 0 and macd_prev_hist is not None and macd_prev_hist >= 0:
-            score -= 20
-            reasons.append(f"MACD bearish crossover ({macd_v:.4f})")
-        # Histogram momentum
-        elif macd_hist_v > 0 and macd_v > 0:
-            score += 10
-            reasons.append(f"MACD bullish momentum")
-        elif macd_hist_v < 0 and macd_v < 0:
-            score -= 10
-            reasons.append(f"MACD bearish momentum")
-
-    # ── Bollinger Bands (J20) ──
+    # ── Bollinger Bands : signal structurel indépendant (mean reversion / breakout) ──
     if bb_upper_v and bb_lower_v and bb_mid_v:
         bb_pos = (c_val - bb_lower_v) / (bb_upper_v - bb_lower_v) if (bb_upper_v - bb_lower_v) > 0 else 0.5
         if c_val <= bb_lower_v * 1.005:
             score += 15
-            reasons.append(f"Price at BB lower — mean reversion setup")
+            reasons.append("Price at BB lower — mean reversion setup")
         elif c_val >= bb_upper_v * 0.995:
             score -= 15
-            reasons.append(f"Price at BB upper — potential reversal")
+            reasons.append("Price at BB upper — potential reversal")
         elif bb_pos > 0.7 and macd_hist_v and macd_hist_v > 0:
             score += 8
-            reasons.append(f"BB upper half + MACD momentum")
+            reasons.append("BB upper half + MACD momentum")
         elif bb_pos < 0.3 and macd_hist_v and macd_hist_v < 0:
             score -= 8
-            reasons.append(f"BB lower half + MACD momentum")
+            reasons.append("BB lower half + MACD momentum")
         if bb_bw_v and bb_bw_v < 0.02:
             reasons.append(f"BB squeeze (bw={bb_bw_v:.3f}) — breakout imminent")
 
@@ -381,30 +670,108 @@ def analyze_candles(symbol: str, timeframe: str, df: pd.DataFrame) -> dict:
         score += b
         reasons += r
 
-    confidence = min(abs(score), 95)
-    if score >= 40:
-        signal = "BUY"
-    elif score <= -40:
-        signal = "SELL"
-    else:
+    # ── Confluence multi-timeframe (3-TF hierarchy) ──
+    # Règle : on applique d'abord le TF intermédiaire (MTF, poids fort)
+    # puis le TF supérieur (HTF, poids léger car plus éloigné de l'exécution).
+    # MTF : même actif, TF juste au-dessus de l'exécution → décision  (+15/-25)
+    # HTF : contexte macro → confirme/invalide la tendance générale (+10/-15)
+    provisional_dir = "BUY" if score >= 0 else "SELL"
+    hierarchy = _TF_HIERARCHY.get(timeframe, ("4h", "1d"))
+    mtf_label, htf_label = hierarchy
+
+    if mtf_regime:
+        mtf_r = mtf_regime.get("regime", "UNKNOWN")
+        if mtf_r == "TRENDING_BULL" and provisional_dir == "BUY":
+            score += 15
+            reasons.append(f"MTF({mtf_label}): alignement TRENDING_BULL")
+        elif mtf_r == "TRENDING_BULL" and provisional_dir == "SELL":
+            score -= 25
+            reasons.append(f"MTF({mtf_label}): contre-tendance TRENDING_BULL — pénalité")
+        elif mtf_r == "TRENDING_BEAR" and provisional_dir == "SELL":
+            score += 15
+            reasons.append(f"MTF({mtf_label}): alignement TRENDING_BEAR")
+        elif mtf_r == "TRENDING_BEAR" and provisional_dir == "BUY":
+            score -= 25
+            reasons.append(f"MTF({mtf_label}): contre-tendance TRENDING_BEAR — pénalité")
+        elif mtf_r == "VOLATILE":
+            score -= 15
+            reasons.append(f"MTF({mtf_label}): VOLATILE — réduction score")
+
+    if htf_regime:
+        htf_r = htf_regime.get("regime", "UNKNOWN")
+        provisional_dir = "BUY" if score >= 0 else "SELL"  # recalc après MTF
+        if htf_r == "TRENDING_BULL" and provisional_dir == "BUY":
+            score += 10
+            reasons.append(f"HTF({htf_label}): alignement TRENDING_BULL")
+        elif htf_r == "TRENDING_BULL" and provisional_dir == "SELL":
+            score -= 15
+            reasons.append(f"HTF({htf_label}): contre-tendance TRENDING_BULL — pénalité")
+        elif htf_r == "TRENDING_BEAR" and provisional_dir == "SELL":
+            score += 10
+            reasons.append(f"HTF({htf_label}): alignement TRENDING_BEAR")
+        elif htf_r == "TRENDING_BEAR" and provisional_dir == "BUY":
+            score -= 15
+            reasons.append(f"HTF({htf_label}): contre-tendance TRENDING_BEAR — pénalité")
+        elif htf_r == "VOLATILE":
+            score -= 10
+            reasons.append(f"HTF({htf_label}): VOLATILE — réduction score")
+
+    provisional_signal = "BUY" if score >= 40 else ("SELL" if score <= -40 else "NEUTRAL")
+
+    # Appliquer le filtre de régime (hard block) — bloque VOLATILE et contre-tendance confirmée
+    allowed, filter_reason = regime_filter(regime, provisional_signal)
+    if not allowed and provisional_signal != "NEUTRAL":
         signal = "NEUTRAL"
         confidence = 0
+        reasons.append(f"[FILTERED] {filter_reason} | score brut={score}")
+    else:
+        signal = provisional_signal
+        confidence = min(abs(score), 95) if signal != "NEUTRAL" else 0
 
-    # Price levels
+    # Price levels — multiplicateurs ATR adaptés au régime
+    # RANGING      : TP serré (objectif souvent irréaliste au-delà de 2×ATR)
+    # TRENDING      : TP élargi (tendance peut porter plus loin)
+    # VOLATILE      : SL élargi pour absorber le bruit, TP conservateur
+    # UNKNOWN/other : valeurs par défaut
+    _reg = regime.get("regime", "UNKNOWN")
+    if _reg == "RANGING":
+        _sl_mult, _tp1_mult, _tp2_mult = 1.2, 1.5, 2.5
+    elif _reg in ("TRENDING_BULL", "TRENDING_BEAR"):
+        _ts = regime.get("trend_strength", "MODERATE")
+        if _ts == "STRONG":
+            _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.5, 4.5
+        else:
+            _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.0, 3.5
+    elif _reg == "VOLATILE":
+        _sl_mult, _tp1_mult, _tp2_mult = 2.0, 2.0, 3.0
+    else:
+        _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.0, 3.5
+
     entry = round(c_val, 6)
-    sl = round(c_val - atr_v * 1.5, 6) if atr_v and signal == "BUY" else (
-         round(c_val + atr_v * 1.5, 6) if atr_v and signal == "SELL" else None)
-    tp1 = round(c_val + atr_v * 2, 6) if atr_v and signal == "BUY" else (
-          round(c_val - atr_v * 2, 6) if atr_v and signal == "SELL" else None)
-    tp2 = round(c_val + atr_v * 3.5, 6) if atr_v and signal == "BUY" else (
-          round(c_val - atr_v * 3.5, 6) if atr_v and signal == "SELL" else None)
+    sl  = round(c_val - atr_v * _sl_mult,  6) if atr_v and signal == "BUY"  else (
+          round(c_val + atr_v * _sl_mult,  6) if atr_v and signal == "SELL" else None)
+    tp1 = round(c_val + atr_v * _tp1_mult, 6) if atr_v and signal == "BUY"  else (
+          round(c_val - atr_v * _tp1_mult, 6) if atr_v and signal == "SELL" else None)
+    tp2 = round(c_val + atr_v * _tp2_mult, 6) if atr_v and signal == "BUY"  else (
+          round(c_val - atr_v * _tp2_mult, 6) if atr_v and signal == "SELL" else None)
     rr  = round(abs(tp1 - entry) / abs(entry - sl), 2) if sl and tp1 and abs(entry - sl) > 0 else None
+
+    _mtf_tf, _htf_tf = _TF_HIERARCHY.get(timeframe, ("4h", "1d"))
+    _mtf_aligned = (
+        (mtf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BULL" and signal == "BUY" or
+        (mtf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BEAR" and signal == "SELL"
+    ) if mtf_regime else None
+    _htf_aligned = (
+        (htf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BULL" and signal == "BUY" or
+        (htf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BEAR" and signal == "SELL"
+    ) if htf_regime else None
 
     return {
         "symbol":       symbol,
         "timeframe":    timeframe,
         "signal":       signal,
         "confidence":   confidence,
+        "_confidence_before_sentiment": confidence,  # snapshot avant enrichissement sentiment
         "entry_price":  entry,
         "stop_loss":    sl,
         "take_profit_1": tp1,
@@ -461,10 +828,27 @@ def analyze_candles(symbol: str, timeframe: str, df: pd.DataFrame) -> dict:
                 "near_eql":   smc["liquidity"].get("near_eql"),
             },
         },
+        "mtf_context": {
+            "ltf":         timeframe,
+            "mtf":         _mtf_tf,
+            "htf":         _htf_tf,
+            "mtf_regime":  (mtf_regime or {}).get("regime"),
+            "htf_regime":  (htf_regime or {}).get("regime"),
+            "mtf_adx":     (mtf_regime or {}).get("adx"),
+            "htf_adx":     (htf_regime or {}).get("adx"),
+            "mtf_aligned": _mtf_aligned,
+            "htf_aligned": _htf_aligned,
+            "confluence":  (
+                "FULL"    if _mtf_aligned and _htf_aligned else
+                "PARTIAL" if _mtf_aligned or  _htf_aligned else
+                "NONE"    if (_mtf_aligned is False or _htf_aligned is False) else
+                "UNKNOWN"
+            ),
+        },
     }
 
 
-async def fetch_and_analyze(symbol: str, timeframe: str) -> dict:
+async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None) -> dict:
     """Fetch klines et analyse un actif — utilisé par warmup et fallback."""
     tf = TF_MAP.get(timeframe, "1h")
     df = await fetch_binance_klines(symbol, tf)
@@ -473,22 +857,65 @@ async def fetch_and_analyze(symbol: str, timeframe: str) -> dict:
     if df is None or len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, analyze_candles, symbol, timeframe, df)
+    return await loop.run_in_executor(_executor, analyze_candles, symbol, timeframe, df, htf_regime)
+
+
+async def warmup_fast():
+    """Boucle rapide — actifs Binance prioritaires, cycle 60s.
+    Binance REST est gratuit et sans limite raisonnable.
+    Couvre 15m et 1h pour le day trading.
+    """
+    logger.info("warmup_fast_start", symbols=len(BINANCE_PRIORITY_SYMBOLS), interval=WARMUP_INTERVAL_FAST)
+    while True:
+        t0 = time.monotonic()
+        for timeframe in WARMUP_TIMEFRAMES_FAST:
+            tasks = [fetch_and_analyze(sym, timeframe) for sym in BINANCE_PRIORITY_SYMBOLS]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            signals_found = 0
+            for sym, res in zip(BINANCE_PRIORITY_SYMBOLS, results):
+                if isinstance(res, Exception):
+                    logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(res))
+                    continue
+                await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_FAST)
+                if res.get("signal") not in (None, "NEUTRAL"):
+                    signals_found += 1
+            logger.info("warmup_fast_done", timeframe=timeframe,
+                        symbols=len(BINANCE_PRIORITY_SYMBOLS), signals=signals_found,
+                        elapsed_ms=round((time.monotonic() - t0) * 1000))
+        # Attendre le reste du cycle (60s - temps du scan)
+        elapsed = time.monotonic() - t0
+        wait = max(0, WARMUP_INTERVAL_FAST - elapsed)
+        await asyncio.sleep(wait)
+
+
+async def warmup_slow():
+    """Boucle lente — Forex, Deriv, Commodités, cycle 5 min.
+    Séquentiel avec pause pour respecter les limites yfinance/TwelveData.
+    """
+    non_binance_syms = [s for s in ACTIVE_SYMBOLS if s not in BINANCE_PRIORITY_SYMBOLS]
+    logger.info("warmup_slow_start", symbols=len(non_binance_syms), interval=WARMUP_INTERVAL_SLOW)
+    # Décalage initial pour ne pas surcharger au démarrage
+    await asyncio.sleep(15)
+    while True:
+        t0 = time.monotonic()
+        for timeframe in WARMUP_TIMEFRAMES_SLOW:
+            for sym in non_binance_syms:
+                try:
+                    res = await fetch_and_analyze(sym, timeframe)
+                    if res:
+                        await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_SLOW)
+                except Exception as e:
+                    logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
+                await asyncio.sleep(0.5)  # respecter rate limits Twelve Data / yfinance
+            logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(non_binance_syms))
+        elapsed = time.monotonic() - t0
+        wait = max(0, WARMUP_INTERVAL_SLOW - elapsed)
+        await asyncio.sleep(wait)
 
 
 async def warmup_features():
-    """Tâche de fond : précalcule les features scan pour les actifs actifs."""
-    while True:
-        for timeframe in WARMUP_TIMEFRAMES:
-            tasks = [fetch_and_analyze(sym, timeframe) for sym in ACTIVE_SYMBOLS]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for sym, res in zip(ACTIVE_SYMBOLS, results):
-                if isinstance(res, Exception):
-                    logger.warning("warmup_failed", symbol=sym, timeframe=timeframe, error=str(res))
-                    continue
-                await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_SECONDS)
-            logger.info("warmup_done", timeframe=timeframe, symbols=len(ACTIVE_SYMBOLS))
-        await asyncio.sleep(WARMUP_INTERVAL_SECONDS)
+    """Point d'entrée legacy — lance les deux boucles en parallèle."""
+    await asyncio.gather(warmup_fast(), warmup_slow())
 
 
 @router.post("/multi")
@@ -516,11 +943,77 @@ async def scan_multi(req: ScanRequest):
         df = await fetch_binance_klines(sym, tf)
         if df is not None:
             return df
-        # Fallback Twelve Data pour Forex/métaux
-        return await fetch_twelvedata_klines(sym, tf)
+        # Fallback Deriv pour indices synthétiques
+        df = await fetch_deriv_klines(sym, tf)
+        if df is not None:
+            return df
+        # Fallback Twelve Data pour Forex/métaux (si clé configurée)
+        df = await fetch_twelvedata_klines(sym, tf)
+        if df is not None:
+            return df
+        # Fallback yfinance (gratuit, sans clé API)
+        return await fetch_yfinance_klines(sym, tf)
 
-    # 1. Fetch toutes les klines en parallèle (I/O) — Binance + Twelve Data fallback
-    dfs = await asyncio.gather(*[_fetch(sym) for sym in missing_symbols])
+    # 1a. Fetch régimes MTF + HTF en parallèle selon la hiérarchie 3-TF
+    # 5m  -> MTF=1h,  HTF=4h
+    # 15m -> MTF=1h,  HTF=4h
+    # 1h  -> MTF=4h,  HTF=1d
+    # 4h  -> MTF=1d,  HTF=1d  (fallback)
+    mtf_regimes: dict[str, Optional[dict]] = {}   # TF intermédiaire (décision)
+    htf_regimes: dict[str, Optional[dict]] = {}   # TF supérieur (contexte macro)
+
+    if missing_symbols:
+        mtf_tf, htf_tf = _TF_HIERARCHY.get(req.timeframe, ("4h", "1d"))
+
+        async def _fetch_regime(sym: str, interval: str) -> tuple[str, str, Optional[dict]]:
+            try:
+                df_htf = await asyncio.wait_for(
+                    fetch_binance_klines(sym, interval, limit=100),
+                    timeout=3.0,
+                )
+                if df_htf is None:
+                    df_htf = await asyncio.wait_for(
+                        fetch_deriv_klines(sym, interval, limit=100),
+                        timeout=5.0,
+                    )
+                if df_htf is None:
+                    df_htf = await asyncio.wait_for(
+                        fetch_twelvedata_klines(sym, interval, limit=100),
+                        timeout=3.0,
+                    )
+                if df_htf is None:
+                    df_htf = await asyncio.wait_for(
+                        fetch_yfinance_klines(sym, interval, limit=100),
+                        timeout=6.0,
+                    )
+                if df_htf is not None and len(df_htf) >= 50:
+                    r = detect_regime(df_htf["high"], df_htf["low"], df_htf["close"])
+                    return sym, interval, r
+            except Exception:
+                pass
+            return sym, interval, None
+
+        # Fetch MTF et HTF simultanément — si MTF == HTF (cas 4h) on ne déduplique pas
+        regime_tasks = (
+            [_fetch_regime(sym, mtf_tf) for sym in missing_symbols] +
+            ([_fetch_regime(sym, htf_tf) for sym in missing_symbols] if htf_tf != mtf_tf else [])
+        )
+        regime_results = await asyncio.gather(*regime_tasks, return_exceptions=True)
+        for item in regime_results:
+            if not isinstance(item, Exception):
+                sym, interval, reg = item
+                if interval == mtf_tf:
+                    mtf_regimes[sym] = reg
+                elif interval == htf_tf:
+                    htf_regimes[sym] = reg
+        # Cas MTF == HTF : copier MTF dans HTF
+        if htf_tf == mtf_tf:
+            htf_regimes = dict(mtf_regimes)
+
+    # 1b. Fetch toutes les klines LTF en parallèle — Binance + Twelve Data fallback, timeout 4s
+    fetch_coros = [asyncio.wait_for(_fetch(sym), timeout=4.0) for sym in missing_symbols]
+    dfs_raw = await asyncio.gather(*fetch_coros, return_exceptions=True)
+    dfs = [None if isinstance(d, Exception) else d for d in dfs_raw]
 
     async def _no_data(s: str):
         return {"symbol": s, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
@@ -531,8 +1024,10 @@ async def scan_multi(req: ScanRequest):
         if df is None or len(df) < 50:
             analyze_tasks.append(_no_data(sym))
         else:
+            htf_r = htf_regimes.get(sym)
+            mtf_r = mtf_regimes.get(sym)
             analyze_tasks.append(
-                loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df)
+                loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df, htf_r, mtf_r)
             )
 
     computed_results = list(await asyncio.gather(*analyze_tasks))
@@ -545,14 +1040,21 @@ async def scan_multi(req: ScanRequest):
 
     results = cached_results + computed_results + brvm_results
 
-    # 3. Enrichissement sentiment news (en parallèle, non bloquant si NEWS_API_KEY absent)
+    # 3. Enrichissement sentiment news (en parallèle, timeout 2s max)
     if config.settings.news_api_key:
         sentiment_tasks = [
             get_news_sentiment(NewsRequest(symbol=r["symbol"], limit=5, analyze=True))
             for r in results if r.get("signal") in ("BUY", "SELL")
         ]
         if sentiment_tasks:
-            sentiments = await asyncio.gather(*sentiment_tasks, return_exceptions=True)
+            try:
+                sentiments = await asyncio.wait_for(
+                    asyncio.gather(*sentiment_tasks, return_exceptions=True),
+                    timeout=2.0,
+                )
+            except asyncio.TimeoutError:
+                sentiments = []
+                logger.warning("news_sentiment_timeout", symbols=len(sentiment_tasks))
             sent_map = {}
             for s in sentiments:
                 if not isinstance(s, Exception):
@@ -568,7 +1070,7 @@ async def scan_multi(req: ScanRequest):
                     elif r.get("signal") == "SELL" and s.sentiment == "bullish":
                         bonus = -abs(bonus)
 
-                    r["confidence"]     = max(0, min(100, r.get("confidence", 0) + bonus))
+                    r["confidence"]     = max(0, min(95, r.get("confidence", 0) + bonus))
                     r["news_sentiment"] = {
                         "label":   s.sentiment,
                         "score":   s.score,
@@ -580,39 +1082,105 @@ async def scan_multi(req: ScanRequest):
                     }
 
     # 4. Enrichissement sentiment scraper propriétaire (RSS + Reddit + Nitter)
-    # Fonctionne sans aucune clé API — toujours actif
-    scraper_tasks = [
-        scrape_all_sources(r["symbol"])
-        for r in results if r.get("signal") in ("BUY", "SELL")
-    ]
-    if scraper_tasks:
-        scraper_results = await asyncio.gather(*scraper_tasks, return_exceptions=True)
-        active_signals = [r for r in results if r.get("signal") in ("BUY", "SELL")]
-        for r, scraped in zip(active_signals, scraper_results):
-            if isinstance(scraped, Exception) or not scraped:
-                continue
-            agg = aggregate_sentiment(scraped)
+    # Stratégie non-bloquante : si cache chaud → enrichit immédiatement,
+    # sinon → fire-and-forget (le prochain appel bénéficiera du cache 15min).
+    active_signals = [r for r in results if r.get("signal") in ("BUY", "SELL")]
+    symbols_missing_cache: list[str] = []
+
+    for r in active_signals:
+        from routers.news_scraper import _cache_get as _sc_get
+        cached_articles = _sc_get(f"scraper:{r['symbol']}")
+        if cached_articles is not None:
+            # Cache chaud → enrichissement immédiat sans réseau
+            agg = aggregate_sentiment(cached_articles)
             bonus = agg["bonus"]
             if r.get("signal") == "BUY" and agg["label"] == "bearish":
                 bonus = -abs(bonus)
             elif r.get("signal") == "SELL" and agg["label"] == "bullish":
                 bonus = -abs(bonus)
-            r["confidence"] = max(0, min(100, r.get("confidence", 0) + bonus))
+            r["confidence"] = max(0, min(95, r.get("confidence", 0) + bonus))
             r["scraper_sentiment"] = {
                 "label":   agg["label"],
                 "score":   agg["score"],
                 "bonus":   bonus,
                 "bullish": agg["bullish"],
                 "bearish": agg["bearish"],
-                "sources": list({a.source for a in scraped[:5]}),
+                "sources": list({a.source for a in cached_articles[:5]}),
+                "cached":  True,
             }
+        else:
+            symbols_missing_cache.append(r["symbol"])
+
+    # Fire-and-forget pour les symboles sans cache — le résultat sera dispo au prochain scan
+    if symbols_missing_cache:
+        async def _warm_scraper_cache(syms: list[str]):
+            tasks = [scrape_all_sources(s) for s in syms]
+            await asyncio.gather(*tasks, return_exceptions=True)
+        asyncio.create_task(_warm_scraper_cache(symbols_missing_cache))
+
+    # 5. Hystérésis flip-flop — évite BUY→NEUTRAL→BUY sur scans successifs
+    # Règles :
+    #   - Un signal BUY/SELL doit être produit 2× consécutivement pour être "confirmé"
+    #   - Un signal confirmé repasse NEUTRAL seulement si le score descend sous 25 (bande morte)
+    #   - L'état expire après _HYSTERESIS_TTL secondes sans scan
+    now_mono = time.monotonic()
+    for r in results:
+        sig = r.get("signal", "NEUTRAL")
+        key = f"{r['symbol']}:{req.timeframe}"
+        state = _signal_state.get(key)
+
+        # Expiration TTL
+        if state and (now_mono - state["ts"]) > _HYSTERESIS_TTL:
+            state = None
+            _signal_state.pop(key, None)
+
+        if sig in ("BUY", "SELL"):
+            if state and state["signal"] == sig:
+                state["count"] = min(state["count"] + 1, _HYSTERESIS_CONFIRM + 1)
+                state["ts"] = now_mono
+            else:
+                # Nouvelle direction — réinitialiser compteur
+                _signal_state[key] = {"signal": sig, "count": 1, "ts": now_mono}
+                state = _signal_state[key]
+
+            # Pas encore confirmé : dégrader en NEUTRAL pour les notifications
+            # (le signal reste dans results avec signal_pending=True pour info)
+            if state["count"] < _HYSTERESIS_CONFIRM:
+                r["signal_pending"] = True
+        else:
+            # Signal NEUTRAL : si l'état précédent était confirmé, appliquer bande morte
+            if state and state.get("count", 0) >= _HYSTERESIS_CONFIRM:
+                conf = r.get("confidence", 0)
+                if conf >= 25:
+                    # Score encore dans la bande morte → maintenir le signal précédent
+                    r["signal"] = state["signal"]
+                    r["signal_sticky"] = True
+                else:
+                    _signal_state.pop(key, None)
+            else:
+                _signal_state.pop(key, None)
+
+    # 6. Analyse du risque portefeuille — clustering signaux corrélés
+    portfolio_risk = analyze_portfolio_risk(results)
+    if portfolio_risk["alerts"]:
+        logger.warning(
+            "portfolio_risk_alert",
+            risk_level=portfolio_risk["risk_level"],
+            alerts=len(portfolio_risk["alerts"]),
+            summary=portfolio_risk["summary"],
+        )
+
+    # Annoter chaque résultat avec son cluster
+    for r in results:
+        r["cluster"] = get_cluster(r["symbol"])
 
     ws_module.set_latest_signals(results)
 
     return {
-        "scanned":   len(results),
-        "timeframe": req.timeframe,
-        "elapsed_ms": round((time.monotonic() - t0) * 1000),
-        "results":   results,
+        "scanned":        len(results),
+        "timeframe":      req.timeframe,
+        "elapsed_ms":     round((time.monotonic() - t0) * 1000),
+        "results":        results,
+        "portfolio_risk": portfolio_risk,
     }
 

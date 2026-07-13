@@ -104,6 +104,18 @@ export interface Signal {
       above_ema200?: boolean;
       description?: string;
     };
+    mtf_context?: {
+      ltf?: string;
+      mtf?: string;
+      htf?: string;
+      mtf_regime?: string;
+      htf_regime?: string;
+      mtf_adx?: number;
+      htf_adx?: number;
+      mtf_aligned?: boolean | null;
+      htf_aligned?: boolean | null;
+      confluence?: 'FULL' | 'PARTIAL' | 'NONE' | 'UNKNOWN';
+    };
     smc?: {
       fvg?: {
         bullish?: { top: number; bottom: number; mid: number }[];

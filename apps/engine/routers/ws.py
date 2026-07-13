@@ -16,15 +16,32 @@ logger = get_logger(__name__)
 
 BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
 SYMBOLS_BINANCE   = [
-    # Crypto majeurs
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
     "AVAXUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT",
     "MATICUSDT", "ATOMUSDT", "LTCUSDT", "XRPUSDT",
-    # Forex & Commodités (paires disponibles sur Binance)
-    "EURUSDT", "GBPUSDT",
-    # Or via PAXG
-    "PAXGUSDT",
+    "DOGEUSDT", "TRXUSDT", "TONUSDT", "PAXGUSDT",
 ]
+
+# Mapping symbole interne → ticker yfinance pour prix snapshot Forex/Commodités
+YF_PRICE_SYMBOLS: dict = {
+    "EUR/USD": "EURUSD=X", "GBP/USD": "GBPUSD=X", "USD/JPY": "JPY=X",
+    "AUD/USD": "AUDUSD=X", "USD/CHF": "CHF=X",   "USD/CAD": "CAD=X",
+    "NZD/USD": "NZDUSD=X",
+    "XAU/USD": "GC=F",  "XAG/USD": "SI=F",
+    "WTI/USD": "CL=F",  "BRENT/USD": "BZ=F",
+}
+
+# Mapping symbole interne → identifiant Deriv pour prix tick
+DERIV_PRICE_SYMBOLS: dict = {
+    "VIX10/USD": "R_10",   "VIX25/USD": "R_25",   "VIX50/USD": "R_50",
+    "VIX75/USD": "R_75",   "VIX100/USD": "R_100",
+    "BOOM300/USD": "BOOM300",   "BOOM500/USD": "BOOM500",   "BOOM1000/USD": "BOOM1000",
+    "CRASH300/USD": "CRASH300", "CRASH500/USD": "CRASH500", "CRASH1000/USD": "CRASH1000",
+    "JUMP10/USD": "JD10", "JUMP25/USD": "JD25", "JUMP50/USD": "JD50",
+    "JUMP75/USD": "JD75", "JUMP100/USD": "JD100",
+}
+
+DERIV_WS_URL = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
 
 _price_clients:  Set[WebSocket] = set()
 _signal_clients: Set[WebSocket] = set()
@@ -43,11 +60,89 @@ async def broadcast(clients: Set[WebSocket], payload: dict):
     clients -= dead
 
 
+def _fetch_yf_prices_sync() -> dict:
+    """Snapshot prix Forex + Commodités via yfinance — 1 seul appel batch pour tous les tickers."""
+    try:
+        import yfinance as yf
+        tickers = list(YF_PRICE_SYMBOLS.values())
+        # Un seul appel HTTP pour tous les symboles (period=1d, interval=1m → dernier prix dispo)
+        raw = yf.download(
+            tickers,
+            period="1d",
+            interval="5m",
+            progress=False,
+            auto_adjust=True,
+            threads=False,   # pas de threads supplémentaires
+        )
+        prices = {}
+        reverse = {v: k for k, v in YF_PRICE_SYMBOLS.items()}
+        if raw.empty:
+            return prices
+        close = raw["Close"] if "Close" in raw else raw
+        if hasattr(close, 'columns'):
+            # Multi-ticker : colonnes = tickers
+            for yf_ticker, sym_internal in reverse.items():
+                try:
+                    col = close[yf_ticker].dropna()
+                    if not col.empty:
+                        prices[sym_internal] = float(col.iloc[-1])
+                except Exception:
+                    pass
+        else:
+            # Un seul ticker
+            col = close.dropna()
+            if not col.empty:
+                first_internal = next(iter(reverse.values()))
+                prices[first_internal] = float(col.iloc[-1])
+        return prices
+    except Exception:
+        return {}
+
+
+async def _fetch_deriv_prices() -> dict:
+    """Snapshot prix Deriv via 1 seule connexion WS — envoie tous les ticks, lit les réponses."""
+    import websockets as _ws
+    prices = {}
+    deriv_syms = list(DERIV_PRICE_SYMBOLS.values())
+    deriv_to_internal = {v: k for k, v in DERIV_PRICE_SYMBOLS.items()}
+    try:
+        async with _ws.connect(DERIV_WS_URL, ping_interval=None) as ws:
+            # Envoyer tous les ticks en une seule rafale
+            for deriv_sym in deriv_syms:
+                await ws.send(json.dumps({"ticks": deriv_sym}))
+            # Lire toutes les réponses avec un seul timeout global
+            deadline = asyncio.get_event_loop().time() + 5.0
+            while asyncio.get_event_loop().time() < deadline:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    break
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                    data = json.loads(raw)
+                    tick = data.get("tick", {})
+                    sym  = tick.get("symbol")
+                    quote = tick.get("quote")
+                    if sym and quote:
+                        internal = deriv_to_internal.get(sym)
+                        if internal:
+                            prices[internal] = float(quote)
+                    if len(prices) >= len(deriv_syms):
+                        break
+                except asyncio.TimeoutError:
+                    break
+    except Exception as e:
+        logger.warning("deriv_prices_failed", error=str(e))
+    return prices
+
+
 async def price_broadcaster():
-    """Tâche de fond : fetch prix Binance toutes les 3s et broadcast."""
+    """Tâche de fond : fetch prix Binance toutes les 3s, Deriv toutes les 10s, Forex/Commodités toutes les 30s."""
+    _yf_counter    = 0   # toutes les 10 itérations = 30s
+    _deriv_counter = 0   # toutes les  3 itérations = 10s
     async with httpx.AsyncClient(timeout=5) as client:
         while True:
             try:
+                # --- Binance (toutes les 3s) ---
                 async def _fetch_prices():
                     resp = await client.get(
                         BINANCE_PRICE_URL,
@@ -66,13 +161,38 @@ async def price_broadcaster():
                     ),
                 )
                 prices = {item["symbol"]: float(item["price"]) for item in data}
+
+                # --- Deriv (toutes les 10s ~ 3 cycles) ---
+                _deriv_counter += 1
+                if _deriv_counter >= 3:
+                    _deriv_counter = 0
+                    try:
+                        deriv_prices = await asyncio.wait_for(_fetch_deriv_prices(), timeout=8.0)
+                        prices.update(deriv_prices)
+                    except Exception:
+                        pass
+
+                # --- yfinance Forex/Commodités (toutes les 30s ~ 10 cycles) ---
+                _yf_counter += 1
+                if _yf_counter >= 10:
+                    _yf_counter = 0
+                    try:
+                        loop = asyncio.get_event_loop()
+                        yf_prices = await asyncio.wait_for(
+                            loop.run_in_executor(None, _fetch_yf_prices_sync),
+                            timeout=20.0
+                        )
+                        prices.update(yf_prices)
+                    except Exception:
+                        pass
+
                 _last_prices.update(prices)
                 if _price_clients:
-                    await broadcast(_price_clients, {"type": "prices", "data": prices})
+                    await broadcast(_price_clients, {"type": "prices", "data": _last_prices})
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.warning("binance_price_failed", error=str(e))
+                logger.warning("price_broadcast_failed", error=str(e))
             await asyncio.sleep(3)
 
 
@@ -86,6 +206,22 @@ def set_latest_signals(signals: list):
 async def _broadcast_signals(signals: list):
     if _signal_clients:
         await broadcast(_signal_clients, {"type": "signals", "data": signals})
+
+
+@router.get("/prices/latest")
+async def prices_latest(symbols: str = ""):
+    """
+    Retourne les derniers prix connus (mis à jour toutes les 3s par le broadcaster).
+    ?symbols=BTCUSDT,ETHUSDT  — filtre optionnel. Sans paramètre : tous les symboles.
+    """
+    if not _last_prices:
+        return {"prices": {}, "source": "cache_empty"}
+    if symbols:
+        want = {s.strip().upper() for s in symbols.split(",")}
+        data = {k: v for k, v in _last_prices.items() if k in want}
+    else:
+        data = dict(_last_prices)
+    return {"prices": data, "count": len(data), "source": "cache"}
 
 
 @router.websocket("/ws/prices")
