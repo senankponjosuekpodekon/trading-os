@@ -89,33 +89,34 @@ async function main() {
     },
   });
 
+  // Règles au format DSL parsé par apps/engine/routers/strategy_eval.py (StrategyRules)
+  const emaTrendRsiRules = {
+    ema_fast: 20,
+    ema_slow: 50,
+    ema_trend: 200,
+    rsi_period: 14,
+    rsi_oversold: 30,
+    rsi_overbought: 70,
+    rsi_bullish_zone: 45,
+    rsi_bearish_zone: 55,
+    min_confidence: 55,
+    volume_spike_min: 1.3,
+    atr_min_pct: 0.2,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_patterns: true,
+    timeframes: ['1h', '4h'],
+    trigger: 'BREAKOUT',
+    profiles: ['SWING', 'DAY'],
+  };
+
   const strategy = await prisma.strategy.upsert({
     where: { name: 'EMA Trend + RSI' },
-    update: {},
+    update: { rules: emaTrendRsiRules },
     create: {
       name: 'EMA Trend + RSI',
-      description: 'Tendance EMA 20/50/200 avec confirmation RSI. Signal BUY si EMA20 > EMA50 et RSI entre 45-65.',
-      rules: {
-        conditions: {
-          buy: [
-            { indicator: 'ema20', operator: 'gt', target: 'ema50' },
-            { indicator: 'rsi', operator: 'between', min: 45, max: 65 },
-            { indicator: 'close', operator: 'gt', target: 'ema200' },
-          ],
-          sell: [
-            { indicator: 'ema20', operator: 'lt', target: 'ema50' },
-            { indicator: 'rsi', operator: 'between', min: 35, max: 55 },
-            { indicator: 'close', operator: 'lt', target: 'ema200' },
-          ],
-        },
-        scoring: {
-          ema_alignment: 30,
-          rsi_zone: 20,
-          above_ema200: 25,
-          volume_ratio: 15,
-          atr_ok: 10,
-        },
-      },
+      description: 'Tendance EMA 20/50/200 avec confirmation RSI. Signal BUY si EMA20 > EMA50 et RSI en zone bullish (45+).',
+      rules: emaTrendRsiRules,
     },
   });
 

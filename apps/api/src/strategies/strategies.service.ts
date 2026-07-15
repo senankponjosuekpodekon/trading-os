@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStrategyDto, UpdateStrategyDto, ToggleUserStrategyDto } from './dto/create-strategy.dto';
+import { validateStrategyRules } from './rules-validator';
 
 @Injectable()
 export class StrategiesService {
@@ -34,11 +35,13 @@ export class StrategiesService {
   }
 
   async create(dto: CreateStrategyDto) {
+    validateStrategyRules(dto.rules);
     return this.prisma.strategy.create({ data: dto });
   }
 
   async update(id: string, dto: UpdateStrategyDto) {
     await this.findOne(id);
+    if (dto.rules) validateStrategyRules(dto.rules);
     return this.prisma.strategy.update({ where: { id }, data: dto });
   }
 
@@ -49,6 +52,7 @@ export class StrategiesService {
 
   async toggleUserStrategy(userId: string, strategyId: string, dto: ToggleUserStrategyDto) {
     await this.findOne(strategyId);
+    if (dto.customRules) validateStrategyRules(dto.customRules);
     return this.prisma.userStrategy.upsert({
       where: { userId_strategyId: { userId, strategyId } },
       create: { userId, strategyId, isEnabled: dto.isEnabled, customRules: dto.customRules },
@@ -64,6 +68,7 @@ export class StrategiesService {
   }
 
   async updateUserStrategy(userId: string, strategyId: string, customRules: any, isEnabled?: boolean) {
+    if (customRules) validateStrategyRules(customRules);
     const existing = await this.prisma.userStrategy.findUnique({
       where: { userId_strategyId: { userId, strategyId } },
     });

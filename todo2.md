@@ -38,8 +38,8 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 - [x] Stabiliser `docker-compose` + `dev.sh`. ✅ (healthchecks validés — build Docker local en attente réseau)
 - [ ] `prisma migrate deploy` en prod et scripts de seed.
 - [x] Tests unitaires critiques NestJS (`auth`, `positions`, `watcher`). ✅ (+ `signals`, `strategies`, `signal-outcome`, `backtest` — 45 tests)
-- [ ] Rate limiting Twelve Data / Coinglass / CryptoQuant.
-- [ ] Centraliser logs et erreurs HTTP.
+- [x] Rate limiting Twelve Data / Coinglass / CryptoQuant. ✅ (`utils/rate_limiter.py` utilisé dans scan/news/onchain)
+- [x] Centraliser logs et erreurs HTTP. ✅ (`all-exceptions.filter.ts` NestJS + structlog engine)
 
 **DOD** : `docker compose up` OK, `npm run test:api` passe, rate limit actif.
 
@@ -49,11 +49,11 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 
 **Objectif** : le moteur utilise `Strategy`/`UserStrategy` au lieu du hardcode.
 
-- [ ] Étendre `strategy_eval.py` pour `analysis_timeframe`, `entry_timeframe`, `trigger`, `invalidation`, `exit_rules`.
-- [ ] Modifier `scan.py` pour charger les stratégies actives et appeler `evaluate_strategy`.
-- [ ] Supprimer le hardcodage `EMA Trend + RSI` dans `signals.service.ts`.
-- [ ] Migrer les paramètres actuels en stratégies par défaut.
-- [ ] Validation du DSL JSON.
+- [x] Étendre `strategy_eval.py` pour `analysis_timeframe`, `entry_timeframe`, `trigger`, `invalidation`, `exit_rules`. ✅
+- [x] Modifier `scan.py` pour charger les stratégies actives et appeler `evaluate_strategy`. ✅ (stratégies passées dans `ScanRequest`, une analyse par stratégie)
+- [x] Supprimer le hardcodage `EMA Trend + RSI` dans `signals.service.ts`. ✅ (stratégies actives chargées depuis Prisma, fallback par défaut)
+- [x] Migrer les paramètres actuels en stratégies par défaut. ✅ (seed.ts au format DSL `StrategyRules`)
+- [x] Validation du DSL JSON. ✅ (`rules-validator.ts` + 14 tests — branché sur create/update/toggle)
 
 **DOD** : créer une stratégie dans l’UI → utilisée au prochain scan.
 
