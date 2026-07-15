@@ -17,7 +17,7 @@ from typing import List, Optional
 import asyncio
 import httpx
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from bs4 import BeautifulSoup
 
 from routers.brvm import BRVM_SYMBOLS, HEADERS

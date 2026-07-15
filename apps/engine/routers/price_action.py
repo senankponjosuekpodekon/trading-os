@@ -3,8 +3,6 @@ Price Action Phase 1 — Swing Points + Structure de marché (BOS / CHoCH)
 La PA ne génère pas de signal seul : elle booste le score via price_action_bonus()
 """
 import pandas as pd
-import numpy as np
-from typing import Optional
 
 
 # ─── Swing Points ─────────────────────────────────────────────────────────────
@@ -85,8 +83,6 @@ def detect_market_structure(high: pd.Series, low: pd.Series, close: pd.Series):
     last_close = float(close.iloc[-1])
     last_sh    = swing_highs[-1][1] if swing_highs else None
     last_sl    = swing_lows[-1][1]  if swing_lows  else None
-    prev_sh    = swing_highs[-2][1] if len(swing_highs) >= 2 else None
-    prev_sl    = swing_lows[-2][1]  if len(swing_lows)  >= 2 else None
 
     # BOS : cassure du dernier swing high/low
     bos = False

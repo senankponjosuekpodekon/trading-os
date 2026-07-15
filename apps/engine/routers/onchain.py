@@ -69,7 +69,7 @@ async def funding_rate(symbol: str):
         _set(cache_key, result)
         return result
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Funding rate unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"Funding rate unavailable: {e}") from e
 
 
 @router.get("/open-interest/{symbol}")
@@ -90,7 +90,7 @@ async def open_interest(symbol: str):
         _set(cache_key, result)
         return result
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Open interest unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"Open interest unavailable: {e}") from e
 
 
 @router.get("/spot-perp-basis/{symbol}")
@@ -120,7 +120,7 @@ async def spot_perp_basis(symbol: str):
         _set(cache_key, result)
         return result
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Basis unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"Basis unavailable: {e}") from e
 
 
 @router.get("/btc-dominance")
@@ -140,7 +140,7 @@ async def btc_dominance():
         _set(cache_key, result)
         return result
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"BTC dominance unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"BTC dominance unavailable: {e}") from e
 
 
 @router.get("/context/{symbol}")

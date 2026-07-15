@@ -1,5 +1,4 @@
 """Cache Redis centralisé pour l'engine."""
-import json
 import pickle
 from typing import Any, Optional
 

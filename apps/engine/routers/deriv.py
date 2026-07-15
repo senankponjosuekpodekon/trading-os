@@ -3,9 +3,9 @@ Deriv Router — Connecteur Deriv API (WebSocket) + stratégie V75 Scalp
 Actif : Volatility 75 Index (V75 / R_75)
 API Deriv : wss://ws.binaryws.com/websockets/v3
 """
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import List
 import asyncio
 import json
 import os
@@ -136,10 +136,10 @@ def _v75_scalp_strategy(candles: list) -> dict:
     # Bollinger
     if last <= bbl:
         score += 20
-        reasons.append(f"Prix sur BB Lower (rebond potentiel)")
+        reasons.append("Prix sur BB Lower (rebond potentiel)")
     elif last >= bbu:
         score -= 20
-        reasons.append(f"Prix sur BB Upper (rejet potentiel)")
+        reasons.append("Prix sur BB Upper (rejet potentiel)")
 
     # Momentum (dernière bougie)
     if last > prev:

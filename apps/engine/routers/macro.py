@@ -32,7 +32,6 @@ def _set_cached(key: str, val: any):
 async def _fetch_yahoo_ticker(ticker: str) -> Optional[float]:
     """Fetch le dernier prix d'un ticker Yahoo via yfinance (thread)."""
     try:
-        import time as _time
         loop = asyncio.get_running_loop()
         t = yf.Ticker(ticker)
         hist = await loop.run_in_executor(None, t.history, period="2d", interval="1d")
@@ -63,7 +62,7 @@ async def fear_greed():
         _set_cached("fear_greed", result)
         return result
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Fear & Greed unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"Fear & Greed unavailable: {e}") from e
 
 
 @router.get("/vix")
@@ -111,7 +110,7 @@ async def btc_dominance():
         _set_cached("btc_dominance", result)
         return result
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"BTC dominance unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"BTC dominance unavailable: {e}") from e
 
 
 @router.get("/summary")

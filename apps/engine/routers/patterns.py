@@ -2,7 +2,6 @@
 Phase 2 — Candlestick Patterns : Pin Bar, Engulfing, Doji, Inside Bar
 """
 import pandas as pd
-import numpy as np
 
 
 def detect_pin_bar(open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series, idx: int) -> str | None:

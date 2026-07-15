@@ -74,6 +74,9 @@ jobs:
         working-directory: apps/engine
         run: |
           python -m py_compile $(git ls-files '*.py' | tr '\n' ' ')
+      - name: Ruff lint
+        working-directory: apps/engine
+        run: ruff check .
       - name: Run Python tests
         working-directory: apps/engine
         run: |

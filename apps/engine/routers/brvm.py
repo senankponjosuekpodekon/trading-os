@@ -2,14 +2,12 @@
 BRVM Router — Bourse Régionale des Valeurs Mobilières (UEMOA)
 Scrape les données de marché depuis brvm.org + calcul indicateurs techniques
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 import httpx
 import asyncio
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from bs4 import BeautifulSoup
 
 router = APIRouter()

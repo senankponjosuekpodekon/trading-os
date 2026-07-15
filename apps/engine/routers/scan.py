@@ -1,12 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 import httpx
 import asyncio
 import time
-import os
 import pandas as pd
-import numpy as np
 import pandas_ta as ta
 from concurrent.futures import ThreadPoolExecutor
 
@@ -298,7 +296,8 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
 @rate_limit(max_concurrent=3, min_delay=0.2)
 async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV depuis l'API Deriv WebSocket — pour les indices synthétiques (V75, Boom/Crash, Jump)."""
-    import websockets, json as _json
+    import websockets
+    import json as _json
     deriv_sym = SYMBOL_TO_DERIV.get(symbol)
     if not deriv_sym:
         return None
@@ -840,7 +839,6 @@ def analyze_candles(
         tp1 = ev["take_profit_1"] if ev["take_profit_1"] is not None else tp1
         tp2 = ev["take_profit_2"] if ev["take_profit_2"] is not None else tp2
         rr = ev["risk_reward"] if ev["risk_reward"] is not None else rr
-        explanation = " | ".join(reasons) or "No clear setup"
         strategy_id = strategy.get("id")
         strategy_name = strategy.get("name")
         profile_suitability = ev["profile_suitability"]
@@ -854,7 +852,6 @@ def analyze_candles(
                 signal = "NEUTRAL"
                 confidence = 0
                 reasons.append(f"[FILTERED] {filter_reason}")
-                explanation = " | ".join(reasons) or "No clear setup"
 
     if not profile_suitability:
         profile_suitability = derive_profile_suitability(

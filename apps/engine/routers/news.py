@@ -5,7 +5,7 @@ News Router — NewsAPI + Sentiment NLP + RAG ingestion
 - Ingestion auto dans pgvector pour enrichir le chat RAG
 - Cache Redis (TTL 15 min) pour limiter les appels NewsAPI (100/jour plan gratuit)
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
 import httpx
@@ -347,6 +347,15 @@ async def news_health():
 
 @router.delete("/news/cache")
 async def clear_cache():
-    count = len(_cache)
-    _cache.clear()
+    """Vide le cache Redis des news (sentiment + articles)."""
+    from utils.cache import cache
+    count = 0
+    try:
+        r = await cache.client()
+        for prefix in ("sentiment:*", "articles:*"):
+            async for key in r.scan_iter(match=prefix):
+                await r.delete(key)
+                count += 1
+    except Exception as e:
+        logger.warning("clear_cache failed", error=str(e))
     return {"cleared": count}

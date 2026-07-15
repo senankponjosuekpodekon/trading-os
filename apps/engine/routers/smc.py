@@ -6,7 +6,6 @@ Phase 3 — Smart Money Concepts (SMC)
 """
 import pandas as pd
 import numpy as np
-from typing import Optional
 
 
 # ─── Fair Value Gaps ──────────────────────────────────────────────────────────

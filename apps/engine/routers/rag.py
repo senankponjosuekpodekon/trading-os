@@ -6,9 +6,8 @@ en s'appuyant sur des documents contextuels indexés.
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import os
-import asyncio
 import hashlib
 
 router = APIRouter()
@@ -189,7 +188,7 @@ async def seed_documents():
                 inserted += 1
         return {"inserted": inserted, "total": len(SEED_DOCUMENTS)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/rag/documents")
@@ -209,7 +208,7 @@ async def add_document(doc: DocumentIn):
             )
         return {"id": row["id"], "title": doc.title, "created_at": str(row["created_at"])}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/rag/query")
@@ -323,7 +322,7 @@ Réponds en français, de façon concise et précise.
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/rag/documents")
@@ -347,7 +346,7 @@ async def list_documents(category: Optional[str] = None, limit: int = 50):
             "count":     len(rows),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.delete("/rag/documents/{doc_id}")

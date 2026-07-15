@@ -1,5 +1,4 @@
 """Configuration centralisée et validation des secrets au démarrage."""
-import os
 import sys
 from pathlib import Path
 

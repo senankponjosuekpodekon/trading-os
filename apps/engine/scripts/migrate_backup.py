@@ -9,7 +9,6 @@ Stratégie (Option B) :
 - rag_documents : ignoré (déjà seedé dans la DB active).
 """
 import asyncio
-from decimal import Decimal
 import asyncpg
 
 OLD_URL = "postgresql://trading_user:trading_pass@localhost:5433/trading_os_old"

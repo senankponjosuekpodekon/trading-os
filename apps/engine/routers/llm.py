@@ -111,9 +111,9 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
     scrp = req.scraper_sentiment or {}
 
     parts = [
-        f"Tu es un analyste trading professionnel. Explique ce signal de manière claire et pédagogique.",
-        f"",
-        f"## Signal",
+        "Tu es un analyste trading professionnel. Explique ce signal de manière claire et pédagogique.",
+        "",
+        "## Signal",
         f"- Actif : {req.symbol}",
         f"- Timeframe : {req.timeframe}",
         f"- Direction : {req.signal}",
@@ -122,8 +122,8 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
 
     if req.entry_price:
         parts += [
-            f"",
-            f"## Niveaux de prix",
+            "",
+            "## Niveaux de prix",
             f"- Entrée : {req.entry_price}",
             f"- Stop Loss : {req.stop_loss or '—'}",
             f"- TP1 : {req.take_profit_1 or '—'} | TP2 : {req.take_profit_2 or '—'}",
@@ -131,8 +131,8 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
         ]
 
     parts += [
-        f"",
-        f"## Indicateurs techniques",
+        "",
+        "## Indicateurs techniques",
         f"- Prix actuel : {ind.get('close', '?')}",
         f"- EMA20 : {ind.get('ema20', '?')} | EMA50 : {ind.get('ema50', '?')} | EMA200 : {ind.get('ema200', '?')}",
         f"- RSI(14) : {ind.get('rsi', '?')}",
@@ -140,15 +140,15 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
         f"- Volume ratio : {ind.get('volume_ratio', '?')}x",
         f"- MACD hist : {ind.get('macd_hist', '?')} | Signal : {ind.get('macd_signal', '?')}",
         f"- Bollinger Upper : {ind.get('bb_upper', '?')} | Mid : {ind.get('bb_mid', '?')} | Lower : {ind.get('bb_lower', '?')}",
-        f"",
-        f"## Raisons du signal (engine)",
+        "",
+        "## Raisons du signal (engine)",
         f"{req.explanation}",
     ]
 
     if pa.get('trend'):
         parts += [
-            f"",
-            f"## Structure de marché (Price Action)",
+            "",
+            "## Structure de marché (Price Action)",
             f"- Tendance : {pa.get('trend')}",
             f"- Structure : {pa.get('structure', '?')}",
             f"- BOS : {'oui' if pa.get('bos') else 'non'} | CHoCH : {'oui' if pa.get('choch') else 'non'}",
@@ -156,8 +156,8 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
 
     if sr.get('near_support') or sr.get('near_resistance'):
         parts += [
-            f"",
-            f"## Supports / Résistances",
+            "",
+            "## Supports / Résistances",
             f"- Près d'un support : {'oui' if sr.get('near_support') else 'non'}",
             f"- Près d'une résistance : {'oui' if sr.get('near_resistance') else 'non'}",
         ]
@@ -169,15 +169,15 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
     if pats.get('patterns'):
         names = [p.get('name', '?') for p in pats['patterns'][:3]]
         parts += [
-            f"",
-            f"## Patterns de bougies",
+            "",
+            "## Patterns de bougies",
             f"- Détectés : {', '.join(names)}",
         ]
 
     if reg.get('regime'):
         parts += [
-            f"",
-            f"## Régime de marché",
+            "",
+            "## Régime de marché",
             f"- Régime : {reg.get('regime')} | ADX : {reg.get('adx', '?')} | Trend dir : {reg.get('trend_dir', '?')}",
         ]
 
@@ -185,8 +185,8 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
         fvg_count = len(smc.get('fvg', []))
         ob_count  = len(smc.get('ob', []))
         parts += [
-            f"",
-            f"## Smart Money Concepts",
+            "",
+            "## Smart Money Concepts",
             f"- FVG actifs : {fvg_count} | Order Blocks : {ob_count}",
         ]
 
@@ -196,17 +196,17 @@ def _build_signal_prompt(req: ExplainRequest) -> str:
     if scrp.get('label'):
         sentiment_parts.append(f"- Scraper ({scrp['label']}) : score {scrp.get('score', '?')} | bonus {scrp.get('bonus', 0):+d}pts")
     if sentiment_parts:
-        parts += [f"", f"## Sentiment du marché"] + sentiment_parts
+        parts += ["", "## Sentiment du marché"] + sentiment_parts
     elif req.sentiment_pending:
-        parts += [f"", f"## Sentiment du marché", f"- Analyse sentiment en attente (pas encore dans le cache)"]
+        parts += ["", "## Sentiment du marché", "- Analyse sentiment en attente (pas encore dans le cache)"]
 
     parts += [
-        f"",
-        f"## Ta mission",
+        "",
+        "## Ta mission",
         f"Explique ce signal en 3-5 phrases maximum en {req.language}.",
-        f"Mentionne : la direction, les indicateurs clés qui confirment, les niveaux importants (entrée, SL, TP), et le risque.",
-        f"Si le sentiment est disponible, intègre-le dans l'analyse.",
-        f"Sois direct et actionnable. Pas de jargon inutile.",
+        "Mentionne : la direction, les indicateurs clés qui confirment, les niveaux importants (entrée, SL, TP), et le risque.",
+        "Si le sentiment est disponible, intègre-le dans l'analyse.",
+        "Sois direct et actionnable. Pas de jargon inutile.",
     ]
 
     return "\n".join(parts)
@@ -216,7 +216,7 @@ def _fmt_time(iso: Optional[str]) -> str:
     if not iso:
         return "—"
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
         return dt.strftime("%d/%m/%Y à %H:%M UTC")
     except Exception:
@@ -259,13 +259,13 @@ def _build_review_prompt(req: ReviewPositionRequest) -> str:
         missed_gain = round(req.max_gain - req.pnl, 2) if req.max_gain > req.pnl else None
 
     parts = [
-        f"Tu es un analyste trading senior. Effectue une analyse post-trade exhaustive et pédagogique.",
-        f"",
-        f"═══════════════════════════════════════",
+        "Tu es un analyste trading senior. Effectue une analyse post-trade exhaustive et pédagogique.",
+        "",
+        "═══════════════════════════════════════",
         f"ANALYSE POST-TRADE — {req.symbol}",
-        f"═══════════════════════════════════════",
-        f"",
-        f"## 1. Résumé du trade",
+        "═══════════════════════════════════════",
+        "",
+        "## 1. Résumé du trade",
         f"- Actif        : {req.symbol}",
         f"- Direction    : {req.direction}",
         f"- Timeframe    : {req.timeframe}",
@@ -275,21 +275,21 @@ def _build_review_prompt(req: ReviewPositionRequest) -> str:
         f"- Prix sortie  : {req.exit_price or '—'}",
         f"- Stop Loss    : {req.stop_loss or '—'}",
         f"- Take Profit  : {req.take_profit or '—'}",
-        f"",
-        f"## 2. Taille de position & finances",
+        "",
+        "## 2. Taille de position & finances",
         f"- Quantité          : {req.quantity} {req.symbol.split('/')[0]}",
         f"- Argent engagé     : {f'{req.cost:.2f} $' if req.cost else '—'}",
         f"- Capital total     : {f'{req.capital_at_open:.2f} $' if req.capital_at_open else '—'}",
         f"- % du capital      : {f'{req.capital_pct:.1f}%' if req.capital_pct else '—'}",
         f"- R/R               : {f'{req.risk_reward:.2f}' if req.risk_reward else '—'}",
-        f"",
-        f"  Scénarios :",
+        "",
+        "  Scénarios :",
         f"  ✓ Si TP touché : +{req.max_gain:.2f} $ (+{req.roi_if_tp:.2f}%)"
             if req.max_gain and req.roi_if_tp else "  ✓ Si TP touché : —",
         f"  ✗ Si SL touché : -{req.max_loss:.2f} $ (-{req.roi_if_sl:.2f}%)"
             if req.max_loss and req.roi_if_sl else "  ✗ Si SL touché : —",
-        f"",
-        f"  Résultat réel :",
+        "",
+        "  Résultat réel :",
         f"  PnL               : {real_pnl} ({real_roi}) — {result_label}",
     ]
     if missed_gain:
@@ -302,7 +302,7 @@ def _build_review_prompt(req: ReviewPositionRequest) -> str:
     # ── BASE DE LA DÉCISION (signal)
     if sig:
         parts += [
-            f"",
+            "",
             f"## 3. Base de la décision (signal généré le {_fmt_time(str(sig.get('signal_created_at', '')))})",
             f"- Type signal  : {sig.get('signal_type', '?')} | Confiance : {sig.get('confidence', '?')}%",
             f"- Stratégie    : {sig.get('strategy', '?')}",
@@ -330,15 +330,15 @@ def _build_review_prompt(req: ReviewPositionRequest) -> str:
             parts.append(f"- Sentiment scraper: {scrp['label']} (score {scrp.get('score','?')}, bonus {scrp.get('bonus',0):+d}pts)")
     else:
         parts += [
-            f"",
-            f"## 3. Base de la décision",
-            f"- Trade ouvert manuellement (pas de signal automatisé lié)",
+            "",
+            "## 3. Base de la décision",
+            "- Trade ouvert manuellement (pas de signal automatisé lié)",
         ]
 
     # ── CONTEXTE PRÉ-TRADE
     if req.candles_before:
         parts += [
-            f"",
+            "",
             f"## 4. Contexte pré-trade ({len(req.candles_before)} bougies {req.timeframe} avant l'entrée)",
         ]
         for c in req.candles_before:
@@ -361,44 +361,44 @@ def _build_review_prompt(req: ReviewPositionRequest) -> str:
         adv_move = abs(req.entry_price - min_l) if req.direction == "BUY" else abs(max_h - req.entry_price)
 
         parts += [
-            f"",
+            "",
             f"## 5. Évolution pendant le trade ({len(req.candles_during)} bougies {req.timeframe})",
             f"- Plus haut atteint : {max_h}  |  Plus bas atteint : {min_l}  |  Clôture finale : {last_c}",
             f"- Mouvement favorable max  : {fav_move:.4g} pts depuis entrée",
             f"- Mouvement adverse max    : {adv_move:.4g} pts depuis entrée",
             f"- TP touché : {'oui ✅' if tp_hit else 'non ❌'}  |  SL touché : {'oui ⚠️' if sl_hit else 'non ✅'}",
-            f"",
-            f"  Bougies clés :",
+            "",
+            "  Bougies clés :",
         ]
         for c in req.candles_during:
             parts.append(_candle_row(c))
 
     # ── MISSION
     parts += [
-        f"",
-        f"## 6. Analyse demandée",
+        "",
+        "## 6. Analyse demandée",
         f"Rédige une analyse structurée en {req.language} avec ces 5 sections :",
-        f"",
-        f"**A. Contexte et base de la décision**",
-        f"   Explique sur quoi l'entrée s'est basée (indicateurs, régime, sentiment, signal automatique ou manuel).",
-        f"   Mentionne l'heure exacte du signal et du point d'entrée.",
-        f"",
-        f"**B. Événements avant le trade**",
-        f"   Décris la structure de marché juste avant l'entrée (tendance pré-trade, momentum, volumes).",
-        f"",
-        f"**C. Déroulement du trade**",
-        f"   Raconte comment le prix a évolué après l'entrée, si le TP ou SL a été touché, les moments clés.",
-        f"   Mentionne l'heure exacte de clôture si disponible.",
-        f"",
-        f"**D. Bilan financier**",
-        f"   Reprends les chiffres exacts : argent engagé, PnL réalisé, ROI réel.",
-        f"   Compare avec ce qui aurait été gagné si le TP avait été atteint, et ce qui aurait été perdu si le SL avait été touché.",
+        "",
+        "**A. Contexte et base de la décision**",
+        "   Explique sur quoi l'entrée s'est basée (indicateurs, régime, sentiment, signal automatique ou manuel).",
+        "   Mentionne l'heure exacte du signal et du point d'entrée.",
+        "",
+        "**B. Événements avant le trade**",
+        "   Décris la structure de marché juste avant l'entrée (tendance pré-trade, momentum, volumes).",
+        "",
+        "**C. Déroulement du trade**",
+        "   Raconte comment le prix a évolué après l'entrée, si le TP ou SL a été touché, les moments clés.",
+        "   Mentionne l'heure exacte de clôture si disponible.",
+        "",
+        "**D. Bilan financier**",
+        "   Reprends les chiffres exacts : argent engagé, PnL réalisé, ROI réel.",
+        "   Compare avec ce qui aurait été gagné si le TP avait été atteint, et ce qui aurait été perdu si le SL avait été touché.",
         f"   Dis si le R/R était correct pour ce type de setup. Le sizing ({f'{req.capital_pct:.1f}% du capital' if req.capital_pct else 'inconnu'}) était-il approprié ?",
-        f"",
-        f"**E. Conseil actionnable**",
-        f"   1 conseil précis sur la gestion du risque ou du sizing pour améliorer ce type de trade.",
-        f"",
-        f"Sois factuel, chronologique et pédagogique. Cite les chiffres fournis dans ton analyse.",
+        "",
+        "**E. Conseil actionnable**",
+        "   1 conseil précis sur la gestion du risque ou du sizing pour améliorer ce type de trade.",
+        "",
+        "Sois factuel, chronologique et pédagogique. Cite les chiffres fournis dans ton analyse.",
     ]
     return "\n".join(parts)
 

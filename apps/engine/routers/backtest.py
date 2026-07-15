@@ -6,7 +6,6 @@ Métriques : win rate, PnL total, max drawdown, Sharpe ratio, nb trades.
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
-import pandas as pd
 import numpy as np
 import asyncio
 

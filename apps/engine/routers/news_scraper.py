@@ -25,12 +25,11 @@ Pipeline :
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import asyncio
 import hashlib
 import time
 import re
-import json
 
 import httpx
 from bs4 import BeautifulSoup

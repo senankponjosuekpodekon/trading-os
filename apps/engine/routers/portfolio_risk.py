@@ -2,7 +2,6 @@
 Risque portefeuille — clustering et exposition par groupe d'actifs corrélés.
 Évite d'afficher N signaux corrélés comme s'ils étaient indépendants.
 """
-from typing import Optional
 
 # Clusters de corrélation — actifs fortement corrélés entre eux
 ASSET_CLUSTERS: dict[str, str] = {
