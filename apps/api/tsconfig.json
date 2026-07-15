@@ -22,7 +22,7 @@
     "noEmitOnError": false,
     "paths": {
       "@trading-os/shared": ["../../packages/shared/src"],
-      "@prisma/client": ["./node_modules/@prisma/client"]
+      "@prisma/client": ["../../node_modules/@prisma/client"]
     }
   },
   "include": ["src/**/*"],

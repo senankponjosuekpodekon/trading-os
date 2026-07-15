@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -14,6 +15,8 @@ const SYM_MAP: Record<string, string> = {
 
 @Injectable()
 export class PositionsService {
+  private readonly logger = new Logger(PositionsService.name);
+
   constructor(
     private prisma: PrismaService,
     private http: HttpService,
@@ -57,6 +60,7 @@ export class PositionsService {
           quantity: dto.quantity,
           stopLoss: dto.stopLoss,
           takeProfit: dto.takeProfit,
+          trailingStop: dto.stopLoss,
           signalId: dto.signalId,
           status: 'OPEN',
         },
@@ -199,7 +203,19 @@ export class PositionsService {
     return withLive;
   }
 
-  async openFromSignal(userId: string, signalId: string) {
+  private async getOrCreatePaperPortfolio(userId: string) {
+    let portfolio = await this.prisma.portfolio.findFirst({
+      where: { userId, type: 'PAPER' },
+    });
+    if (!portfolio) {
+      portfolio = await this.prisma.portfolio.create({
+        data: { userId, name: 'Paper Trading', type: 'PAPER', currency: 'USD' },
+      });
+    }
+    return portfolio;
+  }
+
+  async openFromSignal(userId: string, signalId: string, portfolioType: 'PAPER' | 'LIVE' = 'PAPER') {
     const signal = await this.prisma.signal.findUnique({
       where: { id: signalId },
       include: { asset: true },
@@ -207,7 +223,9 @@ export class PositionsService {
     if (!signal) throw new NotFoundException('Signal not found');
     if (signal.signal === 'NEUTRAL') throw new BadRequestException('Cannot open position on NEUTRAL signal');
 
-    const portfolio = await this.prisma.portfolio.findFirst({ where: { userId } });
+    const portfolio = portfolioType === 'PAPER'
+      ? await this.getOrCreatePaperPortfolio(userId)
+      : await this.prisma.portfolio.findFirst({ where: { userId, type: 'LIVE' } });
     if (!portfolio) throw new NotFoundException('No portfolio found');
 
     const capital    = parseFloat(portfolio.currentCapital.toString());
@@ -246,6 +264,7 @@ export class PositionsService {
           quantity:    qty,
           stopLoss:    slPrice,
           takeProfit:  signal.takeProfit1 ? parseFloat(signal.takeProfit1.toString()) : null,
+          trailingStop: slPrice,
           signalId,
           status:      'OPEN',
         },
@@ -266,6 +285,60 @@ export class PositionsService {
     });
 
     return position;
+  }
+
+  @Cron('*/5 * * * *')
+  async syncTrailingStops() {
+    this.logger.log('TRAILING: synchronisation des trailing stops');
+    const open = await this.prisma.position.findMany({
+      where: { status: 'OPEN' },
+      include: {
+        asset: { select: { symbol: true } },
+        portfolio: { select: { userId: true } },
+        signal: { select: { indicators: true } },
+      },
+    });
+
+    for (const pos of open) {
+      try {
+        const price = await this.fetchLivePrice(pos.asset.symbol);
+        if (!price) continue;
+
+        const entry = parseFloat(pos.entryPrice.toString());
+        const sl = pos.stopLoss ? parseFloat(pos.stopLoss.toString()) : null;
+        let trailingStop = pos.trailingStop
+          ? parseFloat(pos.trailingStop.toString())
+          : (sl ?? (pos.direction === 'BUY' ? entry * 0.99 : entry * 1.01));
+
+        const atr = (pos.signal?.indicators as any)?.atr ?? entry * 0.01;
+
+        if (pos.direction === 'BUY') {
+          const newStop = price - atr;
+          if (newStop > trailingStop) trailingStop = newStop;
+          if (price <= trailingStop) {
+            await this.closeByWatcher(pos.id, price, 'SL');
+            continue;
+          }
+        } else {
+          const newStop = price + atr;
+          if (newStop < trailingStop) trailingStop = newStop;
+          if (price >= trailingStop) {
+            await this.closeByWatcher(pos.id, price, 'SL');
+            continue;
+          }
+        }
+
+        const currentStop = pos.trailingStop ? parseFloat(pos.trailingStop.toString()) : null;
+        if (trailingStop !== currentStop) {
+          await this.prisma.position.update({
+            where: { id: pos.id },
+            data: { trailingStop },
+          });
+        }
+      } catch (e: any) {
+        this.logger.warn(`syncTrailingStops failed for ${pos.asset.symbol}: ${e?.message}`);
+      }
+    }
   }
 
   async closeByWatcher(positionId: string, exitPrice: number, reason: 'SL' | 'TP') {

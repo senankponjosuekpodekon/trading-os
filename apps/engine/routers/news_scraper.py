@@ -37,6 +37,7 @@ from bs4 import BeautifulSoup
 
 import config
 from utils.logger import get_logger
+from utils.rate_limiter import rate_limit
 
 router = APIRouter()
 
@@ -230,6 +231,7 @@ def _sentiment_heuristic(text: str) -> tuple[str, float]:
 
 # ── Fetch RSS ─────────────────────────────────────────────────────────────────
 
+@rate_limit(max_concurrent=5, min_delay=0.1)
 async def _fetch_rss(url: str, source_name: str, symbol: str,
                      client: httpx.AsyncClient) -> list[ScrapedArticle]:
     try:
@@ -284,6 +286,7 @@ async def _fetch_rss(url: str, source_name: str, symbol: str,
 
 # ── Fetch Reddit JSON (API publique, sans clé) ────────────────────────────────
 
+@rate_limit(max_concurrent=3, min_delay=0.2)
 async def _fetch_reddit(subreddit: str, symbol: str,
                         client: httpx.AsyncClient) -> list[ScrapedArticle]:
     try:
@@ -323,6 +326,7 @@ async def _fetch_reddit(subreddit: str, symbol: str,
 
 # ── Fetch Nitter (Twitter sans API) ──────────────────────────────────────────
 
+@rate_limit(max_concurrent=3, min_delay=0.2)
 async def _fetch_nitter(account: str, symbol: str,
                         client: httpx.AsyncClient) -> list[ScrapedArticle]:
     for instance in NITTER_INSTANCES:
@@ -369,6 +373,7 @@ async def _fetch_nitter(account: str, symbol: str,
 
 # ── Fetch CryptoPanic (API publique limitée, sans clé) ───────────────────────
 
+@rate_limit(max_concurrent=1, min_delay=0.5)
 async def _fetch_cryptopanic(symbol: str, client: httpx.AsyncClient) -> list[ScrapedArticle]:
     cat = _symbol_to_source_category(symbol)
     if cat not in ("crypto", "bitcoin", "ethereum"):
@@ -421,6 +426,7 @@ async def _fetch_cryptopanic(symbol: str, client: httpx.AsyncClient) -> list[Scr
 
 # ── Fear & Greed Index ────────────────────────────────────────────────────────
 
+@rate_limit(max_concurrent=1, min_delay=0.5)
 async def _fetch_fear_greed(client: httpx.AsyncClient) -> FearGreedResult:
     try:
         r = await client.get("https://api.alternative.me/fng/", timeout=6)

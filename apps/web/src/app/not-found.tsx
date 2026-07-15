@@ -13,7 +13,7 @@ export default function NotFound() {
         <div>
           <h1 className="text-6xl font-black text-white mb-2">404</h1>
           <p className="text-xl font-semibold text-gray-300 mb-1">Page introuvable</p>
-          <p className="text-gray-500 text-sm">Cette page n'existe pas ou a été déplacée.</p>
+          <p className="text-gray-500 text-sm">Cette page n&apos;existe pas ou a été déplacée.</p>
         </div>
         <Link href="/dashboard"
           className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-xl transition-colors">

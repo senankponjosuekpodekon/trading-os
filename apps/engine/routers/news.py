@@ -15,6 +15,7 @@ import json
 import config
 from utils.cache import get_cached, set_cached
 from utils.logger import get_logger
+from utils.rate_limiter import rate_limit
 
 router = APIRouter()
 
@@ -47,7 +48,7 @@ SYMBOL_KEYWORDS: dict[str, list[str]] = {
 }
 
 # Domaines financiers de qualité pour NewsAPI
-NEWS_DOMAINS = "coindesk.com,cointelegraph.com,reuters.com,bloomberg.com,ft.com,marketwatch.com,investing.com"
+NEWS_DOMAINS = "coindesk.com,cointelegraph.com,reuters.com,bloomberg.com,ft.com,marketwatch.com,investing.com,dailyhodl.com"
 
 
 # ── Modèles ────────────────────────────────────────────────────
@@ -93,6 +94,7 @@ def _keywords_for(symbol: str) -> str:
     return " OR ".join(f'"{k}"' for k in kws[:2])
 
 
+@rate_limit(max_concurrent=1, min_delay=1.0)
 async def _fetch_articles(symbol: str, limit: int = 10) -> list[dict]:
     """Appelle NewsAPI /v2/everything et retourne les articles bruts."""
     if not NEWS_API_KEY:

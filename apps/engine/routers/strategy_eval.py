@@ -4,6 +4,7 @@ Les règles JSON définissent les paramètres du scan (EMA, RSI, seuils, filtres
 """
 from dataclasses import dataclass, field
 from typing import Optional
+from utils.predictive import compute_predictive_metrics
 
 
 @dataclass
@@ -24,6 +25,164 @@ class StrategyRules:
     atr_min_pct:      float = 0.2    # ATR% minimum pour qu'un trade soit valide
     timeframes:       list  = field(default_factory=lambda: ["1h", "4h"])
 
+    # --- Extended DSL fields ---
+    analysis_timeframe: Optional[str] = None
+    entry_timeframe:    Optional[str] = None
+    trigger:            Optional[str] = None
+    markets:            list  = field(default_factory=list)
+    profiles:           list  = field(default_factory=list)
+    entry_rules:        dict  = field(default_factory=dict)
+    filters:            dict  = field(default_factory=dict)
+    invalidation:       dict  = field(default_factory=dict)
+    exit_rules:         dict  = field(default_factory=dict)
+
+
+def derive_profile_suitability(
+    timeframe: Optional[str],
+    risk_reward: Optional[float],
+    profiles: list,
+    signal: str,
+    confidence: float,
+) -> list:
+    """
+    Détermine les profils adaptés au signal.
+    Prend en compte les profils déclarés par la stratégie, le timeframe, le R/R et la confiance.
+    """
+    PROFILE_CONFIDENCE = {
+        "INVESTOR": 55,
+        "SWING": 60,
+        "DAY": 60,
+        "SCALPER": 65,
+    }
+    PROFILE_TIMEFRAMES = {
+        "INVESTOR": {"1d", "4h"},
+        "SWING": {"4h", "1h", "30m"},
+        "DAY": {"1h", "30m", "15m"},
+        "SCALPER": {"15m", "5m", "1m"},
+    }
+    PROFILE_RR = {
+        "INVESTOR": 2.0,
+        "SWING": 1.5,
+        "DAY": 1.2,
+        "SCALPER": 1.0,
+    }
+    if signal == "NEUTRAL" or not confidence:
+        return []
+    candidates = set(profiles) if profiles else set(PROFILE_CONFIDENCE.keys())
+    if timeframe:
+        candidates = {p for p in candidates if timeframe in PROFILE_TIMEFRAMES.get(p, set())}
+    result = []
+    for p in sorted(candidates):
+        if confidence >= PROFILE_CONFIDENCE[p] and (risk_reward is None or risk_reward >= PROFILE_RR[p]):
+            result.append(p)
+    return result
+
+
+def _find_nearest_ob_fvg(signal: str, close: float, smc: Optional[dict]) -> Optional[float]:
+    """Retourne le niveau OB/FVG le plus proche du prix actuel dans la direction du signal."""
+    if not smc:
+        return None
+    fvg = smc.get("fvg") or {}
+    ob = smc.get("ob") or {}
+    if signal == "BUY":
+        candidates = [
+            fvg.get("near_bullish_fvg"),
+            ob.get("near_bullish_ob"),
+        ]
+    else:
+        candidates = [
+            fvg.get("near_bearish_fvg"),
+            ob.get("near_bearish_ob"),
+        ]
+    candidates = [c for c in candidates if c is not None and c != 0]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda x: abs(x - close))
+
+
+def _apply_trigger(
+    trigger: Optional[str],
+    signal: str,
+    close: float,
+    indicators: dict,
+    pa: dict,
+    smc: Optional[dict],
+    regime: Optional[dict],
+    rules: StrategyRules,
+) -> dict:
+    """Applique le mode d'entrée (trigger) et les entry_rules du DSL."""
+    result = {"signal": signal, "entry_price": close, "signal_pending": False, "reason": None}
+    if signal == "NEUTRAL" or not trigger:
+        return result
+
+    entry_rules = getattr(rules, "entry_rules", None) or {}
+
+    # --- entry_rules filters ---
+    if entry_rules.get("ema_fast_above_slow"):
+        e20 = indicators.get("ema20")
+        e50 = indicators.get("ema50")
+        if signal == "BUY" and not (e20 and e50 and e20 > e50):
+            return {**result, "signal": "NEUTRAL", "reason": "EMA fast not above slow"}
+        if signal == "SELL" and not (e20 and e50 and e20 < e50):
+            return {**result, "signal": "NEUTRAL", "reason": "EMA fast not below slow"}
+
+    adx_min = entry_rules.get("adx_min")
+    if adx_min is not None:
+        adx = (regime or {}).get("adx")
+        if adx is None or adx < adx_min:
+            return {**result, "signal": "NEUTRAL", "reason": f"ADX {adx} < {adx_min}"}
+
+    if entry_rules.get("bos"):
+        bos = pa.get("bos")
+        bos_dir = pa.get("bos_dir")
+        if signal == "BUY" and not (bos and bos_dir == "up"):
+            return {**result, "signal": "NEUTRAL", "reason": "BOS up not detected"}
+        if signal == "SELL" and not (bos and bos_dir == "down"):
+            return {**result, "signal": "NEUTRAL", "reason": "BOS down not detected"}
+
+    # --- trigger modes ---
+    if trigger == "BREAKOUT":
+        return result
+
+    if trigger == "MOMENTUM_CONFIRMATION":
+        vol_r = indicators.get("volume_ratio")
+        macd_hist = indicators.get("macd_hist")
+        if signal == "BUY" and (vol_r and vol_r >= rules.volume_spike_min and macd_hist is not None and macd_hist > 0):
+            return result
+        if signal == "SELL" and (vol_r and vol_r >= rules.volume_spike_min and macd_hist is not None and macd_hist < 0):
+            return result
+        return {**result, "signal": "NEUTRAL", "reason": "Momentum confirmation not met"}
+
+    if trigger == "VOLATILITY_EXPANSION":
+        bb_bw = indicators.get("bb_bw")
+        if bb_bw is not None and bb_bw < 0.02:
+            return {**result, "signal": "NEUTRAL", "reason": "No volatility expansion (BB squeeze)"}
+        return result
+
+    if trigger in ("RETEST", "LIMIT"):
+        level = _find_nearest_ob_fvg(signal, close, smc)
+        if level is None:
+            return {**result, "signal": "NEUTRAL", "reason": f"No OB/FVG level for {trigger}"}
+        proximity_pct = entry_rules.get("fvg_proximity_pct", 1.0)
+        distance = abs(close - level) / close * 100 if close else 0
+        if trigger == "RETEST":
+            pending = distance > proximity_pct
+            return {
+                **result,
+                "entry_price": level,
+                "signal_pending": pending,
+                "reason": f"RETEST {'pending' if pending else 'ready'} at {level}",
+            }
+        # LIMIT
+        return {
+            **result,
+            "entry_price": level,
+            "signal_pending": True,
+            "reason": f"LIMIT order at {level}",
+        }
+
+    return result
+
 
 def parse_rules(rules_json: dict) -> StrategyRules:
     """Convertit le dict JSON de règles en objet StrategyRules."""
@@ -40,6 +199,10 @@ def evaluate_strategy(
     pa: dict,
     sr: dict,
     patterns: dict,
+    smc: Optional[dict] = None,
+    regime: Optional[dict] = None,
+    timeframe: Optional[str] = None,
+    market: Optional[str] = None,
 ) -> dict:
     """
     Évalue si les conditions de la stratégie sont remplies.
@@ -57,7 +220,25 @@ def evaluate_strategy(
     vol_r = indicators.get("volume_ratio")
 
     if not close or close == 0:
-        return {"score": 0, "signal": "NEUTRAL", "reasons": ["no data"]}
+        return {
+            "score": 0,
+            "signal": "NEUTRAL",
+            "confidence": 0,
+            "reasons": ["no data"],
+            "entry_price": None,
+            "stop_loss": None,
+            "take_profit_1": None,
+            "take_profit_2": None,
+            "risk_reward": None,
+            "profile_suitability": [],
+            "trigger": getattr(rules, "trigger", None),
+            "signal_pending": False,
+            "invalidation": getattr(rules, "invalidation", None) or {},
+            "dps": 0.0,
+            "tps": 0.0,
+            "success_probability": 0.0,
+            "expected_move": {"value": None, "pct": None},
+        }
 
     # ── EMA alignment ──────────────────────────────────────────
     if e20 and e50 and e200:
@@ -152,9 +333,111 @@ def evaluate_strategy(
         signal = "NEUTRAL"
         confidence = 0
 
+    # --- Filters (regime / market) ---
+    if signal != "NEUTRAL":
+        _filters = getattr(rules, "filters", None) or {}
+        if regime and _filters.get("regime"):
+            allowed_regimes = _filters["regime"]
+            if regime.get("regime") not in allowed_regimes:
+                reasons.append(f"Regime {regime.get('regime')} not in {allowed_regimes} — filtré")
+                signal = "NEUTRAL"
+                confidence = 0
+        if market and getattr(rules, "markets", None):
+            if market not in rules.markets:
+                reasons.append(f"Market {market} not in {rules.markets} — filtré")
+                signal = "NEUTRAL"
+                confidence = 0
+
+    # --- Entry rules / trigger ---
+    trigger = getattr(rules, "trigger", None)
+    signal_pending = False
+    close_val = indicators.get("close")
+    entry_price = close_val
+    if signal != "NEUTRAL":
+        trigger_result = _apply_trigger(
+            trigger, signal, close_val, indicators, pa, smc, regime, rules
+        )
+        signal = trigger_result["signal"]
+        entry_price = trigger_result["entry_price"]
+        signal_pending = trigger_result["signal_pending"]
+        if trigger_result["reason"]:
+            reasons.append(trigger_result["reason"])
+        if signal == "NEUTRAL":
+            confidence = 0
+            score = 0
+
+    # --- Price levels / exit rules ---
+    atr_val = indicators.get("atr")
+    entry_price = round(entry_price, 6) if entry_price is not None else None
+    stop_loss = take_profit_1 = take_profit_2 = risk_reward = None
+
+    _reg = (regime or {}).get("regime", "UNKNOWN")
+    exit_rules = getattr(rules, "exit_rules", None) or {}
+    if _reg == "RANGING":
+        sl_mult, tp1_mult, tp2_mult = 1.2, 1.5, 2.5
+    elif _reg in ("TRENDING_BULL", "TRENDING_BEAR"):
+        sl_mult, tp1_mult, tp2_mult = 1.5, 2.0, 3.5
+    elif _reg == "VOLATILE":
+        sl_mult, tp1_mult, tp2_mult = 2.0, 2.0, 3.0
+    else:
+        sl_mult, tp1_mult, tp2_mult = 1.5, 2.0, 3.5
+    sl_mult = exit_rules.get("sl_atr", sl_mult)
+    tp1_mult = exit_rules.get("tp1_atr", tp1_mult)
+    tp2_mult = exit_rules.get("tp2_atr", tp2_mult)
+
+    if entry_price is not None and atr_val:
+        if signal == "BUY":
+            stop_loss = round(entry_price - atr_val * sl_mult, 6)
+            take_profit_1 = round(entry_price + atr_val * tp1_mult, 6)
+            take_profit_2 = round(entry_price + atr_val * tp2_mult, 6)
+        elif signal == "SELL":
+            stop_loss = round(entry_price + atr_val * sl_mult, 6)
+            take_profit_1 = round(entry_price - atr_val * tp1_mult, 6)
+            take_profit_2 = round(entry_price - atr_val * tp2_mult, 6)
+        if stop_loss is not None and take_profit_1 is not None and abs(entry_price - stop_loss) > 0:
+            risk_reward = round(abs(take_profit_1 - entry_price) / abs(entry_price - stop_loss), 2)
+
+    # --- Profile suitability ---
+    profile_suitability = derive_profile_suitability(
+        timeframe,
+        risk_reward,
+        getattr(rules, "profiles", None) or [],
+        signal,
+        confidence,
+    )
+
+    # --- Predictive metrics (Sprint 4) ---
+    predictive = compute_predictive_metrics(
+        signal,
+        confidence,
+        entry_price,
+        take_profit_1,
+        stop_loss,
+        risk_reward,
+        indicators,
+        pa,
+        regime=regime,
+        smc=smc,
+        trigger=trigger,
+        proximity_pct=(getattr(rules, "entry_rules", None) or {}).get("fvg_proximity_pct", 1.0),
+    )
+
     return {
-        "score":      score,
-        "signal":     signal,
-        "confidence": confidence,
-        "reasons":    reasons,
+        "score":               score,
+        "signal":              signal,
+        "confidence":          confidence,
+        "reasons":             reasons,
+        "entry_price":         entry_price,
+        "stop_loss":           stop_loss,
+        "take_profit_1":       take_profit_1,
+        "take_profit_2":       take_profit_2,
+        "risk_reward":         risk_reward,
+        "profile_suitability": profile_suitability,
+        "trigger":             trigger,
+        "signal_pending":      signal_pending,
+        "invalidation":        getattr(rules, "invalidation", None) or {},
+        "dps":                 predictive["dps"],
+        "tps":                 predictive["tps"],
+        "success_probability": predictive["success_probability"],
+        "expected_move":       predictive["expected_move"],
     }

@@ -1,9 +1,12 @@
 import { Controller, Get, Post, Put, Delete, Patch, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { StrategiesService } from './strategies.service';
 import { CreateStrategyDto, UpdateStrategyDto, ToggleUserStrategyDto } from './dto/create-strategy.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('strategies')
 export class StrategiesController {
   constructor(private readonly strategiesService: StrategiesService) {}
@@ -23,21 +26,41 @@ export class StrategiesController {
     return this.strategiesService.getUserStrategies(req.user.id);
   }
 
+  @Put('mine/:strategyId')
+  updateUserStrategy(
+    @Request() req: any,
+    @Param('strategyId') strategyId: string,
+    @Body() dto: ToggleUserStrategyDto,
+  ) {
+    return this.strategiesService.updateUserStrategy(req.user.id, strategyId, dto.customRules, dto.isEnabled);
+  }
+
+  @Delete('mine/:strategyId')
+  removeUserStrategy(
+    @Request() req: any,
+    @Param('strategyId') strategyId: string,
+  ) {
+    return this.strategiesService.removeUserStrategy(req.user.id, strategyId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.strategiesService.findOne(id);
   }
 
+  @Roles(UserRole.ADMIN)
   @Post()
   create(@Body() dto: CreateStrategyDto) {
     return this.strategiesService.create(dto);
   }
 
+  @Roles(UserRole.ADMIN)
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: UpdateStrategyDto) {
     return this.strategiesService.update(id, dto);
   }
 
+  @Roles(UserRole.ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.strategiesService.remove(id);

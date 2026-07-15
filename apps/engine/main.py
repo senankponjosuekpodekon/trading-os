@@ -10,7 +10,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from routers import health, indicators, analyze, scan, ws, risk, backtest, llm, brvm, brvm_reports, deriv, rag, news, news_scraper
+from routers import health, indicators, analyze, scan, ws, risk, backtest, llm, brvm, brvm_reports, deriv, rag, news, news_scraper, macro, onchain
 import config  # noqa: F401 — valide les secrets au démarrage
 import asyncio
 
@@ -74,6 +74,8 @@ app.include_router(deriv.router,    prefix="",  tags=["Deriv"])
 app.include_router(rag.router,      prefix="",  tags=["RAG"])
 app.include_router(news.router,         prefix="",  tags=["News"])
 app.include_router(news_scraper.router, prefix="",  tags=["News Scraper"])
+app.include_router(macro.router,        prefix="/macro", tags=["Macro"])
+app.include_router(onchain.router,      prefix="/onchain", tags=["On-chain"])
 
 if __name__ == "__main__":
     import uvicorn

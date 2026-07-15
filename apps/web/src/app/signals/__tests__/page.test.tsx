@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import SignalsPage from '../page';
 import { createTestQueryClient } from '@/lib/test-utils';
+import { useTradingStore } from '@/store/trading.store';
 
 jest.mock('@/lib/api', () => ({
   api: {
@@ -45,6 +46,12 @@ const mockSignals = [
 describe('SignalsPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    useTradingStore.setState({
+      signals: [],
+      signalsLoading: false,
+      signalsError: null,
+      signalsFetchedAt: null,
+    });
   });
 
   it('renders empty state and scan button', async () => {
@@ -63,7 +70,7 @@ describe('SignalsPage', () => {
   });
 
   it('renders list of signals', async () => {
-    (api.get as jest.Mock).mockResolvedValue({ data: { data: mockSignals } });
+    useTradingStore.setState({ signals: mockSignals as any, signalsFetchedAt: Date.now() });
 
     render(
       <Wrapper>

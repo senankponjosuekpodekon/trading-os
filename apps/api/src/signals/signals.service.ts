@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SignalOutcomeService } from './signal-outcome.service';
 
 @Injectable()
 export class SignalsService {
@@ -16,6 +17,7 @@ export class SignalsService {
     private http: HttpService,
     private config: ConfigService,
     private notifications: NotificationsService,
+    private outcomeService: SignalOutcomeService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
@@ -33,25 +35,34 @@ export class SignalsService {
   }
 
   private async _scanActiveAssets(timeframe: string) {
-    const assets = await this.prisma.asset.findMany({
-      where: { isActive: true },
-      select: { symbol: true },
-    });
+    const [assets, strategies] = await Promise.all([
+      this.prisma.asset.findMany({
+        where: { isActive: true },
+        select: { symbol: true },
+      }),
+      this.prisma.strategy.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true, rules: true },
+      }),
+    ]);
     const symbols = assets.map(a => a.symbol);
     if (!symbols.length) {
       this.logger.warn('Aucun actif actif à scanner');
       return;
     }
-    return this.triggerScan(symbols, timeframe);
+    return this.triggerScan(symbols, timeframe, strategies);
   }
 
-  async findAll(opts: { page: number; limit: number; sort: string }) {
+  async findAll(opts: { page: number; limit: number; sort: string; profile?: string }) {
     const [field, dir] = opts.sort.split(':');
     const orderByField = ['createdAt', 'confidence', 'entryPrice'].includes(field) ? field : 'createdAt';
     const orderBy: any = { [orderByField]: dir === 'asc' ? 'asc' : 'desc' };
     const skip = (opts.page - 1) * opts.limit;
 
-    const where = { isActive: true };
+    const where: any = { isActive: true };
+    if (opts.profile) {
+      where.profileSuitability = { has: opts.profile };
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.signal.findMany({
@@ -90,15 +101,19 @@ export class SignalsService {
     });
   }
 
-  async triggerScan(symbols: string[], timeframe = '1h') {
+  async triggerScan(symbols: string[], timeframe = '1h', strategies?: any[]) {
     try {
+      const payload: any = { symbols, timeframe };
+      if (strategies && strategies.length) {
+        payload.strategies = strategies;
+      }
       const { data } = await firstValueFrom(
-        this.http.post(`${this.engineUrl}/scan/multi`, { symbols, timeframe }),
+        this.http.post(`${this.engineUrl}/scan/multi`, payload),
       );
       const saved = await this.saveSignals(data.results);
       // Pass 2 : enrichissement sentiment asynchrone (non bloquant)
       // Met à jour confidence + potentiellement invalide le signal
-      setImmediate(() => this._enrichSentimentPass2(saved, data.results).catch(() => {}));
+      setImmediate(() => Promise.resolve(this._enrichSentimentPass2(saved, data.results)).catch(() => {}));
       return { saved, portfolio_risk: data.portfolio_risk ?? null };
     } catch (e: any) {
       throw new Error(`Engine scan failed: ${e?.message}`);
@@ -106,8 +121,7 @@ export class SignalsService {
   }
 
   private async saveSignals(results: any[]) {
-    const strategy = await this.prisma.strategy.findFirst({ where: { name: 'EMA Trend + RSI' } });
-    if (!strategy) return [];
+    const defaultStrategy = await this.prisma.strategy.findFirst({ where: { name: 'EMA Trend + RSI' } });
 
     const saved: any[] = [];
     for (const r of results) {
@@ -115,8 +129,20 @@ export class SignalsService {
       if (!r.signal || r.signal === 'NEUTRAL' || r.confidence < 50) continue;
       if (r.signal_pending === true) continue;
 
-      const asset = await this.prisma.asset.findUnique({ where: { symbol: r.symbol } });
+      const asset = await this.prisma.asset.findUnique({
+        where: { symbol: r.symbol },
+        include: { market: { select: { name: true } } },
+      });
       if (!asset) continue;
+
+      let strategy: any = null;
+      if (r.strategy_id) {
+        strategy = await this.prisma.strategy.findUnique({ where: { id: r.strategy_id } });
+      }
+      if (!strategy) {
+        strategy = defaultStrategy;
+      }
+      if (!strategy) continue;
 
       // Détecter si le sentiment est déjà enrichi ou encore en attente
       const sentimentPresent = !!(r.news_sentiment || r.scraper_sentiment);
@@ -133,6 +159,7 @@ export class SignalsService {
           takeProfit1: r.take_profit_1,
           takeProfit2: r.take_profit_2,
           riskReward: r.risk_reward,
+          profileSuitability: r.profile_suitability || [],
           indicators: r.indicators,
           metadata: {
             price_action:      r.price_action,
@@ -143,6 +170,16 @@ export class SignalsService {
             news_sentiment:    r.news_sentiment    ?? null,
             scraper_sentiment: r.scraper_sentiment ?? null,
             sentiment_pending: !sentimentPresent,
+            score:             r.score ?? null,
+            trigger:           r.trigger ?? null,
+            signal_pending:    r.signal_pending ?? null,
+            invalidation:      r.invalidation ?? null,
+            mtf_context:       r.mtf_context ?? null,
+            dps:               r.dps ?? null,
+            tps:               r.tps ?? null,
+            success_probability: r.success_probability ?? null,
+            expected_move:     r.expected_move ?? null,
+            context:           r.context ?? null,
           },
           explanation: r.explanation,
           expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
@@ -156,6 +193,9 @@ export class SignalsService {
       (signal as any)._technical_confidence = r._confidence_before_sentiment ?? r.confidence;
       (signal as any)._raw = r;
       saved.push(signal);
+
+      // Feedback loop : signal log pour calibration / ML
+      Promise.resolve(this.outcomeService.logSignal({ ...r, signalId: signal.id }, asset.market?.name ?? 'UNKNOWN')).catch(() => {});
 
       // Notifier seulement si le sentiment est déjà appliqué,
       // sinon le pass 2 notifiera après validation
@@ -177,7 +217,7 @@ export class SignalsService {
     for (const signal of saved) {
       const sym = signal.asset?.symbol;
       if (!sym) continue;
-      const raw = rawMap.get(sym);
+      const raw = (signal as any)._raw ?? rawMap.get(sym);
       if (!raw) continue;
 
       const meta = signal.metadata as any ?? {};

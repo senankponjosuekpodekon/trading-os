@@ -4,6 +4,7 @@ import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
+import { RolesGuard } from './common/guards/roles.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -14,6 +15,9 @@ import { SignalsModule } from './signals/signals.module';
 import { PositionsModule } from './positions/positions.module';
 import { JournalModule } from './journal/journal.module';
 import { StrategiesModule } from './strategies/strategies.module';
+import { BacktestModule } from './backtest/backtest.module';
+import { BillingModule } from './billing/billing.module';
+import { MetricsModule } from './metrics/metrics.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { WatcherModule } from './watcher/watcher.module';
@@ -37,6 +41,9 @@ import { AiModule } from './ai/ai.module';
     PositionsModule,
     JournalModule,
     StrategiesModule,
+    BacktestModule,
+    BillingModule,
+    MetricsModule,
     NotificationsModule,
     AiModule,
   ],
@@ -44,6 +51,7 @@ import { AiModule } from './ai/ai.module';
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
+    RolesGuard,
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })

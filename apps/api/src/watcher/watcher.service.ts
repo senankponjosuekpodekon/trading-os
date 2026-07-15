@@ -62,7 +62,7 @@ export class WatcherService {
           .filter(d => symbols.includes(d.symbol))
           .map(d => [d.symbol, parseFloat(d.price)]),
       );
-    } catch (err) {
+    } catch {
       this.logger.error('Watcher: impossible de récupérer les prix Binance après 3 tentatives');
       return;
     }
@@ -122,7 +122,7 @@ export class WatcherService {
           closeReason: triggered,
           positionId:  pos.id,
         });
-      } catch (e) {
+      } catch {
         this.logger.warn(`Watcher: journal auto failed for ${pos.id}`);
       }
     }

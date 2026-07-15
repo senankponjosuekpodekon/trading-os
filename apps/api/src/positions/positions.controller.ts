@@ -14,8 +14,12 @@ export class PositionsController {
   }
 
   @Post('from-signal/:signalId')
-  openFromSignal(@Request() req: any, @Param('signalId') signalId: string) {
-    return this.positionsService.openFromSignal(req.user.id, signalId);
+  openFromSignal(
+    @Request() req: any,
+    @Param('signalId') signalId: string,
+    @Query('type') type?: 'PAPER' | 'LIVE',
+  ) {
+    return this.positionsService.openFromSignal(req.user.id, signalId, type || 'PAPER');
   }
 
   @Get()

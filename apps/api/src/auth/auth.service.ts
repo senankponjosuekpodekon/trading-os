@@ -38,7 +38,7 @@ export class AuthService {
     });
 
     const tokens = await this.generateTokenPair(user.id, user.email);
-    const { password, ...userWithoutPassword } = user;
+    const { password: _password, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, ...tokens };
   }
 
@@ -52,7 +52,7 @@ export class AuthService {
     if (!user.isActive) throw new UnauthorizedException('Account disabled');
 
     const tokens = await this.generateTokenPair(user.id, user.email);
-    const { password, ...userWithoutPassword } = user;
+    const { password: _password, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, ...tokens };
   }
 

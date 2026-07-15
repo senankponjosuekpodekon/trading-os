@@ -31,7 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         this.props.fallback ?? (
           <div className="p-6 text-center">
-            <h2 className="text-lg font-semibold text-red-600">Oups, quelque chose s'est mal passé.</h2>
+            <h2 className="text-lg font-semibold text-red-600">Oups, quelque chose s&apos;est mal passé.</h2>
             <p className="text-sm text-gray-600 mt-2">
               {this.state.error?.message || 'Erreur inattendue dans le client.'}
             </p>

@@ -988,15 +988,16 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 #### 🏗️ NestJS API — Tests à ajouter
 
-##### `signal-outcome.service.spec.ts` — SignalLog (nouveau)
-- [ ] `logSignal()` : signal NEUTRAL → aucun log créé
-- [ ] `logSignal()` : signal BUY avec tous les champs → `signalLog.create` appelé avec les bons params
-- [ ] `resolveOutcomes()` : TP1 atteint avant SL → outcome `WIN_TP1`
-- [ ] `resolveOutcomes()` : SL atteint avant TP → outcome `LOSS_SL`
-- [ ] `resolveOutcomes()` : TP2 atteint → outcome `WIN_TP2`
-- [ ] `resolveOutcomes()` : symbole non-Binance + âge > 5j → outcome `EXPIRED`
+##### `signal-outcome.service.spec.ts` — SignalLog ✅ (12 tests passants)
+- [x] `logSignal()` : signal NEUTRAL → aucun log créé ✅
+- [x] `logSignal()` : signal BUY avec tous les champs → `signalLog.create` appelé avec les bons params ✅
+- [x] `resolveOutcomes()` : TP1 atteint avant SL → outcome `WIN_TP1` ✅
+- [x] `resolveOutcomes()` : SL atteint avant TP → outcome `LOSS_SL` ✅
+- [x] `resolveOutcomes()` : TP2 atteint → outcome `WIN_TP2` ✅
+- [x] `resolveOutcomes()` : symbole non-Binance + âge > 5j → outcome `EXPIRED` ✅
 - [ ] `resolveOutcomes()` : N bougies sans résultat → outcome `EXPIRED`
-- [ ] `getStats()` : 10 WIN_TP1 + 5 LOSS_SL → `win_rate_tp1 = 67%`
+- [x] `getStats()` : win rates calculés + cas vide (null) ✅
+- [x] Bonus : résilience — erreur DB dans `logSignal` et erreur Binance dans `resolveOutcomes` ne cassent pas le flux ✅
 
 ##### `notifications.service.spec.ts` (à créer avec le module)
 - [ ] `create()` : crée notification avec `readAt = null`
@@ -1073,10 +1074,11 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 ---
 
 #### ⚙️ CI / CD Tests
-- [ ] 🤖 **GitHub Actions / CI pipeline**
-  - Sur chaque PR : `pytest`, `jest`, `tsc --noEmit`, `ruff check`, `eslint`
-  - Build Docker en CI → détecter les erreurs de build avant déploiement
-  - Coverage check : PR bloquée si coverage descend
+- [x] 🤖 **GitHub Actions / CI pipeline** ✅ (partiel)
+  - [x] Jobs `api` / `web` / `engine` : `pytest`, `jest`, `tsc --noEmit`, `eslint` (API + web) ✅
+  - [x] Build Docker en CI (job `docker`, needs api+web+engine) ✅ — non validé localement (réseau)
+  - [ ] `ruff check` Python à ajouter au job engine
+  - [ ] Coverage check : PR bloquée si coverage descend
 - [ ] 🤖 **Test database isolée**
   - NestJS tests : `DATABASE_URL` pointe sur DB test (pas prod)
   - `beforeEach` : reset DB avec fixtures minimales
@@ -1382,7 +1384,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [x] BRVM cours + signaux (scraping brvm.org)
 - [x] Deriv multi-indices (17 symboles synthétiques)
 - [x] Risk calculator (position sizing)
-- [x] Strategies CRUD + activation
+- [x] Strategies CRUD + activation (⚠️ CRUD prêt mais `scan.py` n'utilise pas encore dynamiquement les `rules` — actuellement logique fixe "EMA Trend + RSI")
 - [x] Sécurité : Helmet + Throttler + CORS strict
 - [x] RAG : embeddings pgvector + chat interface + 13 docs seedés
 - [x] NewsAPI sentiment NLP ±10pts confiance + ingestion RAG
@@ -1542,9 +1544,485 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [x] **BRVM "Tous les titres"** : `max-h-[600px] overflow-y-auto` + `thead sticky top-0`
 - [x] **BRVM "Reports" émetteurs** : `max-h-[500px] overflow-y-auto` + `thead sticky top-0`
 
+### Profils trader/investisseur et signaux adaptatifs
+
+> Le système ne génère pas encore de signaux explicitement tagués par profil. En revanche, il possède déjà des **briques segmentées** (timeframes, marchés, risk calculator, rôles utilisateur) qu'il faut formaliser en logique `profileSuitability`.
+
+#### Profils cibles
+
+- **INVESTOR** : horizon long terme, fondamentaux + macro + on-chain lent. Timeframes 1D/1W. Confiance ≥ 50%, R/R ≥ 2.0.
+- **SWING** : 3-10 jours, technique + price action + sentiment. Timeframes 4H/1D. Confiance ≥ 55%, R/R ≥ 1.5.
+- **DAY** : intraday, on-chain rapide + order flow + news. Timeframes 15m/1H. Confiance ≥ 65%, R/R ≥ 1.2.
+- **SCALPER** : minutes, tick data + liquidations + compression. Timeframes 1m/5m. Confiance ≥ 75%, R/R ≥ 1.0.
+
+#### Briques déjà présentes (à formaliser)
+
+- **Timeframes multiples** : 1m, 5m, 15m, 1h, 4h, 1d supportés dans `scan.py`. Le `warmup` sépare déjà `WARMUP_TIMEFRAMES_FAST` (15m/1h) et `SLOW` (1h/4h) — base pour DAY/SWING.
+- **Marchés segmentés** : BRVM (fondamental), Forex (macro), crypto (on-chain/technique), Deriv (statistique stochastique).
+- **Risk calculator** : sizing, SL/TP, ajustement régime dans `risk.py` — base pour sizing par profil.
+- **Rôles utilisateur** : `UserRole` enum (`TRADER`, `INVESTOR`, `ADMIN`) dans `schema.prisma` — base pour mapping profil.
+- **Hiérarchie multi-timeframe** (`_TF_HIERARCHY` dans `scan.py`) : LTF/MTF/HTF — utile pour qualifier la confluence par profil.
+
+#### Tâches à faire
+
+- [ ] 🤖 **Champ `profileSuitability` sur `Signal`** : tableau de profils compatibles, calculé par `scan.py`.
+- [ ] 🤖 **Fonction `compute_profile_suitability`** : mappe timeframe / confiance / R/R vers profils.
+- [ ] 🤖 **Endpoint `/signals` avec filtre `?profile=`** : permet de filtrer par profil cible.
+- [ ] 🤖 **Badges profils sur les cartes signaux** : affichage visuel dans le frontend.
+- [ ] 🤖 **Sizing et R/R adaptés au profil** : étendre `risk.py` avec des plafonds et levier par profil.
+- [ ] 🤖 **Onboarding profil optionnel** : questionnaire rapide lors de l'inscription ou dans les paramètres.
+
+#### Stratégie d'implémentation
+
+1. **MVP** : badges `profileSuitability` sur chaque signal + filtre frontend. Tous les signaux restent visibles par défaut.
+2. **Post-MVP** : mode "activer le profil" qui filtre automatiquement les signaux, adapte le sizing et les notifications.
+3. **Phase D** : agents spécialisés par profil (agent investisseur, agent scalpeur, etc.).
+
 ### Crypto DeFi & Arbitrage (Long terme)
 - **Idée** : détecter des opportunités d'arbitrage entre DEX (Uniswap, PancakeSwap, etc.) ou entre CEX et DEX.
 - **Données nécessaires** : prix on-chain en temps réel, frais de gaz, liquidité des pools.
 - **Approches** : arbitrage triangulaire, arbitrage cross-chain, flash loans.
 - **Complexité** : élevée — nécessite intégration Web3 (ethers.js / wagmi) et accès aux données on-chain.
 - **Priorité** : long terme, à planifier après la stabilisation du moteur de signaux.
+
+### Détection précoce de tendance, continuation, trailing stop et feedback
+
+> Suite aux échanges sur la capacité à prédire/identifier une tendance avant qu'elle n'accélère, et sur la gestion des positions en cours.
+
+#### Détection précoce d'une nouvelle tendance (early trend)
+
+**Briques déjà présentes :**
+- BOS / CHoCH dans `price_action.py`
+- Order Blocks, FVG, liquidity zones dans `smc.py`
+- Regime ADX/EMA200 dans `regime.py`
+- Confluence 3-TF dans `scan.py`
+- S/R clustering dans `sr_zones.py`
+
+**Manques identifiés :**
+- Divergences RSI / MACD non implémentées
+- Compression Bollinger + expansion partielle
+- Volume anomalie / Volume profile
+- Liquidity sweep / fakeout detection
+- Momentum leading (ROC, Stochastique, Williams %R)
+- On-chain divergence (prix baisse mais accumulation) — Phase A/C
+
+**Signal idéal "early trend" :**
+1. Divergence ou compression sur LTF
+2. Liquidity sweep d'une zone clé
+3. Retour + CHoCH dans l'autre sens
+4. Reteste d'un FVG ou Order Block
+5. Confluence MTF/HTF alignée
+6. SL sous le sweep/OB/FVG (1-2 ATR)
+7. TP défini selon prochaine zone de liquidité ou R/R cible (1:3+)
+
+#### Prédiction de continuation d'une tendance en cours
+
+**Problème :** estimer si la tendance actuelle a encore de la marge ou si elle approche de ses limites.
+
+**Indicateurs de continuation :**
+- ADX > 30 et DI dominant maintenu
+- Structure HH/HL (bull) ou LH/LL (bear) intacte
+- Volume en accord avec la direction
+- Pas de divergence momentum sur HTF
+- Pas d'approche d'une zone de liquidité majeure
+- Funding / OI cohérent avec le mouvement (pas extrême)
+
+**Indicateurs d'épuisement (limits) :**
+- Divergence RSI/MACD sur MTF/HTF
+- Bougie avec grande mèche + volume climax
+- Compression Bollinger après forte expansion
+- Approche d'une résistance/support majeur non cassé 3×+
+- Funding extrême ou liquidations massives (fin de squeeze)
+
+#### Trailing stop et gestion dynamique des positions
+
+**Objectif :** protéger les profits sans sortir trop tôt sur les tendances fortes.
+
+**Options de trailing stop :**
+- ATR trailing (par ex. 2× ATR sous le prix le plus haut)
+- Trailing par structure (dernier swing low/high)
+- Trailing par EMA (EMA 20/50 selon timeframe)
+- Trailing par chandelier (mèche la plus basse des N dernières bougies)
+- Trail conditionnel : activer après +1R, puis ATR×1.5
+
+**Implémentation nécessaire :**
+- [ ] 🤖 **Module `engine/routers/trailing_stop.py`** : calcule le niveau de trailing pour chaque position ouverte.
+- [ ] 🤖 **Job de réévaluation périodique** : toutes les 30s/1min, recalcule le trailing stop et met à jour `Position`.
+- [ ] 🤖 **Endpoint `POST /positions/{id}/trailing-stop`** : active/désactive et choisit la méthode.
+- [ ] 🤖 **Intégration dans `watcher.service.ts`** : fermeture auto si trailing stop touché.
+- [ ] 🤖 **UI** : toggle trailing stop + affichage du niveau sur la position.
+
+#### Feedback loop et expérience utilisateur
+
+**Objectif :** apprendre de chaque trade, améliorer le scoring et l'UX.
+
+**Données à collecter :**
+- Résultat réel vs prédiction initiale (hit TP1, TP2, SL, timeout, trailing)
+- Durée moyenne des trades gagnants/perdants
+- Profil de l'utilisateur vs performance
+- Market conditions au moment du signal (régime, volatilité, news)
+
+**Mécanismes :**
+- [ ] 🤖 **Journal enrichi** : enregistrer features du signal au moment de l'ouverture.
+- [ ] 🤖 **Score post-trade** : comparer expected value vs realized PnL.
+- [ ] 🤖 **Ajustement auto du score** : réduire le poids des features/conditions qui sous-performent.
+- [ ] 🤖 **"Trading Copilot"** : expliquer après chaque trade fermé pourquoi le système avait raison ou tort.
+- [ ] 🤖 **A/B testing stratégies** : tester variantes de règles sur papier avant mise en production.
+
+### Testeur Lab — Agent analyste / stratégies / rapports par profil
+
+> Espace de recherche et validation où un analyste (humain ou agent) conçoit des règles de trading, les teste sur plusieurs marchés en simultané, et obtient des rapports détaillés par profil et par décision.
+
+#### Objectifs
+
+- Tester rapidement une idée de signal sur plusieurs marchés et timeframes.
+- Valider une stratégie par backtest puis forward test (paper trading).
+- Mesurer la performance **par profil utilisateur** (INVESTOR, SWING, DAY, SCALPER).
+- Produire un rapport détaillé par décision (raisonnement, market conditions, outcome, PnL).
+- Décider quelles stratégies méritent d'être activées en production pour quels profils.
+
+#### Composants du Lab
+
+| Composant | Rôle | Fichier | État |
+|---|---|---|---|
+| **Strategy CRUD + UserStrategy** | Modèles Prisma + API CRUD + toggle user | `apps/api/prisma/schema.prisma` + `apps/api/src/strategies/` | ✅ Existe |
+| **Strategy Rules Engine** | Parse et évalue les règles JSON d'une stratégie | `apps/engine/routers/strategy_eval.py` | ✅ Existe |
+| **Strategy Builder (Lab)** | Créer/éditer des stratégies via DSL JSON, template ou prompt LLM | `engine/routers/strategy_lab.py` | À créer |
+| **Signal Generator (Lab)** | Appliquer les règles sur les données et générer des signaux | `engine/routers/scan.py` (mode lab) | À connecter |
+| **Dynamic Scan** | Le scan principal lit les `rules` des strategies actives au lieu de la logique fixe | `engine/routers/scan.py` | 🔴 Gap critique |
+| **Sandbox Engine** | Exécuter les signaux en paper trading sans risque réel | `engine/routers/paper_lab.py` | À créer |
+| **Profiler** | Classer chaque signal selon les 4 profils | `engine/routers/profile_suitability.py` | À créer |
+| **Evaluator** | Calculer métriques par profil et par marché | `engine/evaluation/metrics.py` | À créer |
+| **Report Generator** | Rapport détaillé par décision | `engine/evaluation/report_generator.py` | À créer |
+| **LLM Analyst** | Résumé des résultats et recommandations | `engine/routers/llm.py` (mode lab) | À étendre |
+
+#### Flux d'un test
+
+```
+1. Créer une stratégie (conditions d'entrée, filtres, SL/TP, timeframe, marchés)
+        ↓
+2. Lancer backtest historique (12-24 mois minimum)
+        ↓
+3. Si backtest valide (Sharpe > 0.5, win rate > 40%, max DD < 20%)
+        ↓
+4. Déployer en paper trading (forward testing 2-4 semaines)
+        ↓
+5. Comparer backtest vs paper pour détecter overfitting
+        ↓
+6. Si validation → activer pour les utilisateurs du profil cible
+        ↓
+7. Générer rapport détaillé par décision et par profil
+```
+
+#### Exemple de stratégie Lab (DSL JSON)
+
+```json
+{
+  "name": "Breakout EMA50 + FVG + ADX",
+  "markets": ["crypto", "forex", "deriv"],
+  "analysis_timeframe": "4h",
+  "entry_timeframe": "15m",
+  "trigger": "RETEST",
+  "entry_rules": {
+    "ema_fast_above_slow": true,
+    "fvg_proximity_pct": 1.0,
+    "adx_min": 25,
+    "bos": true
+  },
+  "filters": {
+    "regime": ["TRENDING_BULL", "TRENDING_BEAR"],
+    "min_confidence": 60
+  },
+  "invalidation": {
+    "close_beyond_ob": true,
+    "close_beyond_fvg": true,
+    "max_wait_bars": 8
+  },
+  "exit_rules": {
+    "sl_atr": 1.5,
+    "tp1_atr": 3.0,
+    "tp2_atr": 5.0,
+    "trailing_enabled": true,
+    "trailing_method": "atr_2x"
+  },
+  "profiles": ["SWING", "DAY"]
+}
+```
+
+#### Modes d'entrée et déclencheurs
+
+Le signal doit préciser **comment** entrer après la validation du setup :
+
+| Mode | Déclenchement | Risque | Profil adapté |
+|---|---|---|---|
+| **RETEST** | Prix reteste un OB/FVG/support/résistance | SL serré | Swing, Day |
+| **BREAKOUT** | Prix casse un swing high/low clairement | Risque de fakeout | Day, Scalper |
+| **LIMIT** | Ordre limite placé à un niveau précis | Non exécuté | Investisseur, Swing |
+| **VOLATILITY_EXPANSION** | Compression Bollinger puis expansion forte | Slippage | Scalper, Day |
+| **MOMENTUM_CONFIRMATION** | Bougie de confirmation + volume spike | Retard | Day, Swing |
+
+Règles d'invalidation communes :
+- Fermeture au-delà de l'OB/FVG dans le mauvais sens.
+- Setup non déclenché après N bougies (`max_wait_bars`).
+- Régime passé en VOLATILE sur MTF/HTF.
+- Divergence momentum sur HTF.
+
+#### Endpoints à ajouter
+
+- `POST /lab/strategies` — créer une stratégie Lab
+- `GET /lab/strategies` — lister les stratégies
+- `POST /lab/backtest` — lancer un backtest
+- `GET /lab/backtest/:id/results` — résultats par profil
+- `POST /lab/paper/start` — démarrer le paper test
+- `POST /lab/paper/stop` — arrêter le paper test
+- `GET /lab/paper/:id/results` — résultats paper
+- `GET /lab/reports/:id/decisions` — rapport détaillé par décision
+- `GET /lab/reports/:id/summary` — résumé LLM des résultats
+
+#### Données enregistrées par décision
+
+```json
+{
+  "decision_id": "uuid",
+  "strategy_id": "uuid",
+  "symbol": "BTC/USDT",
+  "market": "crypto",
+  "timeframe": "1h",
+  "profile_suitability": ["SWING", "DAY"],
+  "side": "BUY",
+  "entry_price": 63200,
+  "sl": 62100,
+  "tp1": 65100,
+  "tp2": 67200,
+  "expected_rr": 1.9,
+  "outcome": "TP1",
+  "realized_pnl_pct": 3.0,
+  "market_conditions": {
+    "regime": "TRENDING_BULL",
+    "adx": 32,
+    "volume_anomaly": true,
+    "sentiment": "bullish"
+  },
+  "reasoning": [
+    "EMA50 > EMA200",
+    "FVG haussier à proximité",
+    "Breakout du dernier swing high"
+  ],
+  "execution_trace": [
+    {"timestamp": "...", "event": "signal_generated", "price": 63200},
+    {"timestamp": "...", "event": "position_opened", "price": 63205},
+    {"timestamp": "...", "event": "tp1_hit", "price": 65100}
+  ]
+}
+```
+
+#### Métriques par profil
+
+| Profil | Trades | Win rate | Profit factor | Sharpe | Max DD | R/R moyen |
+|---|---|---|---|---|---|---|
+| INVESTOR | 12 | 58% | 2.1 | 1.2 | 8% | 1:3.2 |
+| SWING | 48 | 52% | 1.8 | 1.0 | 12% | 1:2.4 |
+| DAY | 124 | 46% | 1.5 | 0.8 | 15% | 1:1.6 |
+| SCALPER | 312 | 41% | 1.2 | 0.5 | 22% | 1:1.1 |
+
+Une stratégie peut être approuvée uniquement pour les profils où elle performe.
+
+#### Tâches à intégrer au planning
+
+##### Connexion stratégies existantes au moteur
+- [ ] 🤖 **Timeframe d'analyse vs timeframe d'entrée** : le signal actuel a un seul `timeframe` (LTF = analyse ET entrée). Ajouter `analysisTimeframe` et `entryTimeframe` pour permettre d'analyser sur 4h et entrer sur 15m, par exemple.
+- [ ] 🤖 **Scan dynamique** : `scan.py` doit récupérer les `Strategy` actives et leurs `rules` JSON, puis appeler `evaluate_strategy()` au lieu de la logique hardcodée.
+- [ ] 🤖 **Stratégie par défaut seed** : créer en DB la stratégie "EMA Trend + RSI" avec les règles équivalentes à la logique actuelle pour ne pas casser le scan.
+- [ ] 🤖 **`UserStrategy.customRules`** : permettre à un utilisateur d'activer/désactiver des stratégies et d'outrepasser certains paramètres.
+- [ ] 🤖 **Champ `Signal.strategyId`** : déjà présent — s'assurer qu'il pointe sur la stratégie réellement utilisée.
+
+##### Lab (recherche + validation)
+- [ ] 🤖 **Backend Lab** : backtest, paper trading, évaluation (CRUD stratégies déjà OK).
+- [ ] 🤖 **Profiler** : mapping `profileSuitability` sur les signaux Lab et production.
+- [ ] 🤖 **Rapport par décision** : enregistrer market conditions + reasoning + trace d'exécution.
+- [ ] 🤖 **Comparaison backtest vs paper** : détecter l'overfitting.
+- [ ] 🤖 **Activation production** : promouvoir une stratégie validée vers le moteur principal.
+- [ ] 🤖 **Frontend Lab** : interface de création, lancement de tests, visualisation des rapports.
+
+#### Agent analyste (évolution)
+
+- Propose automatiquement des variantes de règles à tester.
+- Identifie les conditions de marché où une stratégie échoue.
+- Génère un résumé LLM du rapport et recommande les profils cibles.
+- Surveille les stratégies en production et alerte en cas de dégradation.
+
+---
+
+## 🔥 Priorités actuelles — Ce qui manque
+
+> Synthèse des manques identifiés suite aux échanges. Les points sont triés du plus critique au plus stratégique.
+
+### 0. Passer de la lecture du marché à la prédiction du prochain pas
+
+- **Problème** : le système lit l'état actuel du marché (régime, structure, momentum) et réagit. Il ne prédit pas où le prix va aller **avant** qu'il ne s'y déplace.
+- **Conséquence** : on entre souvent après le mouvement, pas avant. Les meilleurs setups sont manqués.
+- **Ce qu'il faut prédire** :
+  - Direction probable de la prochaine bougie ou des prochaines N bougies.
+  - Probable amplitude du mouvement (ATR-projected range).
+  - Zone de liquidité la plus susceptible d'être chassée.
+  - Moment de l'accélération (compression → expansion).
+
+#### Comment transformer les gardes existantes en gardes prédictives
+
+| Garde actuelle (réactive) | Version prédictive | Implémentation |
+|---|---|---|
+| **Score ≥ 40** (signal confirmé) | **Probabilité directionnelle ≥ 60%** sur les prochaines N bougies | Entraîner un modèle simple (XGBoost / logistic) sur les features du signal et l'outcome |
+| **Hystérésis** (2 scans consécutifs) | **Persistance prédite** : estimer que le signal reste valide au prochain scan | Modèle de séquence (Markov / persistence score) sur les N derniers scores |
+| **Confluence MTF/HTF** | **Convergence prédite** : MTF et HTF vont-ils rester alignés après X bougies ? | Corrélation des régimes dans le futur proche |
+| **Regime filter** (ADX > 25) | **Prédiction de régime** : probabilité de rester en trend, de basculer en range ou d'exploser en volatilité | Classifier le régime N bougies plus tard |
+| **SMC : OB/FVG proche** | **Prédiction de reteste** : le prix va-t-il retester l'OB/FVG avant de partir ? | Distance au niveau + momentum leading + volume profile |
+| **Volume spike** | **Prédiction d'initiative** : le volume anormal est-il acheteur ou vendeur ? | Delta volume (buy vs sell pressure) sur les ticks si dispo |
+| **Sentiment news** | **Sentiment prédictif** : les news vont-elles amplifier ou inverser le mouvement ? | Momentum du sentiment + calendrier économique |
+
+#### Mécanismes concrets à implémenter
+
+1. **Expected Move Engine**
+   - Input : ATR, volume, structure, régime.
+   - Output : range haut/bas probable sur les prochaines 5/10/20 bougies.
+   - Utilisé pour : placer SL/TP, évaluer si le R/R est réaliste.
+
+2. **Trigger Probability Score (TPS)**
+   - Pour chaque setup, calculer `P(trigger_hit_next_N_bars)`.
+   - Exemple : setup analyse 4h, entry 15m, trigger RETEST → P(reteste dans les 8 prochaines bougies 15m).
+   - Si `TPS < 40%`, le signal est dégradé ou annulé.
+
+3. **Direction Probability Score (DPS)**
+   - `P(bullish_next_5_bars)` et `P(bearish_next_5_bars)`.
+   - Basé sur : momentum leading, divergence, sweep, compression, funding, on-chain.
+   - Un signal n'est généré que si `DPS > 60%` dans la direction visée.
+
+4. **ML Signal Success Predictor**
+   - Features : score technique, régime, confluence MTF/HTF, volume, sentiment, heure, day-of-week, marché.
+   - Target : `win` (trade gagnant sur les 20 prochaines bougies).
+   - Output : `P(win)`.
+   - Condition : `P(win) > 55%` pour générer le signal.
+
+5. **Liquidity Sweep Predictor**
+   - Identifier les equal highs/lows proches.
+   - Prédire laquelle sera chassée en premier grâce au momentum et au volume.
+   - Anticiper le fakeout avant d'entrer dans le vrai mouvement.
+
+6. **Compression → Expansion Detector**
+   - Bollinger Band width au plus bas depuis 20 bougies.
+   - ATR percentile faible.
+   - Prédire la direction de l'explosion avec le momentum latent (volume, divergence, funding).
+
+- **À faire** :
+  - [ ] 🤖 Moteur prédictif : features de momentum leading, divergence, sweep, compression.
+  - [ ] 🤖 Score `P(bullish_next_X_bars)` / `P(bearish_next_X_bars)`.
+  - [ ] 🤖 Expected move : projection haut/bas basée sur ATR + structure.
+  - [ ] 🤖 Trigger Probability Score (TPS) pour les modes RETEST/LIMIT.
+  - [ ] 🤖 ML Signal Success Predictor (`P(win)`).
+  - [ ] 🤖 Liquidity Sweep Predictor.
+  - [ ] 🤖 Compression → Expansion Detector.
+  - [ ] 🤖 Signaux générés seulement si `DPS > 60%` + `P(win) > 55%` + edge confluence.
+
+### 1. Stratégies : le moteur ne les utilise pas encore (critique)
+
+- **Problème** : `scan.py` génère les signaux avec une logique hardcodée (`analyze_candles`) et enregistre tout sous la stratégie fixe `"EMA Trend + RSI"`.
+- **Conséquence** : les utilisateurs peuvent créer/modifier des stratégies, mais le moteur ne les applique pas.
+- **À faire** :
+  - [ ] 🤖 Récupérer les `Strategy` actives depuis l'API dans `scan.py`.
+  - [ ] 🤖 Appeler `evaluate_strategy()` avec les `rules` JSON au lieu de la logique hardcodée.
+  - [ ] 🤖 Créer une seed `"EMA Trend + RSI"` en DB avec les règles équivalentes pour ne pas casser le fonctionnement.
+  - [ ] 🤖 Permettre `UserStrategy.customRules` pour outrepasser certains paramètres par utilisateur.
+  - [ ] 🤖 S'assurer que `Signal.strategyId` pointe vers la bonne stratégie.
+
+### 2. Profils utilisateur : signaux non tagués
+
+- **Problème** : aucun signal ne porte d'information `profileSuitability` (INVESTOR / SWING / DAY / SCALPER).
+- **Conséquence** : impossible de filtrer les signaux par profil ou d'adapter le sizing.
+- **À faire** :
+  - [ ] 🤖 Fonction `compute_profile_suitability()` dans `scan.py`.
+  - [ ] 🤖 Champ `profileSuitability` sur le modèle `Signal`.
+  - [ ] 🤖 Endpoint `GET /signals?profile=SWING`.
+  - [ ] 🤖 Badges profils sur les cartes signaux.
+  - [ ] 🤖 Sizing / R/R par profil dans `risk.py`.
+
+### 3. Détection précoce de tendance (early trend)
+
+- **Problème** : le système détecte la structure (BOS/CHoCH), les OB/FVG, le régime, mais pas les divergences, sweeps ou compressions.
+- **Conséquence** : on confirme le mouvement plus qu'on ne le prévient.
+- **À faire** :
+  - [ ] 🤖 Divergences RSI / MACD.
+  - [ ] 🤖 Compression Bollinger + explosion de volatilité.
+  - [ ] 🤖 Liquidity sweep / fakeout detection.
+  - [ ] 🤖 Volume anomalie / Volume profile.
+  - [ ] 🤖 Momentum leading (ROC, Stochastique, Williams %R).
+
+### 4. Continuation et épuisement d'une tendance en cours
+
+- **Problème** : pas d'analyse du "jusqu'où peut aller la tendance actuelle".
+- **Conséquence** : TP2 parfois trop optimiste ou conservateur, pas de trailing stop adaptatif.
+- **À faire** :
+  - [ ] 🤖 Score de continuation basé sur ADX, structure intacte, volume, divergence HTF.
+  - [ ] 🤖 Détection d'épuisement : mèches, volume climax, funding extrême, liquidation massive.
+  - [ ] 🤖 Ajuster TP2 ou activer trailing stop selon ce score.
+
+### 5. Trailing stop et gestion dynamique des positions
+
+- **Problème** : les positions se ferment uniquement sur SL, TP1, TP2 ou timeout.
+- **Conséquence** : on laisse courir les profits ou on sort trop tôt sans mécanisme intermédiaire.
+- **À faire** :
+  - [ ] 🤖 Module `engine/routers/trailing_stop.py`.
+  - [ ] 🤖 Méthodes : ATR trailing, structure (dernier swing), EMA trailing, chandelier trailing.
+  - [ ] 🤖 Job périodique (30s-1min) pour recalculer les trailing stops.
+  - [ ] 🤖 Intégration dans `watcher.service.ts` pour fermeture auto.
+  - [ ] 🤖 UI : toggle + niveau affiché sur la position.
+
+### 6. Testeur Lab (validation stratégies par profil et marché)
+
+- **Problème** : aucun environnement dédié pour tester des idées de trading avant production.
+- **Conséquence** : les nouvelles stratégies passent directement en production ou restent théoriques.
+- **À faire** :
+  - [ ] 🤖 Backend Lab : backtest multi-marchés, paper trading, évaluation.
+  - [ ] 🤖 DSL JSON + templates de stratégies.
+  - [ ] 🤖 Profiler : `profileSuitability` par signal Lab.
+  - [ ] 🤖 Rapport détaillé par décision (market conditions, reasoning, trace).
+  - [ ] 🤖 Comparaison backtest vs paper (anti-overfitting).
+  - [ ] 🤖 Frontend Lab.
+
+### 7. Feedback loop et expérience utilisateur
+
+- **Problème** : les trades fermés ne nourrissent pas assez le moteur.
+- **Conséquence** : pas d'amélioration automatique du scoring, pas d'explication post-trade.
+- **À faire** :
+  - [ ] 🤖 Journal enrichi avec features du signal au moment de l'ouverture.
+  - [ ] 🤖 Score post-trade : expected value vs realized PnL.
+  - [ ] 🤖 "Trading Copilot" : explication du trade gagnant/perdant.
+  - [ ] 🤖 Ajustement automatique du poids des features sous-performantes.
+
+### 8. On-chain / macro / fondamentaux avancés
+
+- **Problème** : le moteur est principalement technique/sentiment.
+- **Conséquence** : pas d'alpha asymétrique réel (crypto on-chain, macro forex, fondamentaux BRVM).
+- **À faire** :
+  - [ ] 🤖 Fear & Greed, funding rates, exchange flows, MVRV, OI.
+  - [ ] 🤖 Calendrier économique Forex + DXY momentum + COT report.
+  - [ ] 🤖 Fondamentaux BRVM (P/E, dividendes, revenus, rapports émetteurs).
+  - [ ] 🤖 Début DEX / memecoins (Helius/Birdeye/dRPC) — Phase C/D.
+
+### 9. Fiabilité et scalabilité
+
+- **À surveiller** :
+  - [ ] WebSocket Binance : reconnexion, heartbeat, gestion des déconnexions.
+  - [ ] Rate limiting Twelve Data / Coinglass / CryptoQuant.
+  - [ ] Tests unitaires NestJS critiques (auth, positions, watcher) manquants.
+  - [ ] Migrations Prisma strictes (`prisma migrate deploy` en prod).
+
+### Vue d'ensemble des priorités
+
+```
+🔴 Bloquant avant prod     : Stratégies dynamiques + Profils + Tests critiques
+🟠 Important post-MVP      : Early trend + Trailing stop + Feedback loop
+🟡 Stratégique Phase A/B   : On-chain/macro/fondamentaux
+🟢 Long terme               : Lab complet + Agent analyste + DEX avancé
+```
+
+
+Faire des analyses long termes du genres et autres Q1, Q2, Q3, Q4; les dominances;

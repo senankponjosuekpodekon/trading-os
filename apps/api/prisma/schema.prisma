@@ -15,6 +15,19 @@ enum UserRole {
   ADMIN
 }
 
+enum SubscriptionStatus {
+  ACTIVE
+  TRIAL
+  CANCELLED
+  PAST_DUE
+  EXPIRED
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -29,8 +42,47 @@ model User {
   journal      JournalEntry[]
   strategies   UserStrategy[]
   refreshTokens RefreshToken[]
+  subscriptions Subscription[]
 
   @@map("users")
+}
+
+model Plan {
+  id              String        @id @default(cuid())
+  name            String
+  code            String        @unique
+  price           Decimal
+  interval        BillingInterval
+  maxStrategies   Int?          @map("max_strategies")
+  maxSignals      Int?          @map("max_signals")
+  maxPortfolios   Int?          @map("max_portfolios")
+  features        String[]      @default([])
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  subscriptions   Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id              String             @id @default(cuid())
+  userId          String             @map("user_id")
+  planId          String             @map("plan_id")
+  status          SubscriptionStatus @default(TRIAL)
+  currentPeriodStart DateTime        @map("current_period_start")
+  currentPeriodEnd   DateTime        @map("current_period_end")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan            Plan               @relation(fields: [planId], references: [id])
+
+  @@index([userId, status])
+  @@index([planId])
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
 }
 
 model RefreshToken {
@@ -165,7 +217,8 @@ model Signal {
   stopLoss     Decimal?
   takeProfit1  Decimal?
   takeProfit2  Decimal?
-  riskReward   Float?
+  riskReward        Float?
+  profileSuitability String[] @default([])
   indicators   Json?
   metadata     Json?
   explanation  String?
@@ -202,6 +255,7 @@ model Position {
   quantity     Decimal
   stopLoss     Decimal?
   takeProfit   Decimal?
+  trailingStop Decimal?
   pnl          Decimal?
   pnlPercent   Float?
   openedAt     DateTime       @default(now())

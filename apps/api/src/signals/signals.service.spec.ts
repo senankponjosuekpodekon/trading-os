@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { of } from 'rxjs';
 import { SignalsService } from './signals.service';
+import { SignalOutcomeService } from './signal-outcome.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -36,14 +37,21 @@ describe('SignalsService', () => {
     pushGlobal: jest.fn(),
   };
 
+  const mockOutcomeService = {
+    logSignal: jest.fn().mockResolvedValue(undefined),
+    getStats: jest.fn().mockResolvedValue({ total: 0, winRate: 0 }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SignalsService,
+        SignalOutcomeService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: HttpService, useValue: mockHttp },
         { provide: ConfigService, useValue: mockConfig },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: SignalOutcomeService, useValue: mockOutcomeService },
       ],
     }).compile();
 
@@ -56,7 +64,7 @@ describe('SignalsService', () => {
       mockHttp.post.mockReturnValue(of({
         data: {
           results: [
-            { symbol: 'BTC/USDT', signal: 'BUY', confidence: 75, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test' },
+            { symbol: 'BTC/USDT', signal: 'BUY', confidence: 75, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test', news_sentiment: { score: 0.5 } },
             { symbol: 'ETH/USDT', signal: 'NEUTRAL', confidence: 40 },
           ],
         },
@@ -67,7 +75,7 @@ describe('SignalsService', () => {
 
       const result = await service.triggerScan(['BTC/USDT'], '1h');
 
-      expect(result).toHaveLength(1);
+      expect(result.saved).toHaveLength(1);
       expect(mockNotifications.pushGlobal).toHaveBeenCalled();
     });
 

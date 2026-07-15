@@ -7,7 +7,6 @@ import { PrismaService } from '../prisma/prisma.service';
 
 describe('AuthService', () => {
   let service: AuthService;
-  const user: any = null;
 
   const mockPrisma = {
     user: {

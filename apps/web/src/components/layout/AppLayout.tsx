@@ -21,7 +21,7 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
     initialized.current = true;
     init();
     setReady(true);
-  }, []);
+  }, [init]);
 
   useEffect(() => {
     if (!user || prefetched.current) return;

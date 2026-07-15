@@ -26,6 +26,7 @@ class BacktestRequest(BaseModel):
     min_confidence:  float = 55.0      # Seuil minimum confiance
     use_smc:         bool  = True
     use_pa:          bool  = True
+    strategy:        Optional[dict] = None  # Stratégie DSL dynamique (Testeur Lab)
 
 class TradeResult(BaseModel):
     entry_bar:   int
@@ -54,10 +55,14 @@ class BacktestResult(BaseModel):
     max_drawdown_pct: float
     sharpe_ratio:    float
     avg_rr:          float
+    avg_pnl_pct:     float
+    expectancy:      float
     profit_factor:   float
     final_capital:   float
     equity_curve:    list[float]
     trade_list:      list[dict]
+    benchmark_pnl_pct: float
+    outperformance_pct: float
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -164,7 +169,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
         # ── Scanner la bougie courante ──
         window = df.iloc[max(0, i - 200):i + 1].copy()
-        result = analyze_candles(req.symbol, req.timeframe, window)
+        result = analyze_candles(req.symbol, req.timeframe, window, strategy=req.strategy)
 
         sig  = result.get("signal", "NEUTRAL")
         conf = result.get("confidence", 0)
@@ -172,14 +177,17 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         if sig == "NEUTRAL" or conf < req.min_confidence:
             continue
 
-        # Calculer SL/TP depuis ATR
-        atr_val = result.get("indicators", {}).get("atr", bar_close * 0.01)
-        if sig == "BUY":
-            stop_loss   = bar_close - atr_val * 1.5
-            take_profit = bar_close + atr_val * 2.5
-        else:
-            stop_loss   = bar_close + atr_val * 1.5
-            take_profit = bar_close - atr_val * 2.5
+        # Utiliser les niveaux SL/TP calculés par le moteur (stratégie dynamique ou défaut)
+        stop_loss = result.get("stop_loss")
+        take_profit = result.get("take_profit_1")
+        if stop_loss is None or take_profit is None:
+            atr_val = result.get("indicators", {}).get("atr", bar_close * 0.01)
+            if sig == "BUY":
+                stop_loss   = bar_close - atr_val * 1.5
+                take_profit = bar_close + atr_val * 2.5
+            else:
+                stop_loss   = bar_close + atr_val * 1.5
+                take_profit = bar_close - atr_val * 2.5
 
         sl_dist = abs(bar_close - stop_loss)
         risk_amt = capital * req.risk_pct / 100
@@ -206,10 +214,22 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
     total_pnl     = sum(t["pnl"] for t in trades)
     total_pnl_pct = total_pnl / req.initial_capital * 100
     avg_rr        = np.mean([t["rr_achieved"] for t in trades]) if trades else 0
+    avg_pnl_pct   = np.mean([t["pnl_pct"] for t in trades]) if trades else 0
+
+    avg_win  = np.mean([t["pnl_pct"] for t in wins]) if wins else 0
+    avg_loss = np.mean([t["pnl_pct"] for t in losses]) if losses else 0
+    win_rate_dec = win_rate / 100
+    expectancy = (win_rate_dec * avg_win) - ((1 - win_rate_dec) * abs(avg_loss)) if trades else 0
 
     pnl_returns = [t["pnl_pct"] / 100 for t in trades]
     sharpe      = compute_sharpe(pnl_returns)
     dd, dd_pct  = compute_max_drawdown(equity)
+
+    # Benchmark : buy & hold sur la période
+    start_price = float(df["close"].iloc[warm_up])
+    end_price   = float(df["close"].iloc[-1])
+    benchmark_pnl_pct = (end_price - start_price) / start_price * 100
+    outperformance_pct = total_pnl_pct - benchmark_pnl_pct
 
     return BacktestResult(
         symbol          = req.symbol,
@@ -225,10 +245,14 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         max_drawdown_pct = dd_pct,
         sharpe_ratio    = sharpe,
         avg_rr          = round(float(avg_rr), 2),
+        avg_pnl_pct     = round(float(avg_pnl_pct), 3),
+        expectancy      = round(float(expectancy), 3),
         profit_factor   = profit_factor,
         final_capital   = round(capital, 2),
         equity_curve    = [round(v, 2) for v in equity],
         trade_list      = trades,
+        benchmark_pnl_pct = round(benchmark_pnl_pct, 2),
+        outperformance_pct = round(outperformance_pct, 2),
     )
 
 

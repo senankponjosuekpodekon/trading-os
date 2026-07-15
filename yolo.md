@@ -159,3 +159,5 @@ Ainsi, YOLO devient un composant utile pour l'analyse visuelle, tandis que les d
   Agent Sentiment    → news NLP, social, LunarCrush
   Agent Risque       → position sizing, drawdown, corrélations
   Agent Superviseur  → agrège tous les agents → décision finale
+
+  tu es un guide, tu peux dire ou proposer des trucs que je ne vois pas

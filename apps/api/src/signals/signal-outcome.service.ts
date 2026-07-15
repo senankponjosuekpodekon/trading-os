@@ -41,6 +41,7 @@ export class SignalOutcomeService {
           takeProfit1:   r.take_profit_1  ?? null,
           takeProfit2:   r.take_profit_2  ?? null,
           riskReward:    r.risk_reward    ?? null,
+          signalId:      r.signalId       ?? null,
           scoreTrend:    indicators.score_trend    ?? null,
           scorePA:       indicators.score_pa       ?? null,
           scoreSR:       indicators.score_sr       ?? null,
@@ -49,7 +50,7 @@ export class SignalOutcomeService {
           scoreSMC:      indicators.score_smc      ?? null,
           scoreMTF:      indicators.score_mtf      ?? null,
           scoreSentiment:indicators.score_sentiment?? null,
-          scoreTotal:    indicators.score_total    ?? r.confidence,
+          scoreTotal:    indicators.score_total    ?? r.score ?? r.confidence,
           regime:        r.regime?.regime           ?? null,
           adx:           r.regime?.adx              ?? null,
           market,
@@ -107,7 +108,6 @@ export class SignalOutcomeService {
     const url = `https://api.binance.com/api/v3/klines?symbol=${binanceSym}&interval=${interval}&limit=${bars}`;
     const { data } = await firstValueFrom(this.http.get(url));
 
-    const entry   = parseFloat(log.entryPrice);
     const sl      = log.stopLoss    ? parseFloat(log.stopLoss)    : null;
     const tp1     = log.takeProfit1 ? parseFloat(log.takeProfit1) : null;
     const tp2     = log.takeProfit2 ? parseFloat(log.takeProfit2) : null;

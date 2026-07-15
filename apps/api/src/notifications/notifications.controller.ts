@@ -1,5 +1,5 @@
 import { Controller, Get, Sse, UseGuards, Request, MessageEvent } from '@nestjs/common';
-import { SkipThrottle, Throttle } from '@nestjs/throttler';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { NotificationsService } from './notifications.service';
 import { Observable } from 'rxjs';

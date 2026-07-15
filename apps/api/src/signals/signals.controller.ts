@@ -17,11 +17,13 @@ export class SignalsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('sort') sort?: string,
+    @Query('profile') profile?: string,
   ) {
     return this.signalsService.findAll({
-      page:   page   ? Math.max(1, parseInt(page, 10))   : 1,
-      limit:  limit  ? Math.min(100, Math.max(1, parseInt(limit, 10))) : 20,
-      sort:   sort   || 'createdAt:desc',
+      page:    page   ? Math.max(1, parseInt(page, 10))   : 1,
+      limit:   limit  ? Math.min(100, Math.max(1, parseInt(limit, 10))) : 20,
+      sort:    sort   || 'createdAt:desc',
+      profile: profile,
     });
   }
 

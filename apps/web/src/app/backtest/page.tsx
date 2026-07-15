@@ -153,7 +153,7 @@ export default function BacktestPage() {
         {error && (
           <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
             <AlertCircle className="w-5 h-5 shrink-0" />
-            Erreur backtest — vérifier que l'engine est actif
+            Erreur backtest — vérifier que l&apos;engine est actif
           </div>
         )}
 

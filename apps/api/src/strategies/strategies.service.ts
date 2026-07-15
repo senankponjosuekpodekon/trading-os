@@ -58,8 +58,30 @@ export class StrategiesService {
 
   async getUserStrategies(userId: string) {
     return this.prisma.userStrategy.findMany({
-      where: { userId, isEnabled: true },
+      where: { userId },
       include: { strategy: true },
+    });
+  }
+
+  async updateUserStrategy(userId: string, strategyId: string, customRules: any, isEnabled?: boolean) {
+    const existing = await this.prisma.userStrategy.findUnique({
+      where: { userId_strategyId: { userId, strategyId } },
+    });
+    if (!existing) throw new NotFoundException('UserStrategy not found');
+    return this.prisma.userStrategy.update({
+      where: { userId_strategyId: { userId, strategyId } },
+      data: { customRules, isEnabled },
+      include: { strategy: true },
+    });
+  }
+
+  async removeUserStrategy(userId: string, strategyId: string) {
+    const existing = await this.prisma.userStrategy.findUnique({
+      where: { userId_strategyId: { userId, strategyId } },
+    });
+    if (!existing) throw new NotFoundException('UserStrategy not found');
+    return this.prisma.userStrategy.delete({
+      where: { userId_strategyId: { userId, strategyId } },
     });
   }
 

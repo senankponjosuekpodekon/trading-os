@@ -273,7 +273,7 @@ export default function SignalsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-gray-600 bg-gray-900 border border-gray-800 rounded-xl">
             <TrendingUp className="w-10 h-10 mb-3"/>
             <p className="font-medium">Aucun signal</p>
-            <p className="text-sm mt-1">Cliquez sur <strong className="text-gray-400">Scanner</strong> pour lancer l'analyse</p>
+            <p className="text-sm mt-1">Cliquez sur <strong className="text-gray-400">Scanner</strong> pour lancer l&apos;analyse</p>
           </div>
         )}
 
@@ -477,8 +477,8 @@ export default function SignalsPage() {
                         {loadingAi[s.id]
                           ? <><RefreshCw className="w-3 h-3 animate-spin" />Analyse IA...</>
                           : aiExplain[s.id]
-                            ? <><ChevronUp className="w-3 h-3" />Masquer l'IA</>
-                            : <><Brain className="w-3 h-3" />Expliquer avec l'IA</>}
+                            ? <><ChevronUp className="w-3 h-3" />Masquer l&apos;IA</>
+                            : <><Brain className="w-3 h-3" />Expliquer avec l&apos;IA</>}
                       </button>
                     </div>
                     {aiExplain[s.id] && (

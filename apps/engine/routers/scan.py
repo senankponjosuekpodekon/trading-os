@@ -20,10 +20,14 @@ from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
 from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
 from routers.portfolio_risk import analyze_portfolio_risk, get_cluster
+from routers.strategy_eval import parse_rules, evaluate_strategy, derive_profile_suitability
 import config
 from utils.cache import get_cached, set_cached
 from utils.logger import get_logger
 from utils.http import retry_async
+from utils.rate_limiter import rate_limit
+from utils.market_context import get_signal_context
+from utils.metrics import inc, observe
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=8)
@@ -188,6 +192,7 @@ TF_TO_MS: dict[str, int] = {
 class ScanRequest(BaseModel):
     symbols: List[str]
     timeframe: str = "1h"
+    strategies: List[dict] = []
 
 
 def ema(s: pd.Series, p: int) -> pd.Series:
@@ -290,6 +295,7 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
         return None
 
 
+@rate_limit(max_concurrent=3, min_delay=0.2)
 async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV depuis l'API Deriv WebSocket — pour les indices synthétiques (V75, Boom/Crash, Jump)."""
     import websockets, json as _json
@@ -429,6 +435,7 @@ async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) ->
         return None
 
 
+@rate_limit(max_concurrent=10, min_delay=0.05)
 async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     import time as _time
     binance_sym = SYMBOL_TO_BINANCE.get(symbol)
@@ -494,6 +501,7 @@ def analyze_candles(
     df: pd.DataFrame,
     htf_regime: Optional[dict] = None,   # régime TF supérieur (HTF2 = top)
     mtf_regime: Optional[dict] = None,   # régime TF intermédiaire (HTF1)
+    strategy: Optional[dict] = None,
 ) -> dict:
     if len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data"}
@@ -509,7 +517,7 @@ def analyze_candles(
     e200 = ema(close, 200) if len(df) >= 200 else None
     r14  = rsi(close, 14)
     a14  = atr(high, low, close, 14)
-    vs   = close.rolling(20).mean()
+    vs   = df["volume"].rolling(20).mean()
     macd_line, macd_sig, macd_hist = macd(close)
     bb_upper, bb_mid, bb_lower, bb_bw = bollinger(close)
 
@@ -614,21 +622,54 @@ def analyze_candles(
         if atr_pct > 0.3:
             reasons.append(f"ATR OK ({atr_pct:.2f}%)")
 
-    # ── Bollinger Bands : signal structurel indépendant (mean reversion / breakout) ──
+    # ── Bollinger Bands : signal structurel indépendant ──
+    # En tendance forte, le toucher des bandes est interprété comme continuation
+    # (breakout), pas comme réversion. En tendance neutre, on garde l'interprétation
+    # mean-reversion.
     if bb_upper_v and bb_lower_v and bb_mid_v:
         bb_pos = (c_val - bb_lower_v) / (bb_upper_v - bb_lower_v) if (bb_upper_v - bb_lower_v) > 0 else 0.5
-        if c_val <= bb_lower_v * 1.005:
-            score += 15
-            reasons.append("Price at BB lower — mean reversion setup")
-        elif c_val >= bb_upper_v * 0.995:
-            score -= 15
-            reasons.append("Price at BB upper — potential reversal")
-        elif bb_pos > 0.7 and macd_hist_v and macd_hist_v > 0:
-            score += 8
-            reasons.append("BB upper half + MACD momentum")
-        elif bb_pos < 0.3 and macd_hist_v and macd_hist_v < 0:
-            score -= 8
-            reasons.append("BB lower half + MACD momentum")
+        if trend_raw > 0.5:
+            # Tendance haussière → continuation
+            if c_val >= bb_upper_v * 0.995:
+                score += 15
+                reasons.append("Price at BB upper — bullish continuation")
+            elif c_val <= bb_lower_v * 1.005:
+                score -= 15
+                reasons.append("Price at BB lower — pull-back in uptrend")
+            elif bb_pos > 0.7 and macd_hist_v and macd_hist_v > 0:
+                score += 8
+                reasons.append("BB upper half + MACD momentum")
+            elif bb_pos < 0.3 and macd_hist_v and macd_hist_v < 0:
+                score -= 8
+                reasons.append("BB lower half + MACD momentum")
+        elif trend_raw < -0.5:
+            # Tendance baissière → continuation
+            if c_val <= bb_lower_v * 1.005:
+                score -= 15
+                reasons.append("Price at BB lower — bearish continuation")
+            elif c_val >= bb_upper_v * 0.995:
+                score += 15
+                reasons.append("Price at BB upper — pull-back in downtrend")
+            elif bb_pos < 0.3 and macd_hist_v and macd_hist_v < 0:
+                score -= 8
+                reasons.append("BB lower half + MACD momentum")
+            elif bb_pos > 0.7 and macd_hist_v and macd_hist_v > 0:
+                score += 8
+                reasons.append("BB upper half + MACD momentum")
+        else:
+            # Range / direction faible → mean reversion
+            if c_val <= bb_lower_v * 1.005:
+                score += 15
+                reasons.append("Price at BB lower — mean reversion setup")
+            elif c_val >= bb_upper_v * 0.995:
+                score -= 15
+                reasons.append("Price at BB upper — potential reversal")
+            elif bb_pos > 0.7 and macd_hist_v and macd_hist_v > 0:
+                score += 8
+                reasons.append("BB upper half + MACD momentum")
+            elif bb_pos < 0.3 and macd_hist_v and macd_hist_v < 0:
+                score -= 8
+                reasons.append("BB lower half + MACD momentum")
         if bb_bw_v and bb_bw_v < 0.02:
             reasons.append(f"BB squeeze (bw={bb_bw_v:.3f}) — breakout imminent")
 
@@ -757,6 +798,73 @@ def analyze_candles(
     rr  = round(abs(tp1 - entry) / abs(entry - sl), 2) if sl and tp1 and abs(entry - sl) > 0 else None
 
     _mtf_tf, _htf_tf = _TF_HIERARCHY.get(timeframe, ("4h", "1d"))
+    # default strategy metadata
+    strategy_id = None
+    strategy_name = None
+    profile_suitability = []
+    trigger = None
+    signal_pending = None
+    invalidation = {}
+    dps = None
+    tps = None
+    success_probability = None
+    expected_move = None
+
+    if strategy:
+        rules = parse_rules(strategy.get("rules", {}))
+        ev = evaluate_strategy(
+            rules,
+            indicators={
+                "close": c_val, "ema20": e20_v, "ema50": e50_v, "ema200": e200_v,
+                "rsi": rsi_v, "atr": atr_v, "volume_ratio": vol_r,
+                "macd": macd_v, "macd_signal": macd_sig_v, "macd_hist": macd_hist_v,
+                "bb_upper": bb_upper_v, "bb_mid": bb_mid_v, "bb_lower": bb_lower_v, "bb_bw": bb_bw_v,
+            },
+            pa=pa,
+            sr=sr,
+            patterns=pats,
+            smc=smc,
+            regime=regime,
+            timeframe=timeframe,
+        )
+        signal = ev["signal"]
+        confidence = ev["confidence"]
+        score = ev["score"]
+        dps = ev["dps"]
+        tps = ev["tps"]
+        success_probability = ev["success_probability"]
+        expected_move = ev["expected_move"]
+        reasons = ev["reasons"]
+        entry = ev["entry_price"] if ev["entry_price"] is not None else entry
+        sl = ev["stop_loss"] if ev["stop_loss"] is not None else sl
+        tp1 = ev["take_profit_1"] if ev["take_profit_1"] is not None else tp1
+        tp2 = ev["take_profit_2"] if ev["take_profit_2"] is not None else tp2
+        rr = ev["risk_reward"] if ev["risk_reward"] is not None else rr
+        explanation = " | ".join(reasons) or "No clear setup"
+        strategy_id = strategy.get("id")
+        strategy_name = strategy.get("name")
+        profile_suitability = ev["profile_suitability"]
+        trigger = ev["trigger"]
+        signal_pending = ev["signal_pending"]
+        invalidation = ev["invalidation"]
+
+        if signal != "NEUTRAL":
+            allowed, filter_reason = regime_filter(regime, signal)
+            if not allowed:
+                signal = "NEUTRAL"
+                confidence = 0
+                reasons.append(f"[FILTERED] {filter_reason}")
+                explanation = " | ".join(reasons) or "No clear setup"
+
+    if not profile_suitability:
+        profile_suitability = derive_profile_suitability(
+            timeframe,
+            rr,
+            [],
+            signal,
+            confidence,
+        )
+
     _mtf_aligned = (
         (mtf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BULL" and signal == "BUY" or
         (mtf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BEAR" and signal == "SELL"
@@ -766,8 +874,43 @@ def analyze_candles(
         (htf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BEAR" and signal == "SELL"
     ) if htf_regime else None
 
+    # --- Predictive metrics for default hardcoded path (Sprint 4) ---
+    if not strategy:
+        from utils.predictive import compute_predictive_metrics
+        predictive = compute_predictive_metrics(
+            signal,
+            confidence,
+            entry,
+            tp1,
+            sl,
+            rr,
+            indicators={
+                "close": c_val, "volume_ratio": vol_r, "bb_bw": bb_bw_v, "macd_hist": macd_hist_v,
+            },
+            pa=pa,
+            regime=regime,
+            smc=smc,
+            mtf_aligned=_mtf_aligned,
+            trigger=None,
+        )
+        dps = predictive["dps"]
+        tps = predictive["tps"]
+        success_probability = predictive["success_probability"]
+        expected_move = predictive["expected_move"]
+
     return {
         "symbol":       symbol,
+        "strategy_id":  strategy_id,
+        "strategy_name": strategy_name,
+        "score":        score,
+        "profile_suitability": profile_suitability,
+        "trigger":      trigger,
+        "signal_pending": signal_pending,
+        "invalidation": invalidation,
+        "dps":          dps,
+        "tps":          tps,
+        "success_probability": success_probability,
+        "expected_move": expected_move,
         "timeframe":    timeframe,
         "signal":       signal,
         "confidence":   confidence,
@@ -783,6 +926,7 @@ def analyze_candles(
             "rsi": rsi_v, "atr": atr_v, "volume_ratio": vol_r,
             "macd": macd_v, "macd_signal": macd_sig_v, "macd_hist": macd_hist_v,
             "bb_upper": bb_upper_v, "bb_mid": bb_mid_v, "bb_lower": bb_lower_v, "bb_bw": bb_bw_v,
+            "score_total": score,
         },
         "price_action": {
             "trend":      pa.get("trend"),
@@ -923,6 +1067,7 @@ async def scan_multi(req: ScanRequest):
     t0  = time.monotonic()
     tf  = TF_MAP.get(req.timeframe, "1h")
     loop = asyncio.get_event_loop()
+    inc("scan:requests_total")
 
     # 0. Séparer BRVM des autres marchés
     brvm_symbols = [s for s in req.symbols if is_brvm_symbol(s)]
@@ -931,12 +1076,15 @@ async def scan_multi(req: ScanRequest):
     # 0b. Cache lookup rapide pour les actifs non-BRVM
     cached_results = []
     missing_symbols = []
-    for sym in other_symbols:
-        cached = await get_cached(f"scan:{sym}:{req.timeframe}")
-        if cached:
-            cached_results.append({**cached, "cached": True})
-        else:
-            missing_symbols.append(sym)
+    if req.strategies:
+        missing_symbols = other_symbols
+    else:
+        for sym in other_symbols:
+            cached = await get_cached(f"scan:{sym}:{req.timeframe}")
+            if cached:
+                cached_results.append({**cached, "cached": True})
+            else:
+                missing_symbols.append(sym)
 
     async def _fetch(sym: str) -> Optional[pd.DataFrame]:
         # Essai Binance en premier
@@ -1026,13 +1174,22 @@ async def scan_multi(req: ScanRequest):
         else:
             htf_r = htf_regimes.get(sym)
             mtf_r = mtf_regimes.get(sym)
-            analyze_tasks.append(
-                loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df, htf_r, mtf_r)
-            )
+            if req.strategies:
+                for strat in req.strategies:
+                    analyze_tasks.append(
+                        loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df, htf_r, mtf_r, strat)
+                    )
+            else:
+                analyze_tasks.append(
+                    loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df, htf_r, mtf_r)
+                )
 
     computed_results = list(await asyncio.gather(*analyze_tasks))
     for r in computed_results:
-        await set_cached(f"scan:{r['symbol']}:{req.timeframe}", r, ttl=WARMUP_TTL_SECONDS)
+        cache_key = f"scan:{r['symbol']}:{req.timeframe}"
+        if r.get("strategy_id"):
+            cache_key = f"{cache_key}:{r['strategy_id']}"
+        await set_cached(cache_key, r, ttl=WARMUP_TTL_SECONDS)
 
     brvm_results = []
     if brvm_symbols:
@@ -1118,6 +1275,22 @@ async def scan_multi(req: ScanRequest):
             await asyncio.gather(*tasks, return_exceptions=True)
         asyncio.create_task(_warm_scraper_cache(symbols_missing_cache))
 
+    # 4b. Contexte macro + on-chain pour les signaux actifs
+    active_symbols = [r["symbol"] for r in results if r.get("signal") in ("BUY", "SELL")]
+    if active_symbols:
+        try:
+            context_tasks = [get_signal_context(sym) for sym in active_symbols]
+            context_results = await asyncio.wait_for(
+                asyncio.gather(*context_tasks, return_exceptions=True),
+                timeout=3.0,
+            )
+            context_map = {sym: ctx for sym, ctx in zip(active_symbols, context_results) if not isinstance(ctx, Exception)}
+            for r in results:
+                if r["symbol"] in context_map and context_map[r["symbol"]]:
+                    r["context"] = context_map[r["symbol"]]
+        except asyncio.TimeoutError:
+            logger.warning("market_context_timeout", symbols=len(active_symbols))
+
     # 5. Hystérésis flip-flop — évite BUY→NEUTRAL→BUY sur scans successifs
     # Règles :
     #   - Un signal BUY/SELL doit être produit 2× consécutivement pour être "confirmé"
@@ -1126,7 +1299,7 @@ async def scan_multi(req: ScanRequest):
     now_mono = time.monotonic()
     for r in results:
         sig = r.get("signal", "NEUTRAL")
-        key = f"{r['symbol']}:{req.timeframe}"
+        key = f"{r['symbol']}:{req.timeframe}:{r.get('strategy_id', 'default')}"
         state = _signal_state.get(key)
 
         # Expiration TTL
@@ -1176,10 +1349,16 @@ async def scan_multi(req: ScanRequest):
 
     ws_module.set_latest_signals(results)
 
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    inc("scan:signals_total", len(results))
+    inc("scan:buy_signals", sum(1 for r in results if r.get("signal") == "BUY"))
+    inc("scan:sell_signals", sum(1 for r in results if r.get("signal") == "SELL"))
+    observe("scan:duration_ms", elapsed_ms)
+
     return {
         "scanned":        len(results),
         "timeframe":      req.timeframe,
-        "elapsed_ms":     round((time.monotonic() - t0) * 1000),
+        "elapsed_ms":     round(elapsed_ms, 2),
         "results":        results,
         "portfolio_risk": portfolio_risk,
     }
