@@ -1,4 +1,6 @@
-import { IsString, IsOptional, IsBoolean, IsObject, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsObject, MaxLength, IsIn } from 'class-validator';
+
+const VALID_TFS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
 
 export class CreateStrategyDto {
   @IsString()
@@ -12,6 +14,16 @@ export class CreateStrategyDto {
 
   @IsObject()
   rules: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(VALID_TFS)
+  analysisTimeframe?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(VALID_TFS)
+  entryTimeframe?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -32,6 +44,16 @@ export class UpdateStrategyDto {
   @IsOptional()
   @IsObject()
   rules?: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(VALID_TFS)
+  analysisTimeframe?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(VALID_TFS)
+  entryTimeframe?: string;
 
   @IsOptional()
   @IsBoolean()

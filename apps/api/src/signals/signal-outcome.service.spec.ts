@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { of } from 'rxjs';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { FeatureStoreService } from './feature-store.service';
 
 describe('SignalOutcomeService', () => {
   let service: SignalOutcomeService;
@@ -24,6 +25,10 @@ describe('SignalOutcomeService', () => {
     get: jest.fn((key: string, def: string) => def),
   };
 
+  const mockFeatureStore = {
+    attachOutcome: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -31,11 +36,13 @@ describe('SignalOutcomeService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: HttpService, useValue: mockHttp },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: FeatureStoreService, useValue: mockFeatureStore },
       ],
     }).compile();
 
     service = module.get<SignalOutcomeService>(SignalOutcomeService);
     jest.clearAllMocks();
+    mockPrisma.signalLog.findMany.mockResolvedValue([]);
   });
 
   describe('logSignal', () => {
@@ -104,9 +111,11 @@ describe('SignalOutcomeService', () => {
 
     it('should mark WIN_TP1 when high reaches TP1 for a BUY', async () => {
       const created = Date.now() - 3600_000;
+      mockFeatureStore.attachOutcome.mockResolvedValue(undefined);
       mockPrisma.signalLog.findMany.mockResolvedValue([
         {
           id: 'log-1',
+          signalId: 'sig-1',
           symbol: 'BTC/USDT',
           timeframe: '1h',
           signalType: 'BUY',
@@ -128,6 +137,7 @@ describe('SignalOutcomeService', () => {
         where: { id: 'log-1' },
         data: expect.objectContaining({ outcome: 'WIN_TP1', outcomePrice: 51000 }),
       });
+      expect(mockFeatureStore.attachOutcome).toHaveBeenCalledWith('sig-1', 'WIN_TP1', expect.any(Number));
     });
 
     it('should mark LOSS_SL when low hits SL for a BUY', async () => {
@@ -309,6 +319,99 @@ describe('SignalOutcomeService', () => {
       expect(stats.total).toBe(0);
       expect(stats.win_rate_tp1).toBeNull();
       expect(stats.by_market).toBeNull();
+    });
+  });
+
+  describe('confidence calibration (feedback loop)', () => {
+    it('should bucket resolved outcomes by confidence decile', async () => {
+      const logs = [
+        { confidence: 72, outcome: 'WIN_TP1' },
+        { confidence: 75, outcome: 'WIN_TP2' },
+        { confidence: 78, outcome: 'LOSS_SL' },
+        { confidence: 81, outcome: 'WIN_TP1' },
+        { confidence: 85, outcome: 'EXPIRED' },
+      ];
+      mockPrisma.signalLog.findMany.mockResolvedValue(logs);
+
+      const calibration = await service.getConfidenceCalibration();
+
+      expect(calibration.total).toBe(5);
+      expect(calibration.buckets['70-80']).toEqual({
+        total: 3, win: 2, loss: 1, other: 0, winRate: 67,
+      });
+      expect(calibration.buckets['80-90']).toEqual({
+        total: 2, win: 1, loss: 0, other: 1, winRate: 50,
+      });
+    });
+
+    it('should filter by market and signalType', async () => {
+      mockPrisma.signalLog.findMany.mockResolvedValue([]);
+
+      await service.getConfidenceCalibration('CRYPTO', 'BUY');
+
+      expect(mockPrisma.signalLog.findMany).toHaveBeenCalledWith({
+        where: { outcome: { not: 'PENDING' }, market: 'CRYPTO', signalType: 'BUY' },
+        take: 5000,
+      });
+    });
+
+    it('should predict win rate from matching bucket', async () => {
+      const logs = [
+        { confidence: 62, outcome: 'WIN_TP1' },
+        { confidence: 65, outcome: 'WIN_TP2' },
+        { confidence: 68, outcome: 'LOSS_SL' },
+      ];
+      mockPrisma.signalLog.findMany.mockResolvedValue(logs);
+
+      const prediction = await service.predictWinRate(63, 'CRYPTO');
+
+      expect(prediction.bucket).toBe('60-70');
+      expect(prediction.predictedWinRate).toBe(67);
+      expect(prediction.sampleSize).toBe(3);
+    });
+
+    it('should return null predicted win rate for empty bucket', async () => {
+      mockPrisma.signalLog.findMany.mockResolvedValue([]);
+
+      const prediction = await service.predictWinRate(93);
+
+      expect(prediction.bucket).toBe('90-100');
+      expect(prediction.predictedWinRate).toBeNull();
+      expect(prediction.sampleSize).toBe(0);
+    });
+  });
+
+  describe('getPatternStats', () => {
+    it('should aggregate outcomes by pattern name', async () => {
+      mockPrisma.signalLog.findMany.mockResolvedValue([
+        { patternName: 'double_top', outcome: 'WIN_TP1', barsToOutcome: 5, patternConfluenceScore: 0.8, realizedPnlPct: 2.1, expectedPnlPct: 1.5, entryPrice: '100', outcomePrice: '102' },
+        { patternName: 'double_top', outcome: 'LOSS_SL', barsToOutcome: 3, patternConfluenceScore: 0.6, realizedPnlPct: -1.0, expectedPnlPct: 1.5, entryPrice: '100', outcomePrice: '99' },
+        { patternName: 'abcd', outcome: 'WIN_TP2', barsToOutcome: 8, patternConfluenceScore: 0.9, realizedPnlPct: 3.5, expectedPnlPct: 2.0, entryPrice: '100', outcomePrice: '104' },
+      ]);
+
+      const stats = await service.getPatternStats();
+
+      expect(stats.total).toBe(3);
+      expect(stats.patterns.double_top.trades).toBe(2);
+      expect(stats.patterns.double_top.wins).toBe(1);
+      expect(stats.patterns.double_top.losses).toBe(1);
+      expect(stats.patterns.double_top.winRate).toBe(50);
+      expect(stats.patterns.abcd.winRate).toBe(100);
+    });
+  });
+
+  describe('getPostTradeAnalysis', () => {
+    it('should compare expected vs realized PnL', async () => {
+      mockPrisma.signalLog.findMany.mockResolvedValue([
+        { expectedPnlPct: 2, realizedPnlPct: 1 },
+        { expectedPnlPct: 2, realizedPnlPct: 3 },
+      ]);
+
+      const analysis = await service.getPostTradeAnalysis();
+
+      expect(analysis.avgExpectedPnlPct).toBe(2);
+      expect(analysis.avgRealizedPnlPct).toBe(2);
+      expect(analysis.bias).toBe(0);
     });
   });
 });

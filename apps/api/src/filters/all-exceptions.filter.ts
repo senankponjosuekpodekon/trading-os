@@ -7,6 +7,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { ApplicationException } from '../common/errors/application.exception';
+import { ErrorCode } from '../common/errors/error-codes';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -21,8 +23,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
+    let code: ErrorCode = ErrorCode.INTERNAL_ERROR;
+    let details: Record<string, any> | undefined;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof ApplicationException) {
+      status = exception.getStatus();
+      const res = exception.getResponse() as any;
+      message = res.message || message;
+      code = exception.code;
+      details = exception.details;
+    } else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const res = exception.getResponse();
       message = typeof res === 'string' ? res : (res as any).message || message;
@@ -32,22 +42,34 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     this.logger.error({
       status,
+      code,
       path: request.url,
       method: request.method,
       userId: (request as any).user?.id,
       body: request.body,
       error: exception instanceof Error ? exception.message : String(exception),
       stack: isProd ? undefined : exception instanceof Error ? exception.stack : undefined,
+      details,
     });
 
-    response.status(status).json({
+    const responseBody: Record<string, any> = {
       statusCode: status,
+      code,
       message,
       timestamp: new Date().toISOString(),
       path: request.url,
-      ...(!isProd && exception instanceof Error
-        ? { error: exception.message, stack: exception.stack }
-        : {}),
-    });
+      requestId: (request as any).requestId,
+    };
+
+    if (details) {
+      responseBody.details = details;
+    }
+
+    if (!isProd && exception instanceof Error) {
+      responseBody.error = exception.message;
+      if (exception.stack) responseBody.stack = exception.stack;
+    }
+
+    response.status(status).json(responseBody);
   }
 }

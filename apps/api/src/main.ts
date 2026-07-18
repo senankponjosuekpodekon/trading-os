@@ -1,7 +1,9 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
+import { auditEnv } from './common/security/env-audit';
+import { randomUUID } from 'crypto';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -10,6 +12,8 @@ async function bootstrap() {
   app.use(helmet({
     crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+    hsts: process.env.NODE_ENV === 'production' ? { maxAge: 15552000, includeSubDomains: true } : false,
+    referrerPolicy: { policy: 'same-origin' },
   }));
 
   // ── CORS strict ────────────────────────────────────────────────
@@ -36,6 +40,15 @@ async function bootstrap() {
     transform:        true,
     transformOptions: { enableImplicitConversion: true },
   }));
+
+  // ── Request ID for tracing ────────────────────────────────────────────
+  app.use((req: any, _res: any, next: any) => {
+    req.requestId = req.headers['x-request-id'] || randomUUID();
+    next();
+  });
+
+  // ── Security env audit ─────────────────────────────────────────────
+  auditEnv(new Logger('SecurityAudit'));
 
   const port = process.env.API_PORT || 3001;
   await app.listen(port);

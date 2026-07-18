@@ -3,6 +3,8 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { TwoFactorService } from './two-factor.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -13,6 +15,8 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
+    private audit: AuditService,
+    private twoFactor: TwoFactorService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -43,7 +47,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = (await this.prisma.user.findUnique({ where: { email: dto.email } })) as any;
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     const valid = await bcrypt.compare(dto.password, user.password);
@@ -51,8 +55,15 @@ export class AuthService {
 
     if (!user.isActive) throw new UnauthorizedException('Account disabled');
 
+    if (user.totpEnabled) {
+      if (!dto.totpToken) throw new UnauthorizedException('2FA token required');
+      const verified = this.twoFactor.verifyToken(user.totpSecret, dto.totpToken);
+      if (!verified) throw new UnauthorizedException('Invalid 2FA token');
+    }
+
     const tokens = await this.generateTokenPair(user.id, user.email);
     const { password: _password, ...userWithoutPassword } = user;
+    await this.audit.log({ userId: user.id, action: 'LOGIN', resource: 'auth', details: { email: dto.email } });
     return { user: userWithoutPassword, ...tokens };
   }
 
@@ -81,6 +92,10 @@ export class AuthService {
 
   async logout(refreshToken: string) {
     const hash = this.hashToken(refreshToken);
+    const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash: hash } });
+    if (stored) {
+      await this.audit.log({ userId: stored.userId, action: 'LOGOUT', resource: 'auth' });
+    }
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash: hash },
       data: { revokedAt: new Date() },

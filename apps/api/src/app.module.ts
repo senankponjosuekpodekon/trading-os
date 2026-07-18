@@ -5,6 +5,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { SecurityModule } from './common/security/security.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -16,12 +17,21 @@ import { PositionsModule } from './positions/positions.module';
 import { JournalModule } from './journal/journal.module';
 import { StrategiesModule } from './strategies/strategies.module';
 import { BacktestModule } from './backtest/backtest.module';
+import { LabModule } from './lab/lab.module';
 import { BillingModule } from './billing/billing.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PriceAlertsModule } from './price-alerts/price-alerts.module';
+import { AuditModule } from './audit/audit.module';
+import { DbPerformanceModule } from './db-performance/db-performance.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { WatcherModule } from './watcher/watcher.module';
+import { MarketDataModule } from './market-data/market-data.module';
 import { AiModule } from './ai/ai.module';
+import { EarlyAlphaModule } from './early-alpha/early-alpha.module';
+import { PhaseBModule } from './phase-b/phase-b.module';
+import { PhaseCModule } from './phase-c/phase-c.module';
+import { ExpectedMoveModule } from './expected-move/expected-move.module';
 
 @Module({
   imports: [
@@ -33,6 +43,7 @@ import { AiModule } from './ai/ai.module';
     ]),
     ScheduleModule.forRoot(),
     WatcherModule,
+    MarketDataModule,
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -42,10 +53,19 @@ import { AiModule } from './ai/ai.module';
     JournalModule,
     StrategiesModule,
     BacktestModule,
+    LabModule,
     BillingModule,
     MetricsModule,
     NotificationsModule,
+    PriceAlertsModule,
+    AuditModule,
+    DbPerformanceModule,
     AiModule,
+    EarlyAlphaModule,
+    PhaseBModule,
+    PhaseCModule,
+    ExpectedMoveModule,
+    SecurityModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,8 +1,15 @@
-import { IsString, IsNumber, IsOptional, IsEnum, MaxLength } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsEnum, IsBoolean, MaxLength } from 'class-validator';
 
 export enum Direction {
   BUY  = 'BUY',
   SELL = 'SELL',
+}
+
+export enum TrailingMethod {
+  ATR = 'atr',
+  SWING = 'swing',
+  EMA = 'ema',
+  CHANDELIER = 'chandelier',
 }
 
 export class CreatePositionDto {
@@ -29,6 +36,14 @@ export class CreatePositionDto {
   @IsOptional()
   @IsNumber()
   takeProfit?: number;
+
+  @IsOptional()
+  @IsEnum(TrailingMethod)
+  trailingMethod?: TrailingMethod;
+
+  @IsOptional()
+  @IsBoolean()
+  trailingActive?: boolean;
 
   @IsOptional()
   @IsString()

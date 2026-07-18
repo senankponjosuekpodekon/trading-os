@@ -4,6 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { FeatureStoreService } from './feature-store.service';
 
 const TF_TO_BARS_LOOKBACK: Record<string, number> = {
   '1m': 60, '5m': 48, '15m': 32, '1h': 24, '4h': 12, '1d': 5,
@@ -22,6 +23,7 @@ export class SignalOutcomeService {
     private prisma: PrismaService,
     private http: HttpService,
     private config: ConfigService,
+    private featureStore: FeatureStoreService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
@@ -29,7 +31,11 @@ export class SignalOutcomeService {
   async logSignal(r: any, market: string) {
     if (!r.signal || r.signal === 'NEUTRAL' || !r.entry_price) return;
     const indicators = r.indicators ?? {};
+    const detected = r.detectedPatterns ?? [];
+    const topPattern = detected[0] ?? {};
     try {
+      // Expected PnL % based on predicted win rate for the confidence bucket
+      const expectedPnlPct = await this._estimateExpectedPnlPct(r.confidence, r.risk_reward, market, r.signal);
       await this.prisma.signalLog.create({
         data: {
           symbol:        r.symbol,
@@ -54,11 +60,38 @@ export class SignalOutcomeService {
           regime:        r.regime?.regime           ?? null,
           adx:           r.regime?.adx              ?? null,
           market,
+          patternName: topPattern.name ?? null,
+          patternConfluenceScore: topPattern.confluenceScore ?? null,
+          patternConfluenceTags: topPattern.confluenceTags ?? [],
+          featureVector: r.feature_vector ?? null,
+          metadata: {
+            marketContext: r.marketContext ?? r.context ?? null,
+            detectedPatterns: detected,
+            decisionTrace: r.decisionTrace ?? null,
+            explanation: r.explanation ?? null,
+          } as any,
+          expectedPnlPct,
         },
       });
     } catch (e: any) {
       this.logger.warn(`logSignal failed: ${e?.message}`);
     }
+  }
+
+  private async _estimateExpectedPnlPct(
+    confidence: number,
+    riskReward: number | null | undefined,
+    market?: string,
+    signalType?: string,
+  ): Promise<number | null> {
+    if (!riskReward || riskReward <= 0) return null;
+    const calibration = await this.getConfidenceCalibration(market, signalType).catch(() => null);
+    const bucket = this._confidenceBucket(confidence);
+    const b = calibration?.buckets?.[bucket];
+    const winRate = b?.winRate ?? 50;
+    const winPct = (riskReward - 1) * 100;
+    const lossPct = -100;
+    return (winRate / 100) * winPct + ((100 - winRate) / 100) * lossPct;
   }
 
   @Cron('0 * * * *')
@@ -157,6 +190,11 @@ export class SignalOutcomeService {
     }
 
     if (outcome) {
+      const realizedPnlPct = this._computeRealizedPnlPct(log, outcome, outcomePrice);
+      const postTradeScore = realizedPnlPct !== null && log.expectedPnlPct && log.expectedPnlPct !== 0
+        ? Math.max(-10, Math.min(10, realizedPnlPct / log.expectedPnlPct))
+        : null;
+
       await this.prisma.signalLog.update({
         where: { id: log.id },
         data: {
@@ -164,9 +202,25 @@ export class SignalOutcomeService {
           outcomePrice:  outcomePrice ?? undefined,
           outcomeAt:     outcomeAt ?? undefined,
           barsToOutcome: barsToOutcome ?? undefined,
+          realizedPnlPct: realizedPnlPct ?? undefined,
+          postTradeScore: postTradeScore ?? undefined,
         },
       });
+
+      if (log.signalId) {
+        const pnlPct = realizedPnlPct ?? null;
+        await this.featureStore.attachOutcome(log.signalId, outcome, pnlPct);
+      }
     }
+  }
+
+  private _computeRealizedPnlPct(log: any, outcome: string, outcomePrice: number | null): number | null {
+    if (!outcomePrice) return null;
+    const entry = parseFloat(log.entryPrice);
+    if (!entry || Number.isNaN(entry) || entry === 0) return null;
+    const isBuy = log.signalType === 'BUY';
+    const pct = isBuy ? (outcomePrice - entry) / entry : (entry - outcomePrice) / entry;
+    return Math.round(pct * 100 * 100) / 100;
   }
 
   async getStats(market?: string) {
@@ -201,5 +255,198 @@ export class SignalOutcomeService {
       delete result[m].by_market;
     }
     return result;
+  }
+
+  async getPatternStats() {
+    const where: any = { outcome: { not: 'PENDING' }, patternName: { not: null } };
+    const logs = await this.prisma.signalLog.findMany({ where, take: 5000 });
+
+    const stats: Record<string, { trades: number; wins: number; losses: number; pnl: number; winRate: number; avgDuration: number | null; avgConfluence: number | null; avgRealizedPnl: number | null; avgExpectedPnl: number | null }> = {};
+    for (const log of logs) {
+      const name = log.patternName!;
+      if (!stats[name]) {
+        stats[name] = { trades: 0, wins: 0, losses: 0, pnl: 0, winRate: 0, avgDuration: null, avgConfluence: null, avgRealizedPnl: null, avgExpectedPnl: null };
+      }
+      const s = stats[name];
+      s.trades += 1;
+      if (log.outcome === 'WIN_TP1' || log.outcome === 'WIN_TP2') s.wins += 1;
+      else if (log.outcome === 'LOSS_SL') s.losses += 1;
+      s.pnl += parseFloat(log.outcomePrice?.toString() ?? '0') - parseFloat(log.entryPrice?.toString() ?? '0');
+    }
+
+    for (const name of Object.keys(stats)) {
+      const s = stats[name];
+      const patternLogs = logs.filter(l => l.patternName === name);
+      s.winRate = s.trades > 0 ? Math.round((s.wins / s.trades) * 100) : 0;
+      s.avgDuration = patternLogs.length ? patternLogs.reduce((sum, l) => sum + (l.barsToOutcome ?? 0), 0) / patternLogs.length : null;
+      s.avgConfluence = patternLogs.filter(l => l.patternConfluenceScore != null).length
+        ? patternLogs.reduce((sum, l) => sum + (l.patternConfluenceScore ?? 0), 0) / patternLogs.filter(l => l.patternConfluenceScore != null).length
+        : null;
+      s.avgRealizedPnl = patternLogs.filter(l => l.realizedPnlPct != null).length
+        ? patternLogs.reduce((sum, l) => sum + (l.realizedPnlPct ?? 0), 0) / patternLogs.filter(l => l.realizedPnlPct != null).length
+        : null;
+      s.avgExpectedPnl = patternLogs.filter(l => l.expectedPnlPct != null).length
+        ? patternLogs.reduce((sum, l) => sum + (l.expectedPnlPct ?? 0), 0) / patternLogs.filter(l => l.expectedPnlPct != null).length
+        : null;
+      s.pnl = Math.round(s.pnl * 100) / 100;
+    }
+    return { total: logs.length, patterns: stats };
+  }
+
+  async getPostTradeAnalysis(market?: string, patternName?: string) {
+    const where: any = { outcome: { not: 'PENDING' }, realizedPnlPct: { not: null }, expectedPnlPct: { not: null } };
+    if (market) where.market = market;
+    if (patternName) where.patternName = patternName;
+    const logs = await this.prisma.signalLog.findMany({ where, take: 5000 });
+
+    const avgExpected = logs.length ? logs.reduce((sum, l) => sum + (l.expectedPnlPct ?? 0), 0) / logs.length : 0;
+    const avgRealized = logs.length ? logs.reduce((sum, l) => sum + (l.realizedPnlPct ?? 0), 0) / logs.length : 0;
+    const bias = avgExpected !== 0 ? (avgRealized - avgExpected) / Math.abs(avgExpected) : 0;
+
+    return {
+      sampleSize: logs.length,
+      avgExpectedPnlPct: Math.round(avgExpected * 100) / 100,
+      avgRealizedPnlPct: Math.round(avgRealized * 100) / 100,
+      bias: Math.round(bias * 100) / 100,
+      overestimating: bias < -0.1,
+      underestimating: bias > 0.1,
+    };
+  }
+
+  // ─── Confidence feedback loop (Sprint 5) ───────────────────────────────
+
+  private _confidenceBucket(confidence: number): string {
+    const low = Math.floor(confidence / 10) * 10;
+    const high = low + 10;
+    return `${low}-${high}`;
+  }
+
+  private _isWinOutcome(outcome: string): boolean {
+    return outcome === 'WIN_TP1' || outcome === 'WIN_TP2';
+  }
+
+  private _outcomeKey(outcome: string): string {
+    if (outcome === 'WIN_TP1' || outcome === 'WIN_TP2') return 'win';
+    if (outcome === 'LOSS_SL') return 'loss';
+    return 'other';
+  }
+
+  async getConfidenceCalibration(market?: string, signalType?: string) {
+    const where: any = { outcome: { not: 'PENDING' } };
+    if (market) where.market = market;
+    if (signalType) where.signalType = signalType;
+
+    const logs = await this.prisma.signalLog.findMany({ where, take: 5000 });
+
+    const buckets: Record<string, { total: number; win: number; loss: number; other: number; winRate: number | null }> = {};
+    for (const log of logs) {
+      const bucket = this._confidenceBucket(log.confidence);
+      if (!buckets[bucket]) {
+        buckets[bucket] = { total: 0, win: 0, loss: 0, other: 0, winRate: null };
+      }
+      const b = buckets[bucket];
+      b.total += 1;
+      const key = this._outcomeKey(log.outcome);
+      if (key === 'win') b.win += 1;
+      else if (key === 'loss') b.loss += 1;
+      else b.other += 1;
+    }
+
+    for (const b of Object.values(buckets)) {
+      b.winRate = b.total > 0 ? Math.round((b.win / b.total) * 100) : null;
+    }
+
+    return { total: logs.length, buckets };
+  }
+
+  async predictWinRate(
+    confidence: number,
+    market?: string,
+    signalType?: string,
+  ): Promise<{ confidence: number; bucket: string; predictedWinRate: number | null; sampleSize: number }> {
+    const bucket = this._confidenceBucket(confidence);
+    const { buckets } = await this.getConfidenceCalibration(market, signalType);
+    const b = buckets[bucket];
+    if (!b || b.total === 0) {
+      return { confidence, bucket, predictedWinRate: null, sampleSize: 0 };
+    }
+    return {
+      confidence,
+      bucket,
+      predictedWinRate: b.winRate,
+      sampleSize: b.total,
+    };
+  }
+
+  // ─── Market Memory ─ nearest neighbours over signal feature vectors ─────────
+
+  async findSimilar(input: {
+    symbol?: string;
+    market?: string;
+    timeframe?: string;
+    confidence?: number;
+    scoreTrend?: number;
+    scorePA?: number;
+    scoreSR?: number;
+    scorePatterns?: number;
+    scoreRegime?: number;
+    scoreSMC?: number;
+    scoreMTF?: number;
+    scoreSentiment?: number;
+    scoreTotal?: number;
+    riskReward?: number;
+    adx?: number;
+    top?: number;
+  }) {
+    const FEATURE_KEYS: (keyof typeof input)[] = [
+      'confidence', 'scoreTrend', 'scorePA', 'scoreSR', 'scorePatterns',
+      'scoreRegime', 'scoreSMC', 'scoreMTF', 'scoreSentiment', 'scoreTotal',
+      'riskReward', 'adx',
+    ];
+
+    const inputVec = this._toVector(input, FEATURE_KEYS);
+
+    const where: any = { outcome: { not: 'PENDING' } };
+    if (input.symbol) where.symbol = input.symbol;
+    else if (input.market) where.market = input.market;
+
+    const logs = await this.prisma.signalLog.findMany({
+      where,
+      take: 2000,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const scored = logs
+      .map(log => {
+        const logVec = this._toVector(log as any, FEATURE_KEYS);
+        const dist = this._euclidean(inputVec, logVec);
+        const similarity = Math.max(0, Math.min(100, Math.round((1 / (1 + dist)) * 100)));
+        return { ...log, similarity, distance: dist };
+      })
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, input.top ?? 10);
+
+    return {
+      input: inputVec,
+      count: scored.length,
+      neighbours: scored,
+    };
+  }
+
+  private _toVector(obj: any, keys: string[]): number[] {
+    const maxs: Record<string, number> = {
+      confidence: 100, scoreTrend: 100, scorePA: 100, scoreSR: 100,
+      scorePatterns: 100, scoreRegime: 100, scoreSMC: 100, scoreMTF: 100,
+      scoreSentiment: 100, scoreTotal: 100, riskReward: 10, adx: 100,
+    };
+    return keys.map(k => {
+      const v = typeof obj[k] === 'number' && !Number.isNaN(obj[k]) ? (obj[k] as number) : 0;
+      const scale = maxs[k] || 1;
+      return v / scale;
+    });
+  }
+
+  private _euclidean(a: number[], b: number[]): number {
+    return Math.sqrt(a.reduce((sum, v, i) => sum + (v - b[i]) ** 2, 0));
   }
 }

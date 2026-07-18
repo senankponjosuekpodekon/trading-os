@@ -88,6 +88,7 @@ describe('PositionsController (integration)', () => {
   });
 
   it('POST /positions creates a position', async () => {
+    prismaMock.position.findFirst.mockResolvedValue(null);
     const dto = {
       portfolioId: 'p1',
       assetSymbol: 'BTC/USDT',
@@ -107,6 +108,7 @@ describe('PositionsController (integration)', () => {
   });
 
   it('PATCH /positions/:id/close closes a position', async () => {
+    prismaMock.position.findFirst.mockResolvedValue(position);
     await request(app.getHttpServer())
       .patch('/positions/pos1/close')
       .send({ exitPrice: 110 })

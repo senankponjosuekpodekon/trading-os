@@ -4,6 +4,8 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { TwoFactorService } from './two-factor.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -29,12 +31,22 @@ describe('AuthService', () => {
     sign: jest.fn(() => 'mock-token'),
   };
 
+  const mockAudit = {
+    log: jest.fn().mockResolvedValue(undefined),
+  };
+
+  const mockTwoFactor = {
+    verifyToken: jest.fn().mockReturnValue(true),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwt },
+        { provide: AuditService, useValue: mockAudit },
+        { provide: TwoFactorService, useValue: mockTwoFactor },
       ],
     }).compile();
 

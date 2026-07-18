@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { StrategiesService } from './strategies.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { QuotaService } from '../billing/quota.service';
 
 describe('StrategiesService', () => {
   let service: StrategiesService;
@@ -17,6 +18,7 @@ describe('StrategiesService', () => {
     },
     userStrategy: {
       findMany: jest.fn(),
+      findUnique: jest.fn(),
       upsert: jest.fn(),
     },
   };
@@ -26,6 +28,7 @@ describe('StrategiesService', () => {
       providers: [
         StrategiesService,
         { provide: PrismaService, useValue: prismaMock as any },
+        { provide: QuotaService, useValue: { assertCanEnableStrategy: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

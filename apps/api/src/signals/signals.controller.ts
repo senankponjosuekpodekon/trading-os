@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards, Request } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
+import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
+import { PatternPredictorService, PatternFeaturesInput } from './pattern-predictor.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('signals')
@@ -10,6 +12,8 @@ export class SignalsController {
   constructor(
     private signalsService: SignalsService,
     private outcomeService: SignalOutcomeService,
+    private predictorService: SignalPredictorService,
+    private patternPredictorService: PatternPredictorService,
   ) {}
 
   @Get()
@@ -18,23 +22,140 @@ export class SignalsController {
     @Query('limit') limit?: string,
     @Query('sort') sort?: string,
     @Query('profile') profile?: string,
+    @Query('market') market?: string,
   ) {
     return this.signalsService.findAll({
       page:    page   ? Math.max(1, parseInt(page, 10))   : 1,
       limit:   limit  ? Math.min(100, Math.max(1, parseInt(limit, 10))) : 20,
       sort:    sort   || 'createdAt:desc',
       profile: profile,
+      market:  market,
     });
   }
 
   @Post('scan')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  triggerScan(@Body() body: { symbols: string[]; timeframe?: string }) {
-    return this.signalsService.triggerScan(body.symbols, body.timeframe ?? '1h');
+  triggerScan(
+    @Request() req: any,
+    @Body() body: { symbols: string[]; timeframe?: string; strategies?: any[] },
+  ) {
+    return this.signalsService.triggerScan(body.symbols, body.timeframe ?? '1h', {
+      userId: req.user.id,
+      strategies: body.strategies,
+    });
   }
 
   @Get('stats')
   getStats(@Query('market') market?: string) {
     return this.outcomeService.getStats(market);
+  }
+
+  @Get('alerts/stats')
+  getAlertStats(@Request() req: any) {
+    return this.signalsService.getAlertStats(req.user.id);
+  }
+
+  @Get('calibration')
+  getCalibration(
+    @Query('market') market?: string,
+    @Query('signalType') signalType?: string,
+  ) {
+    return this.outcomeService.getConfidenceCalibration(market, signalType);
+  }
+
+  @Get('predict-win-rate')
+  predictWinRate(
+    @Query('confidence') confidence: string,
+    @Query('market') market?: string,
+    @Query('signalType') signalType?: string,
+  ) {
+    const c = parseFloat(confidence);
+    if (Number.isNaN(c)) return { error: 'confidence must be a number' };
+    return this.outcomeService.predictWinRate(c, market, signalType);
+  }
+
+  @Post('predictor/train')
+  trainPredictor(@Query('market') market?: string) {
+    return this.predictorService.train(market);
+  }
+
+  @Post('predictor/predict')
+  predictSignal(@Body() features: SignalFeatures) {
+    return this.predictorService.predict(features);
+  }
+
+  @Get('predictor/status')
+  predictorStatus() {
+    return this.predictorService.getStatus();
+  }
+
+  @Get('predictor/weights')
+  predictorWeights() {
+    return this.predictorService.getFeatureWeights();
+  }
+
+  @Post('memory/similar')
+  findSimilarSignals(@Body() dto: any) {
+    return this.outcomeService.findSimilar(dto);
+  }
+
+  @Get('pattern-stats')
+  getPatternStats() {
+    return this.outcomeService.getPatternStats();
+  }
+
+  @Get('features')
+  listFeatureSnapshots(
+    @Query('market') market?: string,
+    @Query('outcome') outcome?: string,
+    @Query('timeframe') timeframe?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    return this.signalsService.listFeatureSnapshots({
+      market,
+      outcome,
+      timeframe,
+      limit: parsedLimit,
+    });
+  }
+
+  @Get('features/export')
+  exportFeatureSnapshots(
+    @Query('market') market?: string,
+    @Query('outcome') outcome?: string,
+    @Query('timeframe') timeframe?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    return this.signalsService.exportFeatureDataset({
+      market,
+      outcome,
+      timeframe,
+      limit: parsedLimit ?? 500,
+    });
+  }
+
+  @Get('post-trade-analysis')
+  getPostTradeAnalysis(
+    @Query('market') market?: string,
+    @Query('patternName') patternName?: string,
+  ) {
+    return this.outcomeService.getPostTradeAnalysis(market, patternName);
+  }
+
+  @Post('pattern-predictor/train')
+  trainPatternPredictor(@Query('market') market?: string) {
+    return this.patternPredictorService.train(market);
+  }
+
+  @Post('pattern-predictor/predict')
+  predictPattern(@Body() features: PatternFeaturesInput) {
+    return this.patternPredictorService.predict(features);
+  }
+
+  @Get('pattern-predictor/status')
+  patternPredictorStatus() {
+    return this.patternPredictorService.getStatus();
   }
 }

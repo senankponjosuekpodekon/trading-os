@@ -7,6 +7,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model SignalFeature {
+  id         String        @id @default(cuid())
+  signalId   String        @unique @map("signal_id")
+  features   Json          @map("features_json")
+  embedding  Json?         @map("embedding_vector")
+  concept    Json?         @map("concept_vector")
+  outcome    SignalOutcome?
+  pnl        Float?
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  signal     Signal        @relation(fields: [signalId], references: [id], onDelete: Cascade)
+
+  @@map("signal_features")
+}
+
 // ─── USERS ───────────────────────────────────────────────────
 
 enum UserRole {
@@ -35,6 +51,8 @@ model User {
   name         String
   role         UserRole       @default(TRADER)
   isActive     Boolean        @default(true)
+  totpSecret   String?        @map("totp_secret")
+  totpEnabled  Boolean        @default(false) @map("totp_enabled")
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -43,6 +61,12 @@ model User {
   strategies   UserStrategy[]
   refreshTokens RefreshToken[]
   subscriptions Subscription[]
+  labSessions  LabSession[]
+  notifications Notification[]
+  priceAlerts  PriceAlert[]
+  auditLogs    AuditLog[]
+  feedbacks    SignalFeedback[]
+  signalUsage  SignalDailyUsage[]
 
   @@map("users")
 }
@@ -175,13 +199,15 @@ enum SignalType {
 }
 
 model Strategy {
-  id           String   @id @default(cuid())
-  name         String   @unique
-  description  String?
-  rules        Json
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(cuid())
+  name            String   @unique
+  description     String?
+  rules           Json
+  analysisTimeframe String?  @map("analysis_timeframe")
+  entryTimeframe    String?  @map("entry_timeframe")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   signals      Signal[]
   userStrategies UserStrategy[]
@@ -206,8 +232,18 @@ model UserStrategy {
 
 // ─── SIGNALS ─────────────────────────────────────────────────
 
+// Cycle de vie du déclenchement (Sprint 3 — modes d'entrée & invalidation).
+// PENDING     : setup RETEST/LIMIT en attente que le prix atteigne entryPrice.
+// ACTIVE      : déclencheur satisfait (ou trigger BREAKOUT immédiat) — signal exploitable.
+// INVALIDATED : setup expiré (expiresAt dépassé) ou invalidation déclenchée avant activation.
+enum SignalStatus {
+  PENDING
+  ACTIVE
+  INVALIDATED
+}
+
 model Signal {
-  id           String     @id @default(cuid())
+  id           String       @id @default(cuid())
   assetId      String
   strategyId   String
   signal       SignalType
@@ -219,6 +255,8 @@ model Signal {
   takeProfit2  Decimal?
   riskReward        Float?
   profileSuitability String[] @default([])
+  qualityScore     Float?        @map("quality_score")
+  status       SignalStatus @default(ACTIVE)
   indicators   Json?
   metadata     Json?
   explanation  String?
@@ -229,16 +267,41 @@ model Signal {
   asset        Asset      @relation(fields: [assetId], references: [id])
   strategy     Strategy   @relation(fields: [strategyId], references: [id])
   positions    Position[]
+  feedbacks    SignalFeedback[]
+  featureSnapshot SignalFeature?
 
   @@index([assetId, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
+  @@index([isActive, createdAt(sort: Desc)])
+  @@index([strategyId, createdAt(sort: Desc)])
+  @@index([status])
+  @@index([profileSuitability])
   @@map("signals")
+}
+
+model SignalFeedback {
+  id        String   @id @default(cuid())
+  signalId  String   @map("signal_id")
+  userId    String   @map("user_id")
+  grade     Int      // 1 to 5
+  comment   String?
+  outcome   Float?   // realized P&L % if available
+  createdAt DateTime @default(now()) @map("created_at")
+  signal    Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([signalId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("signal_feedbacks")
 }
 
 // ─── POSITIONS ───────────────────────────────────────────────
 
+// PARTIAL (Sprint 5) : TP1 atteint sur une position avec takeProfit2 défini —
+// moitié de la quantité clôturée, SL déplacé au breakeven, reste ouvert vers TP2.
 enum PositionStatus {
   OPEN
+  PARTIAL
   CLOSED
   CANCELLED
 }
@@ -252,10 +315,17 @@ model Position {
   direction    SignalType
   entryPrice   Decimal
   exitPrice    Decimal?
-  quantity     Decimal
+  quantity     Decimal        // taille courante ouverte (réduite après un partial exit)
+  originalQuantity Decimal?   // taille initiale — dénominateur stable pour le PnL% total (Sprint 5)
   stopLoss     Decimal?
-  takeProfit   Decimal?
+  takeProfit   Decimal?       // TP1
+  takeProfit2  Decimal?       // Sprint 5 — second palier, déclenche le partial close
   trailingStop Decimal?
+  trailingMethod String?       @default("atr") // atr | swing | ema | chandelier
+  trailingActive Boolean     @default(true)
+  partialExitPrice Decimal?   // prix de clôture de la première moitié
+  partialExitAt    DateTime?
+  partialPnl       Decimal?   // PnL réalisé sur la moitié clôturée au TP1
   pnl          Decimal?
   pnlPercent   Float?
   openedAt     DateTime       @default(now())
@@ -269,7 +339,10 @@ model Position {
   @@index([portfolioId])
   @@index([portfolioId, status])
   @@index([assetId])
+  @@index([assetId, status])
+  @@index([signalId])
   @@index([status])
+  @@index([openedAt(sort: Desc)])
   @@map("positions")
 }
 
@@ -312,6 +385,20 @@ model SignalLog {
   adx             Float?
   market          String?       // CRYPTO | FOREX | METALS | BRVM
 
+  // Pattern snapshot (Sprint 7 / Phase B feedback loop)
+  patternName             String?  @map("pattern_name")
+  patternConfluenceScore  Float?   @map("pattern_confluence_score")
+  patternConfluenceTags   String[] @default([]) @map("pattern_confluence_tags")
+
+  // Enriched snapshot for calibration / ML / Copilot explanations
+  featureVector   Json?         @map("feature_vector")
+  metadata        Json?         // marketContext, detectedPatterns, decisionTrace
+
+  // Post-trade scoring
+  expectedPnlPct  Float?        @map("expected_pnl_pct")
+  realizedPnlPct  Float?        @map("realized_pnl_pct")
+  postTradeScore  Float?        @map("post_trade_score") // realized / expected ratio
+
   // Outcome — mis à jour par le job cron
   outcome         SignalOutcome @default(PENDING)
   outcomePrice    Decimal?      @map("outcome_price")
@@ -323,6 +410,7 @@ model SignalLog {
   @@index([symbol, timeframe, createdAt(sort: Desc)])
   @@index([outcome, createdAt(sort: Desc)])
   @@index([market, signalType, outcome])
+  @@index([patternName, outcome])
   @@map("signal_logs")
 }
 
@@ -345,4 +433,112 @@ model JournalEntry {
   @@index([userId, createdAt(sort: Desc)])
   @@index([positionId])
   @@map("journal_entries")
+}
+
+// ─── LAB / TESTEUR ─────────────────────────────────────────────
+// Sprint 6 : session de test (backtest + évaluation) pour une stratégie.
+
+enum LabSessionStatus {
+  DRAFT
+  RUNNING
+  COMPLETED
+  ARCHIVED
+}
+
+model LabSession {
+  id             String          @id @default(cuid())
+  userId         String
+  name           String
+  symbol         String
+  timeframe      String
+  strategy       Json            // snapshot de la stratégie testée
+  status         LabSessionStatus @default(DRAFT)
+  backtestMetrics Json?          // résultats agrégés du backtest
+  tradeList      Json?           // liste des trades simulés
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([createdAt(sort: Desc)])
+  @@map("lab_sessions")
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────
+// Sprint 8 : notifications persistées pour badge/historique/filtrage.
+
+enum NotificationType {
+  SIGNAL
+  POSITION
+  ALERT
+  SYSTEM
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  data      Json?
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([readAt])
+  @@index([type, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model SignalDailyUsage {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  date        DateTime @map("date")
+  signalsUsed Int      @default(0) @map("signals_used")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date], map: "signal_daily_usage_user_date_unique")
+  @@index([userId, date])
+  @@map("signal_daily_usage")
+}
+
+model PriceAlert {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  assetSymbol String   @map("asset_symbol")
+  direction   String   // "above" | "below"
+  targetPrice Decimal  @map("target_price")
+  triggered   Boolean  @default(false)
+  triggeredAt DateTime? @map("triggered_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, triggered])
+  @@index([assetSymbol, triggered])
+  @@map("price_alerts")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  action    String
+  resource  String
+  details   Json?    @map("details")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("audit_logs")
 }

@@ -4,8 +4,13 @@ import { ConfigService } from '@nestjs/config';
 import { of } from 'rxjs';
 import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
+import { FeatureStoreService } from './feature-store.service';
+import { SignalPredictorService } from './signal-predictor.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AlertService } from '../notifications/alert.service';
+import { MarketDataService } from '../market-data/market-data.service';
+import { QuotaService } from '../billing/quota.service';
 
 describe('SignalsService', () => {
   let service: SignalsService;
@@ -23,10 +28,14 @@ describe('SignalsService', () => {
       findMany: jest.fn(),
       count: jest.fn(),
     },
+    userStrategy: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   const mockHttp = {
     post: jest.fn(),
+    get: jest.fn(),
   };
 
   const mockConfig = {
@@ -35,11 +44,41 @@ describe('SignalsService', () => {
 
   const mockNotifications = {
     pushGlobal: jest.fn(),
+    pushSignal: jest.fn(),
+  };
+
+  const mockAlertService = {
+    sendSignal: jest.fn().mockReturnValue({ id: 'n1' }),
+    getStats: jest.fn().mockReturnValue({ sentToday: 0, maxDaily: 5 }),
   };
 
   const mockOutcomeService = {
     logSignal: jest.fn().mockResolvedValue(undefined),
     getStats: jest.fn().mockResolvedValue({ total: 0, winRate: 0 }),
+  };
+
+  const mockFeatureStore = {
+    upsertSnapshot: jest.fn().mockResolvedValue(undefined),
+    listSnapshots: jest.fn().mockResolvedValue([]),
+  };
+
+  const mockPredictor = {
+    predict: jest.fn().mockResolvedValue({ confidence_ml: 72.5 }),
+  } as unknown as SignalPredictorService;
+
+  const mockMarketData = {
+    getFearGreed: jest.fn().mockResolvedValue([{ value: 50, classification: 'Neutral' }]),
+    getFundingRates: jest.fn().mockResolvedValue([]),
+    getOnChainBtc: jest.fn().mockResolvedValue(null),
+    getOnChainEth: jest.fn().mockResolvedValue(null),
+    getEconomicCalendar: jest.fn().mockResolvedValue([]),
+    getSpotPerpBasis: jest.fn().mockResolvedValue([]),
+    getCot: jest.fn().mockResolvedValue(null),
+  };
+
+  const mockQuota = {
+    assertSignalQuota: jest.fn().mockResolvedValue({ limit: null, used: 0 }),
+    incrementSignalUsage: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
@@ -51,12 +90,18 @@ describe('SignalsService', () => {
         { provide: HttpService, useValue: mockHttp },
         { provide: ConfigService, useValue: mockConfig },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: AlertService, useValue: mockAlertService },
         { provide: SignalOutcomeService, useValue: mockOutcomeService },
+        { provide: FeatureStoreService, useValue: mockFeatureStore },
+        { provide: SignalPredictorService, useValue: mockPredictor },
+        { provide: MarketDataService, useValue: mockMarketData },
+        { provide: QuotaService, useValue: mockQuota },
       ],
     }).compile();
 
     service = module.get<SignalsService>(SignalsService);
     jest.clearAllMocks();
+    mockHttp.get.mockReturnValue(of({ data: null }));
   });
 
   describe('triggerScan', () => {
@@ -76,7 +121,9 @@ describe('SignalsService', () => {
       const result = await service.triggerScan(['BTC/USDT'], '1h');
 
       expect(result.saved).toHaveLength(1);
-      expect(mockNotifications.pushGlobal).toHaveBeenCalled();
+      expect(mockAlertService.sendSignal).toHaveBeenCalled();
+      expect(mockQuota.assertSignalQuota).not.toHaveBeenCalled();
+      expect(mockPredictor.predict).toHaveBeenCalled();
     });
 
     it('should not notify signals below 70 confidence', async () => {
@@ -93,7 +140,45 @@ describe('SignalsService', () => {
 
       await service.triggerScan(['BTC/USDT'], '1h');
 
-      expect(mockNotifications.pushGlobal).not.toHaveBeenCalled();
+      expect(mockAlertService.sendSignal).not.toHaveBeenCalled();
+    });
+
+    it('should enforce user signal quota and skip notifications when exhausted', async () => {
+      mockQuota.assertSignalQuota.mockResolvedValueOnce({ limit: 1, used: 1 });
+      mockHttp.post.mockReturnValue(of({
+        data: {
+          results: [
+            { symbol: 'BTC/USDT', signal: 'BUY', confidence: 80, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'quota' },
+          ],
+        },
+      }));
+      mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1' });
+      mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });
+
+      await service.triggerScan(['BTC/USDT'], '1h', { userId: 'user-1' });
+
+      expect(mockQuota.assertSignalQuota).toHaveBeenCalledWith('user-1');
+      expect(mockAlertService.sendSignal).not.toHaveBeenCalled();
+      expect(mockQuota.incrementSignalUsage).not.toHaveBeenCalled();
+    });
+
+    it('increments signal usage when notifications are sent for a user', async () => {
+      mockQuota.assertSignalQuota.mockResolvedValueOnce({ limit: 3, used: 1 });
+      mockHttp.post.mockReturnValue(of({
+        data: {
+          results: [
+            { symbol: 'BTC/USDT', signal: 'BUY', confidence: 80, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'ok', news_sentiment: { score: 0.5 } },
+          ],
+        },
+      }));
+      mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1' });
+      mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });
+
+      await service.triggerScan(['BTC/USDT'], '1h', { userId: 'user-2' });
+
+      expect(mockQuota.incrementSignalUsage).toHaveBeenCalledWith('user-2', 1);
     });
   });
 
@@ -106,6 +191,20 @@ describe('SignalsService', () => {
 
       expect(result.data).toHaveLength(1);
       expect(result.meta.total).toBe(1);
+    });
+
+    it('should filter signals by market', async () => {
+      mockPrisma.signal.findMany.mockResolvedValue([{ id: 'sig1', asset: { market: { name: 'crypto' } } }]);
+      mockPrisma.signal.count.mockResolvedValue(1);
+
+      const result = await service.findAll({ page: 1, limit: 10, sort: 'createdAt:desc', market: 'CRYPTO' });
+
+      expect(result.data).toHaveLength(1);
+      expect(mockPrisma.signal.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          asset: { market: { name: { equals: 'CRYPTO', mode: 'insensitive' } } },
+        }),
+      }));
     });
   });
 });

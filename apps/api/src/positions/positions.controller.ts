@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Request } 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PositionsService } from './positions.service';
 import { CreatePositionDto } from './dto/create-position.dto';
+import { UpdateTrailingStopDto } from './dto/update-trailing-stop.dto';
 
 @Controller('positions')
 @UseGuards(JwtAuthGuard)
@@ -56,5 +57,23 @@ export class PositionsController {
     @Body('exitPrice') exitPrice: number,
   ) {
     return this.positionsService.close(req.user.id, id, exitPrice);
+  }
+
+  @Post(':id/trailing-stop')
+  updateTrailingStop(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateTrailingStopDto,
+  ) {
+    return this.positionsService.setTrailingStop(req.user.id, id, dto);
+  }
+
+  @Post(':id/continuation-advice')
+  continuationAdvice(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body('currentPrice') currentPrice?: number,
+  ) {
+    return this.positionsService.continuationAdvice(req.user.id, id, currentPrice);
   }
 }

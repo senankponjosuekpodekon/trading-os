@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PositionsService } from '../positions/positions.service';
 import { JournalService } from '../journal/journal.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PriceAlertsService } from '../price-alerts/price-alerts.service';
 
 describe('WatcherService', () => {
   let service: WatcherService;
@@ -13,6 +14,11 @@ describe('WatcherService', () => {
   const mockPrisma = {
     position: {
       findMany: jest.fn(),
+    },
+    signal: {
+      updateMany: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
     },
   };
 
@@ -32,6 +38,10 @@ describe('WatcherService', () => {
     push: jest.fn(),
   };
 
+  const mockPriceAlerts = {
+    checkAlerts: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -41,6 +51,7 @@ describe('WatcherService', () => {
         { provide: JournalService, useValue: mockJournal },
         { provide: HttpService, useValue: mockHttp },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: PriceAlertsService, useValue: mockPriceAlerts },
       ],
     }).compile();
 
@@ -111,6 +122,97 @@ describe('WatcherService', () => {
       await service.watchPositions();
 
       expect(mockPositions.closeByWatcher).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('watchPendingSignals', () => {
+    it('invalidates PENDING signals past expiresAt', async () => {
+      mockPrisma.signal.updateMany.mockResolvedValue({ count: 2 });
+      mockPrisma.signal.findMany.mockResolvedValue([]);
+
+      await service.watchPendingSignals();
+
+      expect(mockPrisma.signal.updateMany).toHaveBeenCalledWith({
+        where: { status: 'PENDING', expiresAt: { lt: expect.any(Date) } },
+        data: { status: 'INVALIDATED' },
+      });
+    });
+
+    it('activates a PENDING BUY signal once price reaches entryPrice', async () => {
+      mockPrisma.signal.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.signal.findMany.mockResolvedValue([
+        { id: 's1', signal: 'BUY', entryPrice: 100, asset: { symbol: 'BTC/USDT' } },
+      ]);
+      mockHttp.get.mockReturnValue(of({ data: [{ symbol: 'BTCUSDT', price: '99' }] }));
+
+      await service.watchPendingSignals();
+
+      expect(mockPrisma.signal.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: { status: 'ACTIVE' },
+      });
+    });
+
+    it('activates a PENDING SELL signal once price reaches entryPrice', async () => {
+      mockPrisma.signal.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.signal.findMany.mockResolvedValue([
+        { id: 's2', signal: 'SELL', entryPrice: 100, asset: { symbol: 'BTC/USDT' } },
+      ]);
+      mockHttp.get.mockReturnValue(of({ data: [{ symbol: 'BTCUSDT', price: '101' }] }));
+
+      await service.watchPendingSignals();
+
+      expect(mockPrisma.signal.update).toHaveBeenCalledWith({
+        where: { id: 's2' },
+        data: { status: 'ACTIVE' },
+      });
+    });
+
+    it('does not activate when price has not reached entryPrice yet', async () => {
+      mockPrisma.signal.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.signal.findMany.mockResolvedValue([
+        { id: 's3', signal: 'BUY', entryPrice: 100, asset: { symbol: 'BTC/USDT' } },
+      ]);
+      mockHttp.get.mockReturnValue(of({ data: [{ symbol: 'BTCUSDT', price: '105' }] }));
+
+      await service.watchPendingSignals();
+
+      expect(mockPrisma.signal.update).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when there are no pending signals', async () => {
+      mockPrisma.signal.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.signal.findMany.mockResolvedValue([]);
+
+      await service.watchPendingSignals();
+
+      expect(mockHttp.get).not.toHaveBeenCalled();
+      expect(mockPrisma.signal.update).not.toHaveBeenCalled();
+    });
+
+    it('skips signals on symbols outside the watcher symbol map', async () => {
+      mockPrisma.signal.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.signal.findMany.mockResolvedValue([
+        { id: 's4', signal: 'BUY', entryPrice: 100, asset: { symbol: 'EUR/USD' } },
+      ]);
+
+      await service.watchPendingSignals();
+
+      expect(mockHttp.get).not.toHaveBeenCalled();
+      expect(mockPrisma.signal.update).not.toHaveBeenCalled();
+    });
+
+    it('does not crash and skips activation if price fetch fails', async () => {
+      mockPrisma.signal.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.signal.findMany.mockResolvedValue([
+        { id: 's5', signal: 'BUY', entryPrice: 100, asset: { symbol: 'BTC/USDT' } },
+      ]);
+      mockHttp.get.mockImplementation(() => {
+        throw new Error('network error');
+      });
+
+      await expect(service.watchPendingSignals()).resolves.not.toThrow();
+      expect(mockPrisma.signal.update).not.toHaveBeenCalled();
     });
   });
 });

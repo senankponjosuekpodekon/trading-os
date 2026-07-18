@@ -9,6 +9,7 @@ import { SignalOutcomeService } from './signal-outcome.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { QuotaService } from '../billing/quota.service';
 
 const fakeGuard: CanActivate = {
   canActivate: (context: ExecutionContext) => {
@@ -19,6 +20,7 @@ const fakeGuard: CanActivate = {
 
 describe('SignalsController (integration)', () => {
   let app: INestApplication;
+  let outcomeService: { logSignal: jest.Mock; getStats: jest.Mock };
   const httpService = { post: jest.fn() };
   const strategy = { id: 's1', name: 'EMA Trend + RSI', rules: {} };
   const asset = { id: 'a1', symbol: 'BTC/USDT', market: { name: 'crypto' } };
@@ -37,9 +39,17 @@ describe('SignalsController (integration)', () => {
     asset: {
       findUnique: jest.fn().mockResolvedValue(asset),
     },
+    userStrategy: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   beforeAll(async () => {
+    outcomeService = {
+      logSignal: jest.fn().mockResolvedValue(undefined),
+      getStats: jest.fn().mockResolvedValue({ total: 0, winRate: 0 }),
+    };
+
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, SignalsModule],
     })
@@ -48,7 +58,12 @@ describe('SignalsController (integration)', () => {
       .overrideProvider(PrismaService)
       .useValue(prismaMock as any)
       .overrideProvider(SignalOutcomeService)
-      .useValue({ logSignal: jest.fn().mockResolvedValue(undefined), getStats: jest.fn().mockResolvedValue({ total: 0, winRate: 0 }) } as any)
+      .useValue(outcomeService as any)
+      .overrideProvider(QuotaService)
+      .useValue({
+        assertSignalQuota: jest.fn().mockResolvedValue({ limit: null, used: 0 }),
+        incrementSignalUsage: jest.fn().mockResolvedValue(undefined),
+      })
       .overrideGuard(JwtAuthGuard)
       .useValue(fakeGuard)
       .compile();
@@ -110,6 +125,33 @@ describe('SignalsController (integration)', () => {
         expect(res.body.saved).toHaveLength(1);
         expect(res.body.portfolio_risk).toEqual({ exposure: 0.1 });
       });
+
+    expect(outcomeService.logSignal).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'BTC/USDT', signal: 'BUY' }),
+      'crypto',
+    );
+  });
+
+  it('POST /signals/scan uses user enabled strategies with customRules', async () => {
+    prismaMock.userStrategy.findMany.mockResolvedValue([
+      {
+        isEnabled: true,
+        customRules: { ema_fast: 10 },
+        strategy: { id: 'us1', name: 'Custom', rules: { ema_fast: 20 } },
+      },
+    ]);
+    httpService.post.mockReturnValue(of({
+      data: { results: [], portfolio_risk: null },
+    }));
+
+    await request(app.getHttpServer())
+      .post('/signals/scan')
+      .send({ symbols: ['BTC/USDT'], timeframe: '1h' })
+      .expect(201);
+
+    const payload = httpService.post.mock.calls[0][1];
+    expect(payload.strategies).toHaveLength(1);
+    expect(payload.strategies[0].rules.ema_fast).toBe(10);
   });
 
   it('GET /signals/stats returns market stats', async () => {

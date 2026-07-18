@@ -35,6 +35,13 @@ export class AiService {
     return data;
   }
 
+  async chat(chatData: any): Promise<any> {
+    const { data } = await firstValueFrom(
+      this.http.post(`${this.engineUrl}/llm/chat`, chatData),
+    );
+    return data;
+  }
+
   async health(): Promise<any> {
     const { data } = await firstValueFrom(
       this.http.get(`${this.engineUrl}/llm/health`),

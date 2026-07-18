@@ -1,0 +1,191 @@
+Timing is on.
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Limit  (cost=2.16..2.16 rows=1 width=84) (actual time=0.046..0.047 rows=0 loops=1)
+   Buffers: shared hit=5
+   ->  Sort  (cost=2.16..2.16 rows=1 width=84) (actual time=0.045..0.046 rows=0 loops=1)
+         Sort Key: "createdAt" DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=5
+         ->  Seq Scan on signals  (cost=0.00..2.15 rows=1 width=84) (actual time=0.008..0.008 rows=0 loops=1)
+               Filter: ("assetId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+               Rows Removed by Filter: 12
+               Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=209
+ Planning Time: 0.960 ms
+ Execution Time: 0.072 ms
+(14 rows)
+
+Time: 2,508 ms
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Limit  (cost=2.20..2.21 rows=6 width=84) (actual time=0.018..0.019 rows=12 loops=1)
+   Buffers: shared hit=2
+   ->  Sort  (cost=2.20..2.21 rows=6 width=84) (actual time=0.018..0.018 rows=12 loops=1)
+         Sort Key: "createdAt" DESC
+         Sort Method: quicksort  Memory: 26kB
+         Buffers: shared hit=2
+         ->  Seq Scan on signals  (cost=0.00..2.12 rows=6 width=84) (actual time=0.003..0.006 rows=12 loops=1)
+               Filter: "isActive"
+               Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=2
+ Planning Time: 0.050 ms
+ Execution Time: 0.030 ms
+(13 rows)
+
+Time: 0,415 ms
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=1.15..1.15 rows=1 width=117) (actual time=0.017..0.017 rows=0 loops=1)
+   Sort Key: "openedAt" DESC
+   Sort Method: quicksort  Memory: 25kB
+   Buffers: shared hit=1
+   ->  Seq Scan on positions  (cost=0.00..1.14 rows=1 width=117) (actual time=0.009..0.009 rows=0 loops=1)
+         Filter: ((status = ANY ('{OPEN,PARTIAL}'::"PositionStatus"[])) AND ("portfolioId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text))
+         Rows Removed by Filter: 9
+         Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=150
+ Planning Time: 0.678 ms
+ Execution Time: 0.030 ms
+(12 rows)
+
+Time: 2,146 ms
+                                                                    QUERY PLAN                                                                    
+--------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=4.59..4.59 rows=1 width=575) (actual time=0.023..0.024 rows=0 loops=1)
+   Sort Key: p."openedAt" DESC
+   Sort Method: quicksort  Memory: 25kB
+   Buffers: shared hit=2
+   ->  Nested Loop  (cost=1.26..4.58 rows=1 width=575) (actual time=0.015..0.015 rows=0 loops=1)
+         Join Filter: (p."portfolioId" = pf.id)
+         Buffers: shared hit=2
+         ->  Seq Scan on positions p  (cost=0.00..1.11 rows=2 width=575) (actual time=0.007..0.008 rows=5 loops=1)
+               Filter: (status = ANY ('{OPEN,PARTIAL}'::"PositionStatus"[]))
+               Rows Removed by Filter: 4
+               Buffers: shared hit=1
+         ->  Materialize  (cost=1.26..3.41 rows=2 width=32) (actual time=0.001..0.001 rows=0 loops=5)
+               Buffers: shared hit=1
+               ->  Bitmap Heap Scan on portfolios pf  (cost=1.26..3.40 rows=2 width=32) (actual time=0.004..0.004 rows=0 loops=1)
+                     Recheck Cond: ("userId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+                     Buffers: shared hit=1
+                     ->  Bitmap Index Scan on "portfolios_userId_idx"  (cost=0.00..1.26 rows=2 width=0) (actual time=0.003..0.003 rows=0 loops=1)
+                           Index Cond: ("userId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+                           Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=195
+ Planning Time: 1.031 ms
+ Execution Time: 0.068 ms
+(23 rows)
+
+Time: 1,597 ms
+                                                                  QUERY PLAN                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using refresh_tokens_token_hash_idx on refresh_tokens  (cost=0.15..2.37 rows=1 width=80) (actual time=0.018..0.018 rows=0 loops=1)
+   Index Cond: (token_hash = 'deadbeefdeadbeefdeadbeefdeadbeef'::text)
+   Buffers: shared read=1
+ Planning:
+   Buffers: shared hit=66 read=4
+ Planning Time: 1.624 ms
+ Execution Time: 0.030 ms
+(7 rows)
+
+Time: 2,039 ms
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Index Scan using users_email_key on users  (cost=0.15..2.37 rows=1 width=101) (actual time=0.009..0.009 rows=0 loops=1)
+   Index Cond: (email = 'test@example.com'::text)
+   Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=47
+ Planning Time: 0.242 ms
+ Execution Time: 0.019 ms
+(7 rows)
+
+Time: 0,657 ms
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on portfolios  (cost=1.26..3.40 rows=2 width=105) (actual time=0.003..0.004 rows=0 loops=1)
+   Recheck Cond: ("userId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+   Buffers: shared hit=1
+   ->  Bitmap Index Scan on "portfolios_userId_idx"  (cost=0.00..1.26 rows=2 width=0) (actual time=0.003..0.003 rows=0 loops=1)
+         Index Cond: ("userId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+         Buffers: shared hit=1
+ Planning Time: 0.021 ms
+ Execution Time: 0.028 ms
+(8 rows)
+
+Time: 0,291 ms
+                                                                           QUERY PLAN                                                                            
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.14..2.36 rows=1 width=116) (actual time=0.010..0.011 rows=0 loops=1)
+   Buffers: shared hit=2
+   ->  Index Scan using signal_logs_symbol_timeframe_created_at_idx on signal_logs  (cost=0.14..2.36 rows=1 width=116) (actual time=0.010..0.010 rows=0 loops=1)
+         Index Cond: ((symbol = 'BTC/USDT'::text) AND (timeframe = '1h'::text))
+         Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=122 read=5
+ Planning Time: 1.360 ms
+ Execution Time: 0.021 ms
+(9 rows)
+
+Time: 1,693 ms
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.41..3.41 rows=2 width=84) (actual time=0.008..0.008 rows=0 loops=1)
+   Buffers: shared hit=2
+   ->  Sort  (cost=3.41..3.41 rows=2 width=84) (actual time=0.007..0.008 rows=0 loops=1)
+         Sort Key: created_at DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=2
+         ->  Bitmap Heap Scan on notifications  (cost=1.26..3.40 rows=2 width=84) (actual time=0.002..0.002 rows=0 loops=1)
+               Recheck Cond: (user_id = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+               Buffers: shared hit=2
+               ->  Bitmap Index Scan on "notifications_userId_createdAt_idx"  (cost=0.00..1.26 rows=2 width=0) (actual time=0.001..0.001 rows=0 loops=1)
+                     Index Cond: (user_id = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+                     Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=89 read=5 dirtied=1
+ Planning Time: 1.589 ms
+ Execution Time: 0.029 ms
+(16 rows)
+
+Time: 1,983 ms
+                                                                        QUERY PLAN                                                                         
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3.41..3.41 rows=2 width=108) (actual time=0.008..0.008 rows=0 loops=1)
+   Buffers: shared hit=1
+   ->  Sort  (cost=3.41..3.41 rows=2 width=108) (actual time=0.007..0.008 rows=0 loops=1)
+         Sort Key: "createdAt" DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=1
+         ->  Bitmap Heap Scan on journal_entries  (cost=1.26..3.40 rows=2 width=108) (actual time=0.003..0.003 rows=0 loops=1)
+               Recheck Cond: ("userId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+               Buffers: shared hit=1
+               ->  Bitmap Index Scan on "journal_entries_userId_createdAt_idx"  (cost=0.00..1.26 rows=2 width=0) (actual time=0.002..0.003 rows=0 loops=1)
+                     Index Cond: ("userId" = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+                     Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=64
+ Planning Time: 0.328 ms
+ Execution Time: 0.034 ms
+(16 rows)
+
+Time: 0,740 ms
+                                                                       QUERY PLAN                                                                       
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2.38..2.38 rows=1 width=8) (actual time=0.016..0.017 rows=1 loops=1)
+   Buffers: shared hit=2
+   ->  Index Scan using "notifications_type_createdAt_idx" on notifications  (cost=0.15..2.37 rows=1 width=0) (actual time=0.015..0.015 rows=0 loops=1)
+         Index Cond: ((type = 'SIGNAL'::"NotificationType") AND (created_at >= CURRENT_DATE))
+         Filter: (user_id = 'aaaaaaaaaaaaaaaaaaaaaaaa'::text)
+         Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=9 read=2
+ Planning Time: 0.613 ms
+ Execution Time: 0.269 ms
+(10 rows)
+
+Time: 2,055 ms

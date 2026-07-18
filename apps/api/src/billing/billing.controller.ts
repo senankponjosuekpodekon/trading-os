@@ -4,12 +4,16 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { BillingService } from './billing.service';
+import { QuotaService } from './quota.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 
 @Controller('billing')
 @UseGuards(JwtAuthGuard)
 export class BillingController {
-  constructor(private billingService: BillingService) {}
+  constructor(
+    private billingService: BillingService,
+    private quotaService: QuotaService,
+  ) {}
 
   @Get('plans')
   listPlans() {
@@ -19,6 +23,11 @@ export class BillingController {
   @Get('subscription')
   getSubscription(@Request() req: any) {
     return this.billingService.getActiveSubscription(req.user.id);
+  }
+
+  @Get('usage')
+  getUsage(@Request() req: any) {
+    return this.quotaService.getUsage(req.user.id);
   }
 
   @Post('subscribe/:code')

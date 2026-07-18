@@ -5,6 +5,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { TwoFactorController } from './two-factor.controller';
+import { TwoFactorService } from './two-factor.service';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
@@ -17,9 +20,10 @@ import { JwtStrategy } from './jwt.strategy';
         signOptions: { expiresIn: config.get('JWT_EXPIRES_IN', '15m') as any },
       }),
     }),
+    AuditModule,
   ],
-  controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [JwtModule, AuthService],
+  controllers: [AuthController, TwoFactorController],
+  providers: [AuthService, TwoFactorService, JwtStrategy],
+  exports: [JwtModule, AuthService, TwoFactorService],
 })
 export class AuthModule {}

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AiService } from './ai.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -73,13 +73,19 @@ export class AiController {
     return this.ai.weeklyReport(body);
   }
 
+  @Post('chat')
+  chat(@Body() body: any) {
+    return this.ai.chat(body);
+  }
+
   @Post('review/position/:positionId')
-  async reviewPosition(@Param('positionId') positionId: string) {
+  async reviewPosition(@Request() req: any, @Param('positionId') positionId: string) {
     const position = await this.prisma.position.findUnique({
       where: { id: positionId },
-      include: { asset: true, portfolio: true },
+      include: { asset: true, portfolio: { include: { user: { select: { id: true } } } } },
     });
     if (!position) return { error: 'Position not found' };
+    if (position.portfolio.user.id !== req.user.id) return { error: 'Unauthorized' };
 
     const symbol   = position.asset.symbol;
     const binSym   = SYM_TO_BINANCE[symbol];

@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { QuotaService } from '../billing/quota.service';
 import { CreateStrategyDto, UpdateStrategyDto, ToggleUserStrategyDto } from './dto/create-strategy.dto';
 import { validateStrategyRules } from './rules-validator';
 
 @Injectable()
 export class StrategiesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private quota: QuotaService,
+  ) {}
 
   async findAll() {
     return this.prisma.strategy.findMany({
@@ -53,6 +57,12 @@ export class StrategiesService {
   async toggleUserStrategy(userId: string, strategyId: string, dto: ToggleUserStrategyDto) {
     await this.findOne(strategyId);
     if (dto.customRules) validateStrategyRules(dto.customRules);
+    if (dto.isEnabled) {
+      const existing = await this.prisma.userStrategy.findUnique({
+        where: { userId_strategyId: { userId, strategyId } },
+      });
+      if (!existing?.isEnabled) await this.quota.assertCanEnableStrategy(userId);
+    }
     return this.prisma.userStrategy.upsert({
       where: { userId_strategyId: { userId, strategyId } },
       create: { userId, strategyId, isEnabled: dto.isEnabled, customRules: dto.customRules },

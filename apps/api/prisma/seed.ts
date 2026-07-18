@@ -112,11 +112,13 @@ async function main() {
 
   const strategy = await prisma.strategy.upsert({
     where: { name: 'EMA Trend + RSI' },
-    update: { rules: emaTrendRsiRules },
+    update: { rules: emaTrendRsiRules, analysisTimeframe: '4h', entryTimeframe: '1h' },
     create: {
       name: 'EMA Trend + RSI',
-      description: 'Tendance EMA 20/50/200 avec confirmation RSI. Signal BUY si EMA20 > EMA50 et RSI en zone bullish (45+).',
+      description: 'Tendance EMA 20/50/200 avec confirmation RSI. Analyse sur 4h, entrée sur 1h.',
       rules: emaTrendRsiRules,
+      analysisTimeframe: '4h',
+      entryTimeframe: '1h',
     },
   });
 
