@@ -4,8 +4,19 @@ import { AppModule } from './app.module';
 import helmet from 'helmet';
 import { auditEnv } from './common/security/env-audit';
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 
 async function bootstrap() {
+  const sentryDsn = process.env.SENTRY_DSN_API;
+  if (sentryDsn) {
+    Sentry.init({
+      dsn: sentryDsn,
+      tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
+      environment: process.env.NODE_ENV ?? 'development',
+      release: process.env.GIT_SHA,
+    });
+  }
+
   const app = await NestFactory.create(AppModule);
 
   // ── Sécurité HTTP headers ────────────────────────────────────────────

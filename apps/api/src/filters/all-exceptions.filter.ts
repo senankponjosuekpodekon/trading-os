@@ -9,6 +9,7 @@ import {
 import { Request, Response } from 'express';
 import { ApplicationException } from '../common/errors/application.exception';
 import { ErrorCode } from '../common/errors/error-codes';
+import * as Sentry from '@sentry/node';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -40,7 +41,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = isProd ? 'Internal server error' : exception.message;
     }
 
-    this.logger.error({
+    const errorPayload = {
       status,
       code,
       path: request.url,
@@ -50,7 +51,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error: exception instanceof Error ? exception.message : String(exception),
       stack: isProd ? undefined : exception instanceof Error ? exception.stack : undefined,
       details,
-    });
+    };
+
+    this.logger.error(errorPayload);
+
+    if (Sentry.getCurrentHub().getClient()) {
+      Sentry.captureException(exception instanceof Error ? exception : new Error(String(exception)), {
+        tags: { module: 'api' },
+        extra: errorPayload,
+      });
+    }
 
     const responseBody: Record<string, any> = {
       statusCode: status,

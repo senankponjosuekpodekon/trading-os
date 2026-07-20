@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     database_url: str = Field(..., validation_alias="DATABASE_URL")
     redis_url: str = Field(default="redis://localhost:6379", validation_alias="REDIS_URL")
     engine_port: int = Field(default=8000, validation_alias="ENGINE_PORT")
+    sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN_ENGINE")
+
+    sentry_traces_sample_rate: float = Field(default=0.05, validation_alias="SENTRY_TRACES_SAMPLE_RATE")
 
     # ── Market Data APIs ───────────────────────────────────────────
     binance_api_key: str = Field(default="", validation_alias="BINANCE_API_KEY")
@@ -71,6 +74,8 @@ def load_settings() -> Settings:
         print("[WARN] OPENAI_API_KEY absent — fallback vers mock LLM.", file=sys.stderr)
     if not settings.twelve_data_api_key:
         print("[WARN] TWELVE_DATA_API_KEY absent — les données Forex seront mockées.", file=sys.stderr)
+    if not settings.sentry_dsn:
+        print("[WARN] SENTRY_DSN_ENGINE absent — aucune remontée d'erreurs moteur.", file=sys.stderr)
 
     return settings
 
