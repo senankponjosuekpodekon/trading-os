@@ -13,6 +13,16 @@ model SignalFeature {
   features   Json          @map("features_json")
   embedding  Json?         @map("embedding_vector")
   concept    Json?         @map("concept_vector")
+  symbol     String?       @map("symbol")
+  market     String?       @map("market")
+  timeframe  String?       @map("timeframe")
+  direction  SignalType?   @map("signal_type")
+  confidence Float?        @map("confidence")
+  mlConfidence Float?      @map("ml_confidence")
+  mlRegime   String?       @map("ml_regime")
+  expectedMove Json?       @map("expected_move_json")
+  snapshotVersion String   @default("v2") @map("snapshot_version")
+  source     String?       @map("source")
   outcome    SignalOutcome?
   pnl        Float?
   createdAt  DateTime      @default(now()) @map("created_at")
@@ -21,6 +31,8 @@ model SignalFeature {
   signal     Signal        @relation(fields: [signalId], references: [id], onDelete: Cascade)
 
   @@map("signal_features")
+  @@index([market, timeframe], map: "signal_features_market_timeframe_idx")
+  @@index([direction, outcome], map: "signal_features_direction_outcome_idx")
 }
 
 // ─── USERS ───────────────────────────────────────────────────

@@ -6,6 +6,15 @@ interface FeatureSnapshotInput {
   features: unknown;
   concept?: unknown;
   embedding?: unknown;
+  symbol?: string | null;
+  market?: string | null;
+  timeframe?: string | null;
+  direction?: 'BUY' | 'SELL' | 'NEUTRAL' | string | null;
+  confidence?: number | null;
+  mlConfidence?: number | null;
+  mlRegime?: string | null;
+  expectedMove?: unknown;
+  source?: string | null;
 }
 
 @Injectable()
@@ -25,7 +34,21 @@ export class FeatureStoreService {
       return null;
     }
 
-    const { signalId, features, concept, embedding } = input;
+    const {
+      signalId,
+      features,
+      concept,
+      embedding,
+      symbol,
+      market,
+      timeframe,
+      direction,
+      confidence,
+      mlConfidence,
+      mlRegime,
+      expectedMove,
+      source,
+    } = input;
     return client.upsert({
       where: { signalId },
       create: {
@@ -33,11 +56,31 @@ export class FeatureStoreService {
         features,
         concept: concept ?? null,
         embedding: embedding ?? null,
+        symbol: symbol ?? null,
+        market: market ?? null,
+        timeframe: timeframe ?? null,
+        direction: direction ?? null,
+        confidence: confidence ?? null,
+        mlConfidence: mlConfidence ?? null,
+        mlRegime: mlRegime ?? null,
+        expectedMove: expectedMove ?? null,
+        snapshotVersion: 'v2',
+        source: source ?? null,
       },
       update: {
         features,
         concept: concept ?? null,
         embedding: embedding ?? null,
+        symbol: symbol ?? null,
+        market: market ?? null,
+        timeframe: timeframe ?? null,
+        direction: direction ?? null,
+        confidence: confidence ?? null,
+        mlConfidence: mlConfidence ?? null,
+        mlRegime: mlRegime ?? null,
+        expectedMove: expectedMove ?? null,
+        snapshotVersion: 'v2',
+        source: source ?? null,
       },
     });
   }

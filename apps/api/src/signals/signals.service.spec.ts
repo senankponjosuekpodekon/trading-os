@@ -6,6 +6,7 @@ import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { FeatureStoreService } from './feature-store.service';
 import { SignalPredictorService } from './signal-predictor.service';
+import { RegimeClassifierService } from './regime-classifier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AlertService } from '../notifications/alert.service';
@@ -62,9 +63,18 @@ describe('SignalsService', () => {
     listSnapshots: jest.fn().mockResolvedValue([]),
   };
 
-  const mockPredictor = {
+  const mockPredictorImpl = {
     predict: jest.fn().mockResolvedValue({ confidence_ml: 72.5 }),
-  } as unknown as SignalPredictorService;
+    train: jest.fn().mockResolvedValue({ trained: true }),
+    getStatus: jest.fn().mockResolvedValue({ trained: true, accuracy: 0.72, updatedAt: new Date().toISOString() }),
+    getFeatureWeights: jest.fn().mockResolvedValue({ topFeatures: [] }),
+  };
+  const mockPredictor = mockPredictorImpl as unknown as SignalPredictorService;
+
+  const mockRegimePredict = jest.fn().mockResolvedValue({ regimes: ['LOW'] });
+  const mockRegimeClassifier = {
+    predict: mockRegimePredict,
+  } as unknown as RegimeClassifierService;
 
   const mockMarketData = {
     getFearGreed: jest.fn().mockResolvedValue([{ value: 50, classification: 'Neutral' }]),
@@ -94,6 +104,7 @@ describe('SignalsService', () => {
         { provide: SignalOutcomeService, useValue: mockOutcomeService },
         { provide: FeatureStoreService, useValue: mockFeatureStore },
         { provide: SignalPredictorService, useValue: mockPredictor },
+        { provide: RegimeClassifierService, useValue: mockRegimeClassifier },
         { provide: MarketDataService, useValue: mockMarketData },
         { provide: QuotaService, useValue: mockQuota },
       ],
@@ -102,20 +113,25 @@ describe('SignalsService', () => {
     service = module.get<SignalsService>(SignalsService);
     jest.clearAllMocks();
     mockHttp.get.mockReturnValue(of({ data: null }));
+    mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1', market: { name: 'CRYPTO' } });
   });
 
   describe('triggerScan', () => {
     it('should save high-confidence BUY signals and notify', async () => {
+      mockRegimePredict.mockResolvedValueOnce({ regimes: ['NORMAL'] });
+      const fetchSpy = jest
+        .spyOn<any, any>(service as any, 'fetchExpectedMove')
+        .mockResolvedValue({ close: 100, ranges: [{ move_pct: 2 }, { move_pct: 1.5 }, { move_pct: 0.8 }] });
       mockHttp.post.mockReturnValue(of({
         data: {
           results: [
-            { symbol: 'BTC/USDT', signal: 'BUY', confidence: 75, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test', news_sentiment: { score: 0.5 } },
+            { symbol: 'BTC/USDT', signal: 'BUY', confidence: 75, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test', news_sentiment: { score: 0.5 }, feature_vector: { levels: { trend: 0.8 } } },
             { symbol: 'ETH/USDT', signal: 'NEUTRAL', confidence: 40 },
           ],
         },
       }));
       mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
-      mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1' });
+      mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1', market: { name: 'CRYPTO' } });
       mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });
 
       const result = await service.triggerScan(['BTC/USDT'], '1h');
@@ -123,10 +139,22 @@ describe('SignalsService', () => {
       expect(result.saved).toHaveLength(1);
       expect(mockAlertService.sendSignal).toHaveBeenCalled();
       expect(mockQuota.assertSignalQuota).not.toHaveBeenCalled();
-      expect(mockPredictor.predict).toHaveBeenCalled();
+      expect(mockPredictorImpl.predict).toHaveBeenCalled();
+      expect(mockRegimePredict).toHaveBeenCalled();
+      const metadata = mockPrisma.signal.create.mock.calls[0][0].data.metadata;
+      expect(metadata.ml_regime).toBe('NORMAL');
+      expect(mockFeatureStore.upsertSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+        signalId: 'sig1',
+        symbol: 'BTC/USDT',
+        market: 'CRYPTO',
+        timeframe: '1h',
+        direction: 'BUY',
+      }));
+      fetchSpy.mockRestore();
     });
 
     it('should not notify signals below 70 confidence', async () => {
+      mockRegimePredict.mockResolvedValue({ regimes: ['LOW'] });
       mockHttp.post.mockReturnValue(of({
         data: {
           results: [
@@ -205,6 +233,19 @@ describe('SignalsService', () => {
           asset: { market: { name: { equals: 'CRYPTO', mode: 'insensitive' } } },
         }),
       }));
+    });
+  });
+
+  describe('predictor orchestration', () => {
+    it('trains the predictor through service', async () => {
+      await service.trainPredictor({ market: 'CRYPTO', timeframe: '1h', limit: 500 });
+      expect(mockPredictorImpl.train).toHaveBeenCalledWith('CRYPTO', '1h', 500);
+    });
+
+    it('exposes predictor status', async () => {
+      const status = await service.getPredictorStatus();
+      expect(mockPredictorImpl.getStatus).toHaveBeenCalled();
+      expect(status.trained).toBe(true);
     });
   });
 });

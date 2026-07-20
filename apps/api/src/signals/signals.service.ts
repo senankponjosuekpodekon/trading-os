@@ -9,7 +9,7 @@ import { AlertService } from '../notifications/alert.service';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { FeatureStoreService } from './feature-store.service';
 import { RegimeClassifierService } from './regime-classifier.service';
-import { SignalPredictorService } from './signal-predictor.service';
+import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
 import { MarketDataService } from '../market-data/market-data.service';
 import { QuotaService } from '../billing/quota.service';
 
@@ -61,6 +61,45 @@ export class SignalsService {
     }
   }
 
+  async trainPredictor(opts: { market?: string; timeframe?: string; limit?: number } = {}) {
+    const { market, timeframe, limit } = opts;
+    try {
+      const result = await this.predictor.train(market, timeframe, limit ?? 2000);
+      this.logger.log('signal_predictor_trained', {
+        market: market ?? 'ALL',
+        timeframe: timeframe ?? 'ALL',
+        limit: limit ?? 2000,
+        samples: result?.samples,
+      });
+      return result;
+    } catch (error) {
+      this.logger.error('signal_predictor_train_failed', { error: (error as any)?.message ?? error });
+      throw error;
+    }
+  }
+
+  async predictSignalScore(features: SignalFeatures) {
+    return this.predictor.predict(features);
+  }
+
+  async getPredictorStatus() {
+    try {
+      return await this.predictor.getStatus();
+    } catch (error) {
+      this.logger.warn('signal_predictor_status_failed', { error: (error as any)?.message ?? error });
+      throw error;
+    }
+  }
+
+  async getPredictorFeatureWeights() {
+    try {
+      return await this.predictor.getFeatureWeights();
+    } catch (error) {
+      this.logger.warn('signal_predictor_weights_failed', { error: (error as any)?.message ?? error });
+      throw error;
+    }
+  }
+
   private async predictMlConfidence(raw: any) {
     if (!raw) return null;
     try {
@@ -96,6 +135,15 @@ export class SignalsService {
   async scheduledDayScan() {
     this.logger.log('CRON: lancement du scan toutes les 4h');
     await this._scanActiveAssets('1h');
+  }
+
+  @Cron('15 */6 * * *', { timeZone: 'UTC' })
+  async scheduledPredictorTraining() {
+    try {
+      await this.trainPredictor({ market: 'CRYPTO', timeframe: '1h' });
+    } catch (error) {
+      this.logger.warn('scheduled_predictor_train_failed', { error: (error as any)?.message ?? error });
+    }
   }
 
   private async _scanActiveAssets(timeframe: string) {
@@ -351,6 +399,7 @@ export class SignalsService {
       } else if (r.expected_move) {
         expectedMoveSummary = this.buildExpectedMoveSummary(r.expected_move);
       }
+      const expectedMoveSnapshot = expectedMoveSummary ?? r.expected_move ?? null;
 
       const mlConfidence = await this.predictMlConfidence(r);
       const mlRegime = await this.predictMlRegime(expectedMoveDetails);
@@ -418,6 +467,15 @@ export class SignalsService {
           features: r.feature_vector,
           concept: r.market_concept_vector ?? r.marketConcept ?? null,
           embedding: r.market_embedding ?? null,
+          symbol: r.symbol,
+          market: asset.market?.name ?? null,
+          timeframe: r.timeframe ?? null,
+          direction: r.signal,
+          confidence: r.confidence ?? null,
+          mlConfidence: mlConfidence ?? null,
+          mlRegime: mlRegime ?? null,
+          expectedMove: expectedMoveSnapshot,
+          source: r.feature_source ?? 'engine.scan',
         });
       }
 
@@ -450,6 +508,7 @@ export class SignalsService {
             opportunityScore: this._opportunityScore(r),
             expectedMove: expectedMoveSummary ?? undefined,
             mlConfidence: mlConfidence ?? undefined,
+            mlRegime: mlRegime ?? undefined,
           });
         }
       }
@@ -523,6 +582,7 @@ export class SignalsService {
         opportunityScore: this._opportunityScore(raw),
         expectedMove: (signal.metadata as any)?.expected_move_summary ?? undefined,
         mlConfidence: (signal.metadata as any)?.ml_confidence ?? undefined,
+        mlRegime: (signal.metadata as any)?.ml_regime ?? undefined,
       });
     }
   }

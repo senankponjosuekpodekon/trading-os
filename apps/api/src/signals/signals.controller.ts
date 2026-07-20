@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Query, UseGuards, Request } from '@nestjs/
 import { Throttle } from '@nestjs/throttler';
 import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
-import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
+import { SignalFeatures } from './signal-predictor.service';
 import { PatternPredictorService, PatternFeaturesInput } from './pattern-predictor.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -12,7 +12,6 @@ export class SignalsController {
   constructor(
     private signalsService: SignalsService,
     private outcomeService: SignalOutcomeService,
-    private predictorService: SignalPredictorService,
     private patternPredictorService: PatternPredictorService,
   ) {}
 
@@ -75,23 +74,28 @@ export class SignalsController {
   }
 
   @Post('predictor/train')
-  trainPredictor(@Query('market') market?: string) {
-    return this.predictorService.train(market);
+  trainPredictor(
+    @Query('market') market?: string,
+    @Query('timeframe') timeframe?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit ? Math.max(100, Math.min(5000, parseInt(limit, 10))) : undefined;
+    return this.signalsService.trainPredictor({ market, timeframe, limit: parsedLimit });
   }
 
   @Post('predictor/predict')
   predictSignal(@Body() features: SignalFeatures) {
-    return this.predictorService.predict(features);
+    return this.signalsService.predictSignalScore(features);
   }
 
   @Get('predictor/status')
   predictorStatus() {
-    return this.predictorService.getStatus();
+    return this.signalsService.getPredictorStatus();
   }
 
   @Get('predictor/weights')
   predictorWeights() {
-    return this.predictorService.getFeatureWeights();
+    return this.signalsService.getPredictorFeatureWeights();
   }
 
   @Post('memory/similar')

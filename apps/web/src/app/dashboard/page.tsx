@@ -1,13 +1,15 @@
 'use client';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, Briefcase, Activity, ArrowUpRight, ArrowDownRight, Zap, BookOpen, Brain, BarChart2, Globe, Cpu } from 'lucide-react';
+import { TrendingUp, TrendingDown, Briefcase, Activity, ArrowUpRight, ArrowDownRight, Zap, BookOpen, Brain, BarChart2, Globe, Cpu, Smile, Banknote, Calendar, Database, Scale, Layers, Users } from 'lucide-react';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuthStore } from '@/store/auth.store';
 import { useTradingStore } from '@/store/trading.store';
 import { api } from '@/lib/api';
-import { Portfolio, Signal, PortfolioSummary } from '@/types';
+import { Portfolio, Signal, PortfolioSummary, ExpectedMoveResponse } from '@/types';
 import Link from 'next/link';
+import { ExpectedMoveWidget } from './_components/ExpectedMoveWidget';
 
 function StatCard({ label, value, sub, trend, icon }: { label: string; value: string | React.ReactNode; sub?: string; trend?: 'up' | 'down' | 'neutral'; icon?: React.ReactNode }) {
   return (
@@ -44,6 +46,8 @@ export default function DashboardPage() {
   const prices    = useTradingStore(s => s.prices);
   const connected = useTradingStore(s => s.wsConnected);
   const signals   = useTradingStore(s => s.signals) as Signal[];
+  const [expectedSymbol, setExpectedSymbol] = useState('BTC/USDT');
+  const [expectedTimeframe, setExpectedTimeframe] = useState('1h');
 
   const { data: portfolios } = useQuery<Portfolio[]>({
     queryKey: ['portfolios'],
@@ -58,15 +62,99 @@ export default function DashboardPage() {
     enabled: !!portfolio?.id,
   });
 
+  const { data: fearGreed } = useQuery<{ value: number; classification: string }[]>({
+    queryKey: ['fear-greed'],
+    queryFn: async () => (await api.get('/market-data/fear-greed')).data,
+    staleTime: 300_000,
+  });
+
+  const { data: fundingRates } = useQuery<{ symbol: string; fundingRate: number; fundingTime: string }[]>({
+    queryKey: ['funding-rates'],
+    queryFn: async () => (await api.get('/market-data/funding-rates')).data,
+    staleTime: 300_000,
+  });
+
+  const { data: economicCalendar } = useQuery<{ date: string; time: string; currency: string; impact: string; title: string; forecast: string; previous: string }[]>({
+    queryKey: ['economic-calendar'],
+    queryFn: async () => (await api.get('/market-data/economic-calendar')).data,
+    staleTime: 300_000,
+  });
+
+  const { data: onChainBtc } = useQuery<{ price: number; marketCap: number; transactions24h: number; mempoolSize: number; suggestedFee: number } | null>({
+    queryKey: ['on-chain-btc'],
+    queryFn: async () => (await api.get('/market-data/on-chain/btc')).data,
+    staleTime: 300_000,
+  });
+
+  const { data: onChainEth } = useQuery<{ price: number; marketCap: number; transactions24h: number; gasPriceMedian: number } | null>({
+    queryKey: ['on-chain-eth'],
+    queryFn: async () => (await api.get('/market-data/on-chain/eth')).data,
+    staleTime: 300_000,
+  });
+
+  const { data: basis } = useQuery<{ symbol: string; spotPrice: number; perpPrice: number; basis: number }[]>({
+    queryKey: ['basis'],
+    queryFn: async () => (await api.get('/market-data/basis')).data,
+    staleTime: 300_000,
+  });
+
+  const { data: expectedMove, isLoading: expectedMoveLoading } = useQuery<ExpectedMoveResponse>({
+    queryKey: ['expected-move', expectedSymbol, expectedTimeframe],
+    queryFn: async () => (await api.get('/expected-move', { params: { symbol: expectedSymbol, timeframe: expectedTimeframe } })).data,
+    staleTime: 60_000,
+    enabled: Boolean(expectedSymbol),
+  });
+
+  const { data: predictorStatus, isLoading: predictorStatusLoading } = useQuery<{
+    trained: boolean;
+    accuracy?: number;
+    samples?: number;
+    featureCount?: number;
+    updatedAt?: string;
+  }>({
+    queryKey: ['signal-predictor-status'],
+    queryFn: async () => (await api.get('/signals/predictor/status')).data,
+    staleTime: 120_000,
+  });
+
+  const { data: cotBtc } = useQuery<{ reportDate: string; asset: string; nonCommercialNet: number; openInterest: number } | null>({
+    queryKey: ['cot', 'BTC'],
+    queryFn: async () => (await api.get('/market-data/cot/BTC')).data,
+    staleTime: 300_000,
+  });
+
   const capital = portfolio ? parseFloat(portfolio.currentCapital) : 0;
   const initial = portfolio ? parseFloat(portfolio.initialCapital) : 0;
   const pnl     = summary?.totalPnl ?? (capital - initial);
   const pnlPct  = initial > 0 ? ((pnl / initial) * 100).toFixed(2) : '0.00';
   const winRate  = summary?.winRate ?? 0;
   const activeSignals = signals?.length ?? 0;
+  const mlSignals = (signals ?? []).filter(s => typeof s.metadata?.ml_confidence === 'number');
+  const mlCount = mlSignals.length;
+  const avgManualConfidence = mlCount > 0
+    ? mlSignals.reduce((sum, s) => sum + (s.confidence ?? 0), 0) / mlCount
+    : null;
+  const avgMlConfidence = mlCount > 0
+    ? mlSignals.reduce((sum, s) => sum + ((s.metadata?.ml_confidence as number) ?? 0), 0) / mlCount
+    : null;
+  const mlBeatsManualPct = mlCount > 0
+    ? mlSignals.filter(s => ((s.metadata?.ml_confidence as number) ?? 0) >= (s.confidence ?? 0)).length / mlCount * 100
+    : null;
+
+  const cotSnapshot = (cotBtc && typeof cotBtc.nonCommercialNet === 'number' && typeof cotBtc.openInterest === 'number') ? cotBtc : null;
+  const onChainBtcSnapshot = (onChainBtc && typeof onChainBtc.price === 'number') ? onChainBtc : null;
+  const onChainEthSnapshot = (onChainEth && typeof onChainEth.price === 'number') ? onChainEth : null;
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bonjour' : hour < 18 ? 'Bon après-midi' : 'Bonsoir';
+
+  const predictorAccuracy = predictorStatus?.accuracy != null ? (predictorStatus.accuracy * 100).toFixed(1) : null;
+  const predictorSamples = predictorStatus?.samples ?? null;
+  const predictorUpdated = predictorStatus?.updatedAt ? new Date(predictorStatus.updatedAt) : null;
+  const predictorSubParts: string[] = [];
+  if (predictorSamples != null) predictorSubParts.push(`${predictorSamples} échantillons`);
+  if (predictorUpdated) predictorSubParts.push(`MAJ ${predictorUpdated.toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`);
+  const predictorSub = predictorSubParts.length > 0 ? predictorSubParts.join(' · ') : predictorStatus?.trained ? 'Entraîné via Feature Store' : 'Jamais entraîné';
 
   return (
     <AppLayout title="Dashboard">
@@ -120,6 +208,20 @@ export default function DashboardPage() {
           }
         </div>
 
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          {predictorStatusLoading
+            ? <SkeletonCard />
+            : predictorStatus && (
+              <StatCard
+                label="SignalScorer (ML)"
+                value={predictorStatus.trained && predictorAccuracy ? `${predictorAccuracy}% acc.` : 'Non entraîné'}
+                sub={predictorSub}
+                trend={predictorStatus?.trained ? 'up' : 'neutral'}
+                icon={<Brain className="w-4 h-4" />}
+              />
+            )}
+        </div>
+
         {/* Raccourcis rapides */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
@@ -138,6 +240,204 @@ export default function DashboardPage() {
             </Link>
           ))}
         </div>
+
+        {/* Sentiment marché */}
+        {fearGreed && fearGreed[0] && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Smile className={`w-8 h-8 ${
+                fearGreed[0].value >= 75 ? 'text-red-400' :
+                fearGreed[0].value >= 55 ? 'text-yellow-400' :
+                fearGreed[0].value <= 25 ? 'text-emerald-400' :
+                'text-blue-400'
+              }`} />
+              <div>
+                <p className="text-xs text-gray-500">Fear & Greed</p>
+                <p className="text-white font-semibold">{fearGreed[0].classification}</p>
+                <p className="text-xs text-gray-500">{fearGreed[0].value}/100</p>
+              </div>
+            </div>
+            <div className="w-24 h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${
+                  fearGreed[0].value >= 75 ? 'bg-red-400' :
+                  fearGreed[0].value >= 55 ? 'bg-yellow-400' :
+                  fearGreed[0].value <= 25 ? 'bg-emerald-400' :
+                  'bg-blue-400'
+                }`}
+                style={{ width: `${fearGreed[0].value}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <ExpectedMoveWidget
+          data={expectedMove}
+          isLoading={expectedMoveLoading}
+          symbol={expectedSymbol}
+          timeframe={expectedTimeframe}
+          symbols={[
+            { value: 'BTC/USDT', label: 'BTC/USDT' },
+            { value: 'ETH/USDT', label: 'ETH/USDT' },
+            { value: 'SOL/USDT', label: 'SOL/USDT' },
+            { value: 'BNB/USDT', label: 'BNB/USDT' },
+            { value: 'XAU/USD', label: 'XAU/USD' },
+            { value: 'EUR/USD', label: 'EUR/USD' },
+            { value: 'VIX', label: 'VIX' },
+          ]}
+          timeframes={[
+            { value: '1h', label: '1H' },
+            { value: '4h', label: '4H' },
+            { value: '1d', label: '1D' },
+          ]}
+          onSymbolChange={setExpectedSymbol}
+          onTimeframeChange={setExpectedTimeframe}
+        />
+
+        {/* Funding rates perp */}
+        {fundingRates && fundingRates.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Banknote className="w-4 h-4 text-blue-400" />
+              <p className="text-xs text-gray-500">Funding rates 8h</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {fundingRates.map(fr => {
+                const ratePct = fr.fundingRate * 100;
+                return (
+                  <div key={fr.symbol} className="bg-gray-950/50 rounded p-2">
+                    <p className="text-xs text-gray-400">{fr.symbol}</p>
+                    <p className={`text-sm font-mono font-semibold ${ratePct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {ratePct >= 0 ? '+' : ''}{ratePct.toFixed(4)}%
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Spot-perp basis */}
+        {basis && basis.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Scale className="w-4 h-4 text-pink-400" />
+              <p className="text-xs text-gray-500">Basis spot-perp</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {basis.map(b => (
+                <div key={b.symbol} className="bg-gray-950/50 rounded p-2">
+                  <p className="text-xs text-gray-400">{b.symbol}</p>
+                  <p className={`text-sm font-mono font-semibold ${b.basis >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {b.basis >= 0 ? '+' : ''}{b.basis.toFixed(2)}%
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* COT BTC */}
+        {cotSnapshot && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Users className="w-4 h-4 text-cyan-400" />
+              <p className="text-xs text-gray-500">COT BTC CME ({cotSnapshot.reportDate})</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Net non-commercial</p>
+                <p className={`text-sm font-mono font-semibold ${cotSnapshot.nonCommercialNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {cotSnapshot.nonCommercialNet >= 0 ? '+' : ''}{cotSnapshot.nonCommercialNet.toLocaleString('en-US')}
+                </p>
+              </div>
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Open interest</p>
+                <p className="text-sm font-mono font-semibold text-white">{cotSnapshot.openInterest.toLocaleString('en-US')}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* On-chain BTC */}
+        {onChainBtcSnapshot && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Database className="w-4 h-4 text-orange-400" />
+              <p className="text-xs text-gray-500">On-chain BTC</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Prix</p>
+                <p className="text-sm font-mono font-semibold text-white">${onChainBtcSnapshot.price.toLocaleString('en-US')}</p>
+              </div>
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Tx 24h</p>
+                <p className="text-sm font-mono font-semibold text-white">{onChainBtcSnapshot.transactions24h.toLocaleString('en-US')}</p>
+              </div>
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Mempool</p>
+                <p className="text-sm font-mono font-semibold text-white">{onChainBtcSnapshot.mempoolSize.toLocaleString('en-US')}</p>
+              </div>
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Fee reco</p>
+                <p className="text-sm font-mono font-semibold text-white">{onChainBtcSnapshot.suggestedFee} sat/vB</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* On-chain ETH */}
+        {onChainEthSnapshot && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Layers className="w-4 h-4 text-indigo-400" />
+              <p className="text-xs text-gray-500">On-chain ETH</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Prix</p>
+                <p className="text-sm font-mono font-semibold text-white">${onChainEthSnapshot.price.toLocaleString('en-US')}</p>
+              </div>
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Tx 24h</p>
+                <p className="text-sm font-mono font-semibold text-white">{onChainEthSnapshot.transactions24h.toLocaleString('en-US')}</p>
+              </div>
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Gas median</p>
+                <p className="text-sm font-mono font-semibold text-white">{onChainEthSnapshot.gasPriceMedian} gwei</p>
+              </div>
+              <div className="bg-gray-950/50 rounded p-2">
+                <p className="text-xs text-gray-400">Market cap</p>
+                <p className="text-sm font-mono font-semibold text-white">${(onChainEthSnapshot.marketCap / 1e9).toFixed(0)}B</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Calendrier économique */}
+        {economicCalendar && economicCalendar.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Calendar className="w-4 h-4 text-yellow-400" />
+              <p className="text-xs text-gray-500">Calendrier économique (impact élevé/moyen)</p>
+            </div>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {economicCalendar.slice(0, 10).map((ev, i) => (
+                <div key={i} className="flex items-center justify-between text-sm border-b border-gray-800 last:border-0 pb-2 last:pb-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${ev.impact === 'High' ? 'bg-red-400/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{ev.currency}</span>
+                    <span className="text-gray-300 truncate">{ev.title}</span>
+                  </div>
+                  <div className="text-xs text-gray-500 text-right shrink-0">
+                    <p>{ev.time}</p>
+                    <p className="text-gray-600">F:{ev.forecast} P:{ev.previous}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Prix live */}
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
@@ -239,6 +539,32 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {mlCount > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatCard
+            label="Confiance moyenne (manuel)"
+            value={avgManualConfidence ? `${avgManualConfidence.toFixed(1)}%` : '—'}
+            sub={`Sur ${mlCount} signaux ML`}
+            icon={<Brain className="w-4 h-4" />}
+          />
+          <StatCard
+            label="Confiance moyenne ML"
+            value={avgMlConfidence ? `${avgMlConfidence.toFixed(1)}%` : '—'}
+            sub={mlBeatsManualPct != null ? `${mlBeatsManualPct.toFixed(0)}% ≥ manuel` : undefined}
+            trend={avgMlConfidence && avgManualConfidence ? (avgMlConfidence >= avgManualConfidence ? 'up' : 'down') : 'neutral'}
+            icon={<Cpu className="w-4 h-4" />}
+          />
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <p className="text-sm text-gray-400 mb-2">Écart ML vs manuel</p>
+            <p className="text-2xl font-bold text-white">
+              {avgMlConfidence && avgManualConfidence ? `${(avgMlConfidence - avgManualConfidence).toFixed(1)} pts` : '—'}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Positif = modèle ML plus confiant que le scoring manuel.</p>
+          </div>
+        </div>
+      )}
+
     </AppLayout>
   );
 }
