@@ -46,17 +46,25 @@ export class NotificationsService {
 
   pushSignal(
     userId: string,
-    signal: { symbol: string; signal: string; confidence: number; expectedMove?: { move_pct?: number | null }; mlConfidence?: number | null },
+    signal: {
+      symbol: string;
+      signal: string;
+      confidence: number;
+      expectedMove?: { move_pct?: number | null };
+      mlConfidence?: number | null;
+      mlRegime?: string | null;
+    },
   ) {
     const moveSnippet = signal.expectedMove?.move_pct != null
       ? ` · ±${signal.expectedMove.move_pct.toFixed(2)}%`
       : '';
     const mlSnippet = signal.mlConfidence != null ? ` · ML ${signal.mlConfidence.toFixed(1)}%` : '';
+    const regimeSnippet = signal.mlRegime ? ` · Regime ${signal.mlRegime}` : '';
     return this.push({
       userId,
       type:    'SIGNAL',
       title:   `Signal ${signal.signal} — ${signal.symbol}`,
-      message: `Confiance ${signal.confidence}%${moveSnippet}${mlSnippet} sur ${signal.symbol}`,
+      message: `Confiance ${signal.confidence}%${moveSnippet}${mlSnippet}${regimeSnippet} sur ${signal.symbol}`,
       data:    signal,
     });
   }

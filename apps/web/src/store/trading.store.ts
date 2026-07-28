@@ -39,9 +39,11 @@ export const useTradingStore = create<TradingState>((set, get) => ({
 
   fetchSignals: async (force = false) => {
     const { signalsLoading, signalsFetchedAt } = get();
+    const hasToken = typeof window !== 'undefined' ? !!localStorage.getItem('trading_os_token') : false;
     const now = Date.now();
     // Éviter les fetches simultanés ou trop fréquents
     if (signalsLoading) return;
+    if (!hasToken) return;
     if (!force && signalsFetchedAt && now - signalsFetchedAt < SIGNALS_STALE_MS) return;
 
     set({ signalsLoading: true, signalsError: null });

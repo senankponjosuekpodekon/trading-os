@@ -68,11 +68,22 @@ describe('NotificationsService', () => {
       expect((event.data as Notification).title).toBe('Maintenance');
       expect((event.data as Notification).userId).toBe('*');
     });
+
+    it('emits mlRegime inside SIGNAL SSE payloads', async () => {
+      const promise = firstValueFrom(service.subscribe('u1'));
+
+      service.pushSignal('u1', { symbol: 'ETH/USDT', signal: 'SELL', confidence: 66, mlRegime: 'LOW' });
+
+      const event = await promise;
+      const notification = event.data as Notification;
+      expect(notification.type).toBe('SIGNAL');
+      expect(notification.data?.mlRegime).toBe('LOW');
+    });
   });
 
   describe('pushSignal', () => {
     it('formats title and message from the signal', () => {
-      const n = service.pushSignal('u1', { symbol: 'BTC/USDT', signal: 'BUY', confidence: 78, expectedMove: { move_pct: 4.2 }, mlConfidence: 74.3 });
+      const n = service.pushSignal('u1', { symbol: 'BTC/USDT', signal: 'BUY', confidence: 78, expectedMove: { move_pct: 4.2 }, mlConfidence: 74.3, mlRegime: 'HIGH' });
 
       expect(n.type).toBe('SIGNAL');
       expect(n.title).toContain('BUY');
@@ -80,7 +91,8 @@ describe('NotificationsService', () => {
       expect(n.message).toContain('78%');
       expect(n.message).toContain('±4.20%');
       expect(n.message).toContain('ML 74.3%');
-      expect(n.data).toEqual({ symbol: 'BTC/USDT', signal: 'BUY', confidence: 78, expectedMove: { move_pct: 4.2 }, mlConfidence: 74.3 });
+      expect(n.message).toContain('Regime HIGH');
+      expect(n.data).toEqual({ symbol: 'BTC/USDT', signal: 'BUY', confidence: 78, expectedMove: { move_pct: 4.2 }, mlConfidence: 74.3, mlRegime: 'HIGH' });
     });
   });
 

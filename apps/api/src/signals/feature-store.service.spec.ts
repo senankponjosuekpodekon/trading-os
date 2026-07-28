@@ -41,17 +41,19 @@ describe('FeatureStoreService', () => {
 
     expect(upsert).toHaveBeenCalledWith({
       where: { signalId: 'sig' },
-      create: {
+      create: expect.objectContaining({
         signalId: 'sig',
         features: { level1: {} },
         concept: null,
         embedding: null,
-      },
-      update: {
+        snapshotVersion: 'v2',
+      }),
+      update: expect.objectContaining({
         features: { level1: {} },
         concept: null,
         embedding: null,
-      },
+        snapshotVersion: 'v2',
+      }),
     });
   });
 

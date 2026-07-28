@@ -9,8 +9,12 @@ from routers.risk import (
     calc_position_size,
     calc_targets,
     regime_risk_adjustment,
+    profile_risk_adjustment,
     calculate_risk,
     RiskCalcRequest,
+    sl_liquidity_aware,
+    tp_linked_to_liquidity,
+    compute_staged_stop,
 )
 
 
@@ -146,3 +150,78 @@ class TestCalculateRiskEndpoint:
         resp = calculate_risk(req)
         # volatile halves risk, then cap 3% -> 2.5
         assert resp.risk_pct_actual <= 3.0
+
+
+class TestLiquidityAwareLevels:
+    def test_sl_liquidity_aware_buy_moves_below_eql(self):
+        eq_lows = [{"price": 94.0, "touches": 3}, {"price": 92.0, "touches": 2}]
+        sl = sl_liquidity_aware(100.0, 95.0, "BUY", equal_lows=eq_lows, buffer_pct=0.001)
+        # nearest EQL under SL = 94 -> SL pushed below with buffer
+        assert sl < 94.0
+
+    def test_tp_linked_to_liquidity_buy_aligns_with_eqh(self):
+        eq_highs = [{"price": 112.0, "touches": 3}, {"price": 120.0, "touches": 2}]
+        tp = tp_linked_to_liquidity(100.0, 95.0, "BUY", equal_highs=eq_highs, default_rr=2.0)
+        # nearest EQH above entry = 112
+        assert tp == 112.0
+
+    def test_tp_linked_to_liquidity_sell_aligns_with_eql(self):
+        eq_lows = [{"price": 88.0, "touches": 3}, {"price": 80.0, "touches": 2}]
+        tp = tp_linked_to_liquidity(100.0, 105.0, "SELL", equal_lows=eq_lows, default_rr=2.0)
+        # nearest EQL below entry = 88
+        assert tp == 88.0
+
+    def test_tp_linked_to_liquidity_fallback_rr_when_no_liquidity(self):
+        tp = tp_linked_to_liquidity(100.0, 95.0, "BUY", default_rr=2.0)
+        assert tp == 110.0
+
+    def test_sl_liquidity_aware_sell_moves_above_eqh(self):
+        eq_highs = [{"price": 108.0, "touches": 3}, {"price": 115.0, "touches": 2}]
+        sl = sl_liquidity_aware(100.0, 105.0, "SELL", equal_highs=eq_highs, buffer_pct=0.001)
+        assert sl > 108.0
+
+    def test_sl_liquidity_aware_fallback_when_no_liquidity(self):
+        sl = sl_liquidity_aware(100.0, 95.0, "BUY", equal_highs=[], equal_lows=[])
+        assert sl == 95.0
+
+
+class TestProfileRiskAdjustment:
+    def test_conservative_reduces_risk_and_rr(self):
+        risk, rr1, rr2, note = profile_risk_adjustment("conservative", 1.0, 2.0, 3.0)
+        assert risk <= 1.0
+        assert rr1 == 1.5
+        assert rr2 == pytest.approx(2.4)
+        assert "conservateur" in note.lower()
+
+    def test_aggressive_increases_risk_and_rr(self):
+        risk, rr1, rr2, note = profile_risk_adjustment("aggressive", 1.0, 2.0, 3.0)
+        assert risk == 1.5
+        assert rr1 == 2.5
+        assert rr2 == pytest.approx(3.75)
+        assert "agressif" in note.lower()
+
+
+class TestComputeStagedStop:
+    def test_initial_stage_before_tp1(self):
+        stop, stage, reason = compute_staged_stop("BUY", 100.0, 95.0)
+        assert stop == 95.0
+        assert stage == "initial"
+
+    def test_break_even_after_tp1(self):
+        stop, stage, reason = compute_staged_stop("BUY", 100.0, 95.0, reached_tps=[1])
+        assert stop == 100.0
+        assert stage == "break_even"
+
+    def test_structure_after_tp2(self):
+        stop, stage, reason = compute_staged_stop(
+            "BUY", 100.0, 95.0, structure_stop=102.0, reached_tps=[1, 2]
+        )
+        assert stop == 102.0
+        assert stage == "structure"
+
+    def test_trailing_after_tp3(self):
+        stop, stage, reason = compute_staged_stop(
+            "BUY", 100.0, 95.0, trailing_stop=104.0, reached_tps=[1, 2, 3]
+        )
+        assert stop == 104.0
+        assert stage == "trailing"

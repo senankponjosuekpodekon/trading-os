@@ -20,7 +20,7 @@ import re
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-from routers.brvm import BRVM_SYMBOLS, HEADERS
+from scrapers.brvm_scraper import BRVM_SYMBOLS, HEADERS
 
 router = APIRouter()
 

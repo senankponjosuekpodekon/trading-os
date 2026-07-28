@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Optional
 import numpy as np
 import asyncio
+import os
 
 from routers.scan import fetch_binance_klines, analyze_candles, TF_MAP
 
@@ -39,6 +40,12 @@ class TradeResult(BaseModel):
     confidence:  float
     signal_reasons: list[str]
     win:         bool
+    regime:      Optional[str] = None
+    duration_bars: Optional[int] = None
+    pattern_name: Optional[str] = None
+    pattern_direction: Optional[str] = None
+    pattern_confluence_score: Optional[float] = None
+    pattern_confluence_tags: list[str] = []
 
 class BacktestResult(BaseModel):
     symbol:          str
@@ -62,6 +69,9 @@ class BacktestResult(BaseModel):
     trade_list:      list[dict]
     benchmark_pnl_pct: float
     outperformance_pct: float
+    regime_breakdown: dict
+    pattern_breakdown: dict
+    model_version:    str
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,6 +83,39 @@ def compute_sharpe(returns: list[float], risk_free: float = 0.0) -> float:
     mean = np.mean(arr) - risk_free
     std  = np.std(arr)
     return round(float(mean / std * np.sqrt(252)) if std > 0 else 0.0, 3)
+
+
+def compute_pattern_stats(trades: list[dict]) -> dict[str, dict[str, float | int]]:
+    """Aggregate trade outcomes by detected pattern name."""
+    stats: dict[str, dict[str, float | int]] = {}
+    for t in trades:
+        name = t.get("pattern_name") or "NO_PATTERN"
+        bucket = stats.setdefault(name, {
+            "trades": 0, "wins": 0, "losses": 0, "pnl": 0.0,
+            "avg_pnl_pct": 0.0, "avg_rr": 0.0, "avg_duration_bars": 0.0,
+            "avg_confluence_score": 0.0, "win_rate": 0.0,
+        })
+        bucket["trades"] = int(bucket["trades"]) + 1
+        if t.get("win"):
+            bucket["wins"] = int(bucket["wins"]) + 1
+        else:
+            bucket["losses"] = int(bucket["losses"]) + 1
+        bucket["pnl"] = float(bucket["pnl"]) + float(t.get("pnl", 0))
+        bucket["avg_pnl_pct"] = float(bucket["avg_pnl_pct"]) + float(t.get("pnl_pct", 0))
+        bucket["avg_rr"] = float(bucket["avg_rr"]) + float(t.get("rr_achieved", 0))
+        bucket["avg_duration_bars"] = float(bucket["avg_duration_bars"]) + int(t.get("duration_bars") or 0)
+        bucket["avg_confluence_score"] = float(bucket["avg_confluence_score"]) + float(t.get("pattern_confluence_score") or 0)
+
+    for bucket in stats.values():
+        n = int(bucket["trades"])
+        if n > 0:
+            bucket["win_rate"] = round(int(bucket["wins"]) / n * 100, 1)
+            bucket["avg_pnl_pct"] = round(float(bucket["avg_pnl_pct"]) / n, 3)
+            bucket["avg_rr"] = round(float(bucket["avg_rr"]) / n, 2)
+            bucket["avg_duration_bars"] = round(float(bucket["avg_duration_bars"]) / n, 1)
+            bucket["avg_confluence_score"] = round(float(bucket["avg_confluence_score"]) / n, 3)
+            bucket["pnl"] = round(float(bucket["pnl"]), 2)
+    return stats
 
 
 def compute_max_drawdown(equity: list[float]) -> tuple[float, float]:
@@ -152,6 +195,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
                 trades.append({
                     "entry_bar":    entry_bar,
                     "exit_bar":     i,
+                    "duration_bars": i - entry_bar,
                     "direction":    direction,
                     "entry_price":  round(entry_price, 4),
                     "exit_price":   round(exit_price, 4),
@@ -162,6 +206,11 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
                     "signal_reasons": trade_reasons[:3],
                     "win":          pnl > 0,
                     "exit_reason":  "TP" if hit_tp else ("SL" if hit_sl else "TIMEOUT"),
+                    "regime":       (result.get("regime") or {}).get("regime", "UNKNOWN"),
+                    "pattern_name": trade_pattern_name,
+                    "pattern_direction": trade_pattern_direction,
+                    "pattern_confluence_score": trade_pattern_confluence_score,
+                    "pattern_confluence_tags": trade_pattern_confluence_tags,
                 })
                 in_trade = False
             continue
@@ -200,6 +249,14 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         trade_conf  = conf
         trade_reasons = result.get("reasons", [])
 
+        # Capture top detected pattern for pattern-level journaling
+        detected = result.get("detectedPatterns") or []
+        top_pattern = detected[0] if detected else {}
+        trade_pattern_name = top_pattern.get("name")
+        trade_pattern_direction = top_pattern.get("direction")
+        trade_pattern_confluence_score = top_pattern.get("confluenceScore")
+        trade_pattern_confluence_tags = top_pattern.get("confluenceTags", [])
+
     # ── Statistiques ──────────────────────────────────────────────────────────
     n_trades = len(trades)
     wins     = [t for t in trades if t["win"]]
@@ -230,6 +287,19 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
     benchmark_pnl_pct = (end_price - start_price) / start_price * 100
     outperformance_pct = total_pnl_pct - benchmark_pnl_pct
 
+    # Regime breakdown
+    regime_stats: dict[str, dict[str, float | int]] = {}
+    for t in trades:
+        r = t.get("regime") or "UNKNOWN"
+        bucket = regime_stats.setdefault(r, {"trades": 0, "wins": 0, "pnl": 0.0, "win_rate": 0.0})
+        bucket["trades"] = int(bucket["trades"]) + 1
+        bucket["wins"] = int(bucket["wins"]) + (1 if t["win"] else 0)
+        bucket["pnl"] = float(bucket["pnl"]) + t["pnl"]
+    for bucket in regime_stats.values():
+        bucket["win_rate"] = round(bucket["wins"] / bucket["trades"] * 100, 1) if bucket["trades"] > 0 else 0.0
+
+    pattern_stats = compute_pattern_stats(trades)
+
     return BacktestResult(
         symbol          = req.symbol,
         timeframe       = req.timeframe,
@@ -252,6 +322,9 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         trade_list      = trades,
         benchmark_pnl_pct = round(benchmark_pnl_pct, 2),
         outperformance_pct = round(outperformance_pct, 2),
+        regime_breakdown = regime_stats,
+        pattern_breakdown = pattern_stats,
+        model_version     = os.environ.get("ENGINE_VERSION", "engine-1.0.0"),
     )
 
 
@@ -266,3 +339,16 @@ async def backtest_run(req: BacktestRequest):
 async def backtest_multi(requests: list[BacktestRequest]):
     results = await asyncio.gather(*[run_backtest(r) for r in requests])
     return [r.model_dump() for r in results]
+
+
+@router.post("/backtest/pattern-stats")
+async def backtest_pattern_stats(req: BacktestRequest):
+    """Run a backtest and return per-pattern statistics."""
+    result = await run_backtest(req)
+    return {
+        "symbol": req.symbol,
+        "timeframe": req.timeframe,
+        "lookback_bars": req.lookback_bars,
+        "trades": result.trades,
+        "patterns": result.pattern_breakdown,
+    }

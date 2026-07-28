@@ -23,13 +23,17 @@ export interface Position {
   id: string;
   portfolioId: string;
   assetId: string;
-  status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+  status: 'OPEN' | 'PARTIAL' | 'CLOSED' | 'CANCELLED';
   direction: 'BUY' | 'SELL';
   entryPrice: string;
   exitPrice?: string;
   quantity: string;
   stopLoss?: string;
   takeProfit?: string;
+  takeProfit2?: string;
+  trailingStop?: string;
+  trailingMethod?: 'atr' | 'swing' | 'ema' | 'chandelier';
+  trailingActive?: boolean;
   pnl?: string;
   pnlPercent?: string;
   openedAt: string;
@@ -59,6 +63,64 @@ export interface JournalEntry {
   position?: { asset?: { symbol: string } };
 }
 
+export interface PatternStats {
+  trades: number;
+  wins: number;
+  losses: number;
+  pnl: number;
+  winRate: number;
+  avgDuration: number | null;
+  avgConfluence: number | null;
+  avgRealizedPnl: number | null;
+  avgExpectedPnl: number | null;
+}
+
+export interface PatternStatsResponse {
+  total: number;
+  patterns: Record<string, PatternStats>;
+}
+
+export interface PostTradeAnalysis {
+  sampleSize: number;
+  avgExpectedPnlPct: number;
+  avgRealizedPnlPct: number;
+  bias: number;
+  overestimating: boolean;
+  underestimating: boolean;
+}
+
+export type VolatilityRegime = 'LOW' | 'NORMAL' | 'HIGH';
+
+export interface ExpectedMoveRange {
+  horizon: number;
+  move: number;
+  move_pct: number;
+  upper: number;
+  lower: number;
+}
+
+export interface ExpectedMoveResponse {
+  symbol: string;
+  timeframe: string;
+  close: number;
+  atr: number;
+  atr_pct: number;
+  atr_percentile: number;
+  volatility_regime: VolatilityRegime;
+  volume_ratio?: number | null;
+  ranges: ExpectedMoveRange[];
+}
+
+export interface ExpectedMoveSummary {
+  move?: number | null;
+  move_pct?: number | null;
+  horizon?: number | null;
+  upper?: number | null;
+  lower?: number | null;
+  volatility_regime?: string | null;
+  atr_pct?: number | null;
+}
+
 export interface Signal {
   id: string;
   assetId: string;
@@ -70,7 +132,11 @@ export interface Signal {
   stopLoss?: string;
   takeProfit1?: string;
   takeProfit2?: string;
+  takeProfit3?: string;
+  tpProbabilities?: { price: number; rr: number; probability: number }[];
   riskReward?: number;
+  profileSuitability?: string[];
+  status?: string;
   explanation?: string;
   createdAt: string;
   asset?: { symbol: string; name: string };
@@ -129,6 +195,8 @@ export interface Signal {
         bearish?: { top: number; bottom: number; mid: number }[];
         near_bullish_ob?: { top: number; bottom: number; mid: number } | null;
         near_bearish_ob?: { top: number; bottom: number; mid: number } | null;
+        displacement_ratio?: number;
+        status?: string;
       };
       liquidity?: {
         equal_highs?: { price: number; touches: number }[];
@@ -137,6 +205,10 @@ export interface Signal {
         near_eql?: { price: number; touches: number } | null;
       };
     };
+    expected_move_summary?: ExpectedMoveSummary | null;
+    expected_move_engine?: ExpectedMoveResponse | null;
+    ml_confidence?: number | null;
+    ml_regime?: 'LOW' | 'NORMAL' | 'HIGH' | string | null;
   };
 }
 

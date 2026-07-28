@@ -2,21 +2,34 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, TrendingUp, Briefcase, BookOpen,
-  Settings, LogOut, Zap, FlaskConical, LineChart, Brain, Globe, Activity,
+  LayoutDashboard, TrendingUp, Briefcase, BookOpen, Layers,
+  Settings, LogOut, Zap, FlaskConical, LineChart, Brain, Globe, Activity, Beaker, MessageSquare,
+  ShieldAlert, Trophy, Search, Cpu, Calendar, Database, SlidersHorizontal, DatabaseBackup, BarChart3,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { clsx } from 'clsx';
 
 const nav = [
   { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
+  { href: '/scanner',   label: 'Scanner',    icon: Search },
   { href: '/signals',    label: 'Signaux',     icon: TrendingUp },
   { href: '/chart',      label: 'Graphique',   icon: LineChart },
   { href: '/portfolio',  label: 'Portfolio',   icon: Briefcase },
+  { href: '/risk',       label: 'Risk',        icon: ShieldAlert },
+  { href: '/performance', label: 'Performance', icon: Trophy },
   { href: '/backtest',   label: 'Backtest',    icon: FlaskConical },
+  { href: '/patterns',  label: 'Patterns',      icon: BarChart3 },
+  { href: '/features',   label: 'Features',   icon: SlidersHorizontal },
+  { href: '/phase-b',    label: 'Phase B',    icon: Layers },
+  { href: '/lab',        label: 'Lab',         icon: Beaker },
+  { href: '/copilot',    label: 'Copilot',     icon: MessageSquare },
   { href: '/ai',         label: 'Assistant IA', icon: Brain },
+  { href: '/memory',     label: 'Mémoire',     icon: DatabaseBackup },
   { href: '/brvm',       label: 'BRVM',         icon: Globe },
+  { href: '/synthetic',   label: 'Synthetic',    icon: Cpu },
   { href: '/deriv',      label: 'Deriv V75',    icon: Activity },
+  { href: '/onchain',    label: 'On-chain',    icon: Database },
+  { href: '/economic-calendar', label: 'Calendrier', icon: Calendar },
   { href: '/journal',    label: 'Journal',     icon: BookOpen },
   { href: '/settings',   label: 'Paramètres',  icon: Settings },
 ];

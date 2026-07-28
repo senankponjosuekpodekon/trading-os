@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Plus, Star, AlertCircle, RefreshCw } from 'lucide-react';
+import { BookOpen, Plus, Star, AlertCircle, RefreshCw, Download } from 'lucide-react';
+import { downloadCsv } from '@/lib/export';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 import { JournalEntry } from '@/types';
@@ -58,6 +59,23 @@ export default function JournalPage() {
     },
   });
 
+  const exportEntries = () => {
+    if (!entries?.length) return;
+    downloadCsv(
+      `journal-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { header: 'Titre', accessor: e => e.title },
+        { header: 'Contenu', accessor: e => e.content },
+        { header: 'Émotion', accessor: e => e.emotion ?? '—' },
+        { header: 'Note', accessor: e => e.grade ?? '—' },
+        { header: 'Tags', accessor: e => e.tags.join(', ') },
+        { header: 'Position', accessor: e => e.position?.asset?.symbol ?? '—' },
+        { header: 'Date', accessor: e => new Date(e.createdAt).toISOString() },
+      ],
+      entries,
+    );
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     create.mutate({
@@ -100,7 +118,14 @@ export default function JournalPage() {
         </div>
 
         {/* Bouton */}
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={exportEntries}
+            disabled={!entries?.length}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-700 bg-gray-900 hover:border-emerald-500/40 hover:text-emerald-400 text-gray-300 font-semibold rounded-lg text-sm transition-colors disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />Exporter CSV
+          </button>
           <button onClick={() => setShowForm(v => !v)}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-lg text-sm transition-colors">
             <Plus className="w-4 h-4" />{showForm ? 'Annuler' : 'Nouvelle entrée'}

@@ -159,6 +159,7 @@ async def price_broadcaster():
                     on_retry=lambda attempt, exc: logger.warning(
                         "binance_price_retry", attempt=attempt, error=str(exc)
                     ),
+                    source="binance",
                 )
                 prices = {item["symbol"]: float(item["price"]) for item in data}
 

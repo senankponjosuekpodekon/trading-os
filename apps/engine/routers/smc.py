@@ -89,7 +89,10 @@ def detect_order_blocks(
     high: pd.Series,
     low: pd.Series,
     close: pd.Series,
+    volume: pd.Series | None = None,
     lookback: int = 50,
+    min_displacement: float = 2.0,
+    min_volume_ratio: float = 1.2,
 ) -> dict:
     """
     Bullish OB : dernière bougie bearish avant un fort mouvement haussier
@@ -108,8 +111,13 @@ def detect_order_blocks(
     threshold = atr * 1.5
 
     current = float(close.iloc[-1])
+    current_low = float(low.iloc[-1])
+    current_high = float(high.iloc[-1])
     bullish_ob: list[dict] = []
     bearish_ob: list[dict] = []
+
+    vol = volume if volume is not None else pd.Series(np.ones(n), index=close.index)
+    avg_volume = float(vol.iloc[max(0, n - 14):].mean()) or 1.0
 
     for i in range(start, n - 2):
         o, h, l, c = float(open_.iloc[i]), float(high.iloc[i]), float(low.iloc[i]), float(close.iloc[i])
@@ -119,29 +127,58 @@ def detect_order_blocks(
         if move < threshold:
             continue
 
+        displacement_ratio = round(move / atr, 3) if atr else 0.0
+        vol_ratio = float(vol.iloc[i]) / avg_volume if avg_volume else 1.0
+
+        # Status : fresh = zone jamais testée, tested_once = prix dedans, mitigated = traversée
+        def _status(ob_type: str) -> str:
+            if ob_type == "BULLISH":
+                if current_low < l:
+                    return "mitigated"
+                if current_low >= l and current <= h:
+                    return "tested_once"
+                return "fresh"
+            if current_high > h:
+                return "mitigated"
+            if current_high <= h and current >= l:
+                return "tested_once"
+            return "fresh"
+
+        is_valid = displacement_ratio >= min_displacement and vol_ratio >= min_volume_ratio
+
         if c < o and c_next > c:  # Bougie bearish puis move haussier → Bullish OB
+            status = _status("BULLISH")
             bullish_ob.append({
                 "type":   "BULLISH",
                 "top":    round(o, 6),
                 "bottom": round(l, 6),
                 "mid":    round((o + l) / 2, 6),
                 "bar_idx": i,
-                "respected": current > l,
+                "respected": status != "mitigated",
+                "status": status,
+                "displacement_ratio": displacement_ratio,
+                "volume_ratio": round(vol_ratio, 2),
+                "valid": is_valid,
             })
 
         if c > o and c_next < c:  # Bougie bullish puis move baissier → Bearish OB
+            status = _status("BEARISH")
             bearish_ob.append({
                 "type":   "BEARISH",
                 "top":    round(h, 6),
                 "bottom": round(c, 6),
                 "mid":    round((h + c) / 2, 6),
                 "bar_idx": i,
-                "respected": current < h,
+                "respected": status != "mitigated",
+                "status": status,
+                "displacement_ratio": displacement_ratio,
+                "volume_ratio": round(vol_ratio, 2),
+                "valid": is_valid,
             })
 
-    # Plus récents en premier, max 3
-    bull_ob = [ob for ob in reversed(bullish_ob) if ob["respected"]][:3]
-    bear_ob = [ob for ob in reversed(bearish_ob) if ob["respected"]][:3]
+    # Plus récents en premier, max 3 (exclure mitigated)
+    bull_ob = [ob for ob in reversed(bullish_ob) if ob["status"] != "mitigated"][:3]
+    bear_ob = [ob for ob in reversed(bearish_ob) if ob["status"] != "mitigated"][:3]
 
     proximity_pct = 0.008  # 0.8%
     near_bull_ob = next(
@@ -266,8 +303,9 @@ def analyze_smc(
     high: pd.Series,
     low: pd.Series,
     close: pd.Series,
+    volume: pd.Series | None = None,
 ) -> dict:
     fvg = detect_fvg(high, low, close)
-    ob  = detect_order_blocks(open_, high, low, close)
+    ob  = detect_order_blocks(open_, high, low, close, volume=volume)
     liq = detect_liquidity_zones(high, low)
     return {"fvg": fvg, "ob": ob, "liquidity": liq}

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   TrendingUp, TrendingDown, X, Plus, AlertCircle, RefreshCw,
-  Calculator, Zap, History, Activity, ChevronLeft, ChevronRight, Bot,
+  Calculator, Zap, History, Activity, ChevronLeft, ChevronRight, Bot, Target,
 } from 'lucide-react';
 import axios from 'axios';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -47,13 +47,23 @@ export default function PortfolioPage() {
   const [tab,         setTab]         = useState<'open' | 'history'>('open');
   const [showForm,    setShowForm]    = useState(false);
   const [closePrice,  setClosePrice]  = useState<Record<string, string>>({});
-  const [form,        setForm]        = useState({ assetSymbol: 'BTC/USDT', direction: 'BUY', entryPrice: '', quantity: '', stopLoss: '', takeProfit: '' });
+  const [form,        setForm]        = useState({
+    assetSymbol: 'BTC/USDT',
+    direction: 'BUY',
+    entryPrice: '',
+    quantity: '',
+    stopLoss: '',
+    takeProfit: '',
+    trailingMethod: 'atr',
+    trailingActive: true,
+  });
   const [riskCalc,    setRiskCalc]    = useState<any>(null);
   const [riskPct,     setRiskPct]     = useState('1.0');
   const [calcLoading, setCalcLoading] = useState(false);
   const [histPage,    setHistPage]    = useState(0);
   const [formError,   setFormError]   = useState<string | null>(null);
   const [aiReview,    setAiReview]    = useState<{ positionId: string; text: string; pnl: number | null } | null>(null);
+  const [continuation, setContinuation] = useState<Record<string, any>>({});
   const qc = useQueryClient();
 
   const HIST_PAGE_SIZE = 10;
@@ -111,17 +121,61 @@ export default function PortfolioPage() {
       qc.invalidateQueries({ queryKey: ['positions-summary'] });
       qc.invalidateQueries({ queryKey: ['portfolios'] });
       setShowForm(false);
-      setForm({ assetSymbol: 'BTC/USDT', direction: 'BUY', entryPrice: '', quantity: '', stopLoss: '', takeProfit: '' });
+      setForm({
+        assetSymbol: 'BTC/USDT',
+        direction: 'BUY',
+        entryPrice: '',
+        quantity: '',
+        stopLoss: '',
+        takeProfit: '',
+        trailingMethod: 'atr',
+        trailingActive: true,
+      });
     },
   });
 
   const closePosition = useMutation({
     mutationFn: ({ id, exitPrice }: { id: string; exitPrice: number }) =>
       api.patch(`/positions/${id}/close`, { exitPrice }),
-    onSuccess: () => {
+    onMutate: async ({ id }) => {
+      await qc.cancelQueries({ queryKey: ['positions-live'] });
+      const previous = qc.getQueryData<LivePosition[]>(['positions-live']);
+      if (previous) {
+        qc.setQueryData(['positions-live'], previous.filter(p => p.id !== id));
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(['positions-live'], context.previous);
+      }
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['positions-summary'] });
       qc.invalidateQueries({ queryKey: ['positions-live'] });
       qc.invalidateQueries({ queryKey: ['portfolios'] });
+    },
+  });
+
+  const updateTrailingStop = useMutation({
+    mutationFn: ({ id, method, active }: { id: string; method?: string; active?: boolean }) =>
+      api.post(`/positions/${id}/trailing-stop`, { method, active }),
+    onMutate: async ({ id, method, active }) => {
+      await qc.cancelQueries({ queryKey: ['positions-live'] });
+      const previous = qc.getQueryData<LivePosition[]>(['positions-live']);
+      if (previous) {
+        qc.setQueryData(['positions-live'],
+          previous.map(p => p.id === id ? { ...p, ...(method && { trailingMethod: method as any }), ...(active !== undefined && { trailingActive: active }) } : p));
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(['positions-live'], context.previous);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['positions-live'] });
     },
   });
 
@@ -129,6 +183,14 @@ export default function PortfolioPage() {
     mutationFn: (positionId: string) => api.post(`/ai/review/position/${positionId}`, {}),
     onSuccess: (res, positionId) => {
       setAiReview({ positionId, text: res.data.ai_review, pnl: res.data.pnl ?? null });
+    },
+  });
+
+  const continuationAdvice = useMutation({
+    mutationFn: async (positionId: string) =>
+      (await api.post(`/positions/${positionId}/continuation-advice`, {})).data,
+    onSuccess: (data, positionId) => {
+      setContinuation(prev => ({ ...prev, [positionId]: data }));
     },
   });
 
@@ -161,6 +223,8 @@ export default function PortfolioPage() {
       quantity: qty,
       stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : undefined,
       takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : undefined,
+      trailingMethod: form.trailingMethod,
+      trailingActive: form.trailingActive,
     });
   };
 
@@ -179,6 +243,7 @@ export default function PortfolioPage() {
         {errorSummary  && <ErrorBox message="Impossible de charger les positions." onRetry={() => refetchSummary()} />}
         {openPosition.isError   && <ErrorBox message={(openPosition.error as any)?.response?.data?.message ?? "Erreur ouverture."} />}
         {closePosition.isError  && <ErrorBox message={(closePosition.error as any)?.response?.data?.message ?? "Erreur clôture."} />}
+        {updateTrailingStop.isError && <ErrorBox message={(updateTrailingStop.error as any)?.response?.data?.message ?? "Erreur mise à jour trailing stop."} />}
         {openFromSignal.isError && <ErrorBox message={(openFromSignal.error as any)?.response?.data?.message ?? "Erreur paper trading."} />}
 
         {/* Stats */}
@@ -297,6 +362,23 @@ export default function PortfolioPage() {
                     className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500" />
                 </div>
               ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Trailing</label>
+                <select value={form.trailingMethod}
+                  onChange={e => setForm(v => ({ ...v, trailingMethod: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500">
+                  <option value="atr">ATR</option>
+                  <option value="swing">Swing</option>
+                  <option value="ema">EMA</option>
+                  <option value="chandelier">Chandelier</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2 pt-5">
+                <input id="trailingActive" type="checkbox" checked={form.trailingActive}
+                  onChange={e => setForm(v => ({ ...v, trailingActive: e.target.checked }))}
+                  className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500" />
+                <label htmlFor="trailingActive" className="text-sm text-gray-300">Activer trailing stop</label>
+              </div>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -329,19 +411,19 @@ export default function PortfolioPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800 bg-gray-800/50">
-                    {['Actif', 'Dir.', 'Entrée', 'Prix live', 'PnL live', 'SL', 'TP', ''].map(h => (
+                    {['Actif', 'Dir.', 'Entrée', 'Prix live', 'PnL live', 'SL', 'TP', 'Trailing', 'Conseil', ''].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
                   {!livePositions && (
-                    <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-600">
+                    <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-600">
                       <RefreshCw className="w-4 h-4 animate-spin inline mr-2" />Chargement prix live…
                     </td></tr>
                   )}
                   {livePositions?.length === 0 && (
-                    <tr><td colSpan={8} className="px-4 py-12 text-center">
+                    <tr><td colSpan={10} className="px-4 py-12 text-center">
                       <div className="flex flex-col items-center gap-2 text-gray-600">
                         <Activity className="w-8 h-8" />
                         <p>Aucune position ouverte</p>
@@ -352,6 +434,7 @@ export default function PortfolioPage() {
                     const entry     = parseFloat(p.entryPrice);
                     const sl        = p.stopLoss   ? parseFloat(p.stopLoss)   : null;
                     const tp        = p.takeProfit ? parseFloat(p.takeProfit) : null;
+                    const tsl       = p.trailingStop ? parseFloat(p.trailingStop) : null;
                     const live      = p.livePrice;
                     const upnl      = p.unrealizedPnl;
                     const upnlPct   = p.unrealizedPct;
@@ -397,6 +480,56 @@ export default function PortfolioPage() {
                           {tp ? `$${tp.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
                         </td>
                         <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1.5 min-w-[120px]">
+                            <span className="font-mono text-yellow-400 text-xs">
+                              {tsl ? `$${tsl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+                            </span>
+                            <select
+                              disabled={updateTrailingStop.isPending}
+                              value={p.trailingMethod || 'atr'}
+                              onChange={e => updateTrailingStop.mutate({ id: p.id, method: e.target.value })}
+                              className="px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-300 text-xs focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                            >
+                              <option value="atr">ATR</option>
+                              <option value="swing">Swing</option>
+                              <option value="ema">EMA</option>
+                              <option value="chandelier">Chandelier</option>
+                            </select>
+                            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                              <input type="checkbox" checked={p.trailingActive !== false}
+                                disabled={updateTrailingStop.isPending}
+                                onChange={e => updateTrailingStop.mutate({ id: p.id, active: e.target.checked })}
+                                className="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500 disabled:opacity-50" />
+                              Actif
+                            </label>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1 min-w-[140px]">
+                            {continuation[p.id] && (
+                              <div className="text-[10px] leading-tight">
+                                <span className={`font-medium ${
+                                  continuation[p.id].action === 'ACTIVATE_TRAILING' ? 'text-emerald-400' :
+                                  continuation[p.id].action === 'EXHAUSTED' ? 'text-red-400' :
+                                  continuation[p.id].action === 'MOVE_TO_BREAK_EVEN' ? 'text-yellow-400' :
+                                  'text-gray-400'
+                                }`}>
+                                  {continuation[p.id].action.replace(/_/g, ' ')}
+                                </span>
+                                <p className="text-gray-500 mt-0.5">Score {continuation[p.id].score}</p>
+                              </div>
+                            )}
+                            <button
+                              onClick={() => continuationAdvice.mutate(p.id)}
+                              disabled={continuationAdvice.isPending}
+                              className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-violet-500/10 text-violet-400 border border-violet-500/30 hover:bg-violet-500/20 disabled:opacity-50 transition-colors w-fit"
+                            >
+                              <Target className="w-3 h-3" />
+                              {continuation[p.id] ? 'Rafraîchir' : 'Conseil'}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
                           <div className="flex items-center gap-1">
                             <input type="number" step="any" placeholder="Exit"
                               value={closePrice[p.id] ?? ''}
@@ -434,6 +567,7 @@ export default function PortfolioPage() {
                 const entry     = parseFloat(p.entryPrice);
                 const sl        = p.stopLoss   ? parseFloat(p.stopLoss)   : null;
                 const tp        = p.takeProfit ? parseFloat(p.takeProfit) : null;
+                const tsl       = p.trailingStop ? parseFloat(p.trailingStop) : null;
                 const live      = p.livePrice;
                 const upnl      = p.unrealizedPnl;
                 const upnlPct   = p.unrealizedPct;
@@ -443,11 +577,16 @@ export default function PortfolioPage() {
                 return (
                   <div key={p.id} className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-white font-semibold">{p.asset?.symbol}</span>
                         {p.direction === 'BUY'
                           ? <span className="text-emerald-400 text-xs font-bold flex items-center gap-1"><TrendingUp className="w-3 h-3" />BUY</span>
                           : <span className="text-red-400 text-xs font-bold flex items-center gap-1"><TrendingDown className="w-3 h-3" />SELL</span>}
+                        {p.trailingActive !== false && tsl !== null && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                            TRAIL {p.trailingMethod?.toUpperCase()} ${tsl.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </span>
+                        )}
                       </div>
                       <button
                         disabled={!closePrice[p.id] || closePosition.isPending}
@@ -473,6 +612,30 @@ export default function PortfolioPage() {
                         <p className="text-xs text-gray-500">TP</p>
                         <p className="font-mono text-emerald-400">{tp ? `$${tp.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</p>
                       </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Trailing</p>
+                        <p className="font-mono text-yellow-400">{tsl ? `$${tsl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 pt-2 border-t border-gray-700/50">
+                      <select
+                        disabled={updateTrailingStop.isPending}
+                        value={p.trailingMethod || 'atr'}
+                        onChange={e => updateTrailingStop.mutate({ id: p.id, method: e.target.value })}
+                        className="px-2 py-1 bg-gray-900 border border-gray-700 rounded text-gray-300 text-xs focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                      >
+                        <option value="atr">ATR</option>
+                        <option value="swing">Swing</option>
+                        <option value="ema">EMA</option>
+                        <option value="chandelier">Chandelier</option>
+                      </select>
+                      <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                        <input type="checkbox" checked={p.trailingActive !== false}
+                          disabled={updateTrailingStop.isPending}
+                          onChange={e => updateTrailingStop.mutate({ id: p.id, active: e.target.checked })}
+                          className="w-3.5 h-3.5 rounded border-gray-600 bg-gray-900 text-emerald-500 focus:ring-emerald-500 disabled:opacity-50" />
+                        Trailing actif
+                      </label>
                     </div>
                     {upnl !== null && (
                       <div>

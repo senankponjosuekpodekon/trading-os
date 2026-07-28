@@ -80,3 +80,58 @@ def test_derive_profile_suitability_swing_ok():
 def test_derive_profile_suitability_neutral_empty():
     profiles = derive_profile_suitability("1h", 2.0, [], "NEUTRAL", 0)
     assert profiles == []
+
+
+def test_evaluate_strategy_dps_filter_blocks_low_dps_signal():
+    # min_confidence bas (40) laisse passer un signal faible (confidence 50%) que le DPS (seuil 60) doit filtrer.
+    rules = StrategyRules(min_confidence=40, min_dps=60.0)
+    indicators = _default_indicators(close=101, ema20=102, ema50=101.5, ema200=100, rsi=52, atr=2, volume_ratio=1.0)
+    result = evaluate_strategy(rules, indicators, {}, {}, {}, timeframe="1h")
+    assert result["dps"] == 50.0
+    assert result["signal"] == "NEUTRAL"
+    assert result["confidence"] == 0
+    assert any("DPS" in r for r in result["reasons"])
+
+
+def test_evaluate_strategy_dps_filter_allows_high_dps_signal():
+    rules = StrategyRules(min_confidence=55, min_dps=60.0)
+    indicators = _default_indicators(close=110, ema20=112, ema50=108, ema200=100, rsi=25, atr=2)
+    result = evaluate_strategy(rules, indicators, {}, {}, {}, timeframe="1h")
+    assert result["signal"] == "BUY"
+    assert result["dps"] >= 60.0
+
+
+def test_evaluate_strategy_entry_timeframe_refines_entry_price():
+    rules = StrategyRules(min_confidence=55, min_dps=0.0, analysis_timeframe="1h", entry_timeframe="5m")
+    indicators = _default_indicators(close=110, ema20=112, ema50=108, ema200=100, rsi=25, atr=2)
+    result = evaluate_strategy(
+        rules, indicators, {}, {}, {}, timeframe="1h", entry_context={"close": 111.5},
+    )
+    assert result["signal"] == "BUY"
+    assert result["entry_price"] == 111.5
+    assert any("Entrée affinée sur 5m" in r for r in result["reasons"])
+
+
+def test_evaluate_strategy_entry_timeframe_ignored_without_context():
+    rules = StrategyRules(min_confidence=55, min_dps=0.0, analysis_timeframe="1h", entry_timeframe="5m")
+    indicators = _default_indicators(close=110, ema20=112, ema50=108, ema200=100, rsi=25, atr=2)
+    result = evaluate_strategy(rules, indicators, {}, {}, {}, timeframe="1h", entry_context=None)
+    assert result["signal"] == "BUY"
+    assert result["entry_price"] == 110.0
+
+
+def test_evaluate_strategy_entry_timeframe_same_as_analysis_no_refinement():
+    rules = StrategyRules(min_confidence=55, min_dps=0.0, analysis_timeframe="1h", entry_timeframe="1h")
+    indicators = _default_indicators(close=110, ema20=112, ema50=108, ema200=100, rsi=25, atr=2)
+    result = evaluate_strategy(
+        rules, indicators, {}, {}, {}, timeframe="1h", entry_context={"close": 999.0},
+    )
+    assert result["entry_price"] == 110.0
+
+
+def test_evaluate_strategy_dps_filter_disabled_with_low_threshold():
+    rules = StrategyRules(min_confidence=40, min_dps=0.0)
+    indicators = _default_indicators(close=101, ema20=102, ema50=101.5, ema200=100, rsi=52, atr=2, volume_ratio=1.0)
+    result = evaluate_strategy(rules, indicators, {}, {}, {}, timeframe="1h")
+    # Avec min_dps=0, le filtre DPS ne peut jamais déclencher
+    assert not any("DPS" in r for r in result["reasons"])

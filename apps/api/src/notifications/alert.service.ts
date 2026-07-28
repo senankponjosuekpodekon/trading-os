@@ -17,6 +17,7 @@ export interface SignalAlertInput {
     atr_pct?: number | null;
   };
   mlConfidence?: number | null;
+  mlRegime?: string | null;
 }
 
 @Injectable()
@@ -108,6 +109,7 @@ export class AlertService {
       confidence: Math.round((input.opportunityScore ?? input.confidence / 100) * 100),
       expectedMove: input.expectedMove,
       mlConfidence: input.mlConfidence ?? null,
+      mlRegime: input.mlRegime ?? null,
     });
   }
 

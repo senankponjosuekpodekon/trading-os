@@ -8,6 +8,8 @@ import { useAuthStore } from '@/store/auth.store';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [totpToken, setTotpToken] = useState('');
+  const [needsTotp, setNeedsTotp] = useState(false);
   const [error, setError] = useState('');
   const { login, isLoading } = useAuthStore();
   const router = useRouter();
@@ -16,10 +18,16 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     try {
-      await login(email, password);
+      await login(email, password, needsTotp ? totpToken : undefined);
       router.replace('/dashboard');
-    } catch {
-      setError('Email ou mot de passe incorrect.');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message ?? '';
+      if (msg.toLowerCase().includes('2fa token required')) {
+        setNeedsTotp(true);
+        setError('Code 2FA requis. Entrez le code de votre application d’authentification.');
+      } else {
+        setError('Email, mot de passe ou code 2FA incorrect.');
+      }
     }
   };
 
@@ -66,6 +74,22 @@ export default function LoginPage() {
                 placeholder="••••••••"
               />
             </div>
+
+            {needsTotp && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Code 2FA</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={totpToken}
+                  onChange={(e) => setTotpToken(e.target.value)}
+                  required={needsTotp}
+                  className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                  placeholder="123456"
+                />
+              </div>
+            )}
 
             <button
               type="submit"

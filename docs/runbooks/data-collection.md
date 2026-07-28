@@ -50,7 +50,36 @@ Tips : utiliser tmux ou 4 terminaux. Vérifier `http://localhost:3001/api/health
 - `SELECT COUNT(*) FROM signal_features WHERE outcome IS NOT NULL;`
 - `SELECT outcome, COUNT(*) FROM signal_features GROUP BY outcome;`
 - `SELECT market, COUNT(*) FROM signal_features GROUP BY market;`
-Consigner ces chiffres dans `docs/runbooks/data-collection-log.md` (création libre).
+Consigner ces chiffres dans `docs/runbooks/data-collection-log.md`.
+
+### Script de métriques
+Un raccourci est disponible :
+
+```bash
+npm run data:metrics --workspace=apps/api
+```
+
+Sortie typique :
+
+```
+── Signal Feature Metrics ───────────────────────────────
+Total snapshots      : 142
+Snapshots w/ outcome : 78 (54.9%)
+Outcome distribution
+  WIN_TP1   : 42 (53.8%)
+  LOSS_SL   : 26 (33.3%)
+  EXPIRED   : 10 (12.8%)
+Snapshots by market
+  CRYPTO     : 95 (66.9%)
+  FOREX      : 33 (23.2%)
+  SYNTHETIC  : 14 (9.9%)
+Snapshots by timeframe
+  15m      : 40 (28.2%)
+  1h       : 62 (43.7%)
+  4h       : 30 (21.1%)
+```
+
+Reporter les totaux pertinents dans le log quotidien.
 
 ## 5. Checklist tests manuels (à répéter au moins 1x/jour)
 | Test | Étapes | Résultat |

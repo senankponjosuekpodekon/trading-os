@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
+from collections import defaultdict
 import httpx
 import asyncio
 import time
@@ -8,17 +9,33 @@ import pandas as pd
 import pandas_ta as ta
 from concurrent.futures import ThreadPoolExecutor
 
-from routers.price_action import detect_market_structure, price_action_bonus
+from routers.price_action import detect_market_structure, price_action_bonus, bos_quality_score
+from routers.synthetic_engine import analyze_synthetic, SYMBOL_TO_DERIV as SYNTHETIC_SYMBOLS
+from routers.boom_crash_model import analyze_boom_crash
 from routers.sr_zones import get_sr_zones, sr_bonus
 from routers.patterns import scan_last_patterns, patterns_bonus
+from patterns.detector import detect_all as detect_chart_patterns
+from patterns.confluence import score_pattern_confluence
 from routers.regime import detect_regime, regime_bonus, regime_filter
 from routers.smc import analyze_smc, smc_bonus
 from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
 from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
+from routers.forex_context import get_forex_context, should_suspend_forex
 from routers.portfolio_risk import analyze_portfolio_risk, get_cluster
 from routers.strategy_eval import parse_rules, evaluate_strategy, derive_profile_suitability
+from routers.onchain import is_crypto_symbol, onchain_context, onchain_bonus
+from routers.onchain_advanced import (
+    get_advanced_onchain_context,
+    advanced_onchain_bonus,
+)
+from routers.tokenomics import fetch_tokenomics, tokenomics_penalty
+from routers.social_sentiment import fetch_social_metrics, social_bonus
+from routers.macro import fear_greed
+from features.market_concept_layer import compute_market_concept_vector
+from features.market_embedding import build_market_embedding
+from ml.feature_factory import build_feature_vector
 import config
 from utils.cache import get_cached, set_cached
 from utils.logger import get_logger
@@ -26,6 +43,7 @@ from utils.http import retry_async
 from utils.rate_limiter import rate_limit
 from utils.market_context import get_signal_context
 from utils.metrics import inc, observe
+from utils.session import get_session_info
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=8)
@@ -62,12 +80,15 @@ WARMUP_INTERVAL_SECONDS  = WARMUP_INTERVAL_FAST
 WARMUP_TTL_SECONDS       = WARMUP_TTL_FAST
 
 # Hystérésis flip-flop : mémoire d'état par (symbol, timeframe)
-# Structure : { "BTC/USDT:1h": {"signal": "BUY", "count": 2, "ts": <monotonic>} }
+# Structure : { "BTC/USDT:1h": {"signal": "BUY", "count": 2, "ts": <monotonic>, "history": [...]} }
 # Un signal est «hystérésis-confirmé» seulement après 2 scans consécutifs dans la même direction.
 # Bande morte asymmétrique : repasser NEUTRAL exige score < 25, pas juste < 40.
+# persistence_score (Sprint 4) : enrichit l'hystérésis binaire par un score continu 0-100%
+# = fraction des N derniers scans allant dans la même direction que le signal actuel.
 _signal_state: dict[str, dict] = {}
 _HYSTERESIS_CONFIRM = 2   # scans consécutifs pour confirmer
 _HYSTERESIS_TTL     = 3600  # réinitialise l'état après 1h sans scan
+_PERSISTENCE_WINDOW = 5    # fenêtre glissante (nb de scans) pour le persistence_score
 
 router = APIRouter()
 
@@ -167,6 +188,26 @@ TF_TO_DERIV_GRANULARITY: dict = {
     "1m": 60, "5m": 300, "15m": 900,
     "1h": 3600, "4h": 14400, "1d": 86400,
 }
+
+# Asset type classification
+FOREX_SYMBOLS = set(SYMBOL_TO_TWELVEDATA.keys()) | set(SYMBOL_TO_YFINANCE.keys())
+COMMODITY_SYMBOLS = {"XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD"}
+
+
+def get_asset_type(symbol: str) -> str:
+    """Classify an internal symbol into CRYPTO | FOREX | SYNTHETIC | BRVM | COMMODITY | UNKNOWN."""
+    if symbol in SYMBOL_TO_BINANCE or symbol.endswith("/USDT"):
+        return "CRYPTO"
+    if symbol in SYNTHETIC_SYMBOLS:
+        return "SYNTHETIC"
+    if is_brvm_symbol(symbol):
+        return "BRVM"
+    if symbol in COMMODITY_SYMBOLS:
+        return "COMMODITY"
+    if symbol in FOREX_SYMBOLS or ("/" in symbol and len(symbol.split("/")) == 2):
+        return "FOREX"
+    return "UNKNOWN"
+
 
 # Conversion timeframe interne → Twelve Data
 TF_TO_TD: dict = {
@@ -277,6 +318,7 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
             on_retry=lambda attempt, exc: logger.warning(
                 "twelvedata_retry", symbol=symbol, attempt=attempt, error=str(exc)
             ),
+            source="twelvedata",
         )
         if "values" not in data:
             return None
@@ -289,7 +331,13 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
         df["time"] = pd.to_datetime(df["time"]).map(lambda t: int(t.timestamp()))
         _klines_cache[cache_key] = (time.monotonic(), df)
         return df
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "twelvedata_fetch_failed",
+            symbol=symbol,
+            interval=interval,
+            error=str(exc),
+        )
         return None
 
 
@@ -465,6 +513,7 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
             on_retry=lambda attempt, exc: logger.warning(
                 "binance_retry", symbol=symbol, attempt=attempt, error=str(exc)
             ),
+            source="binance",
         )
         df = pd.DataFrame(data, columns=[
             "time","open","high","low","close","volume",
@@ -479,7 +528,13 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
             df = df.iloc[:-1].reset_index(drop=True)
         _klines_cache[cache_key] = (_time.monotonic(), df)
         return df
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "binance_klines_failed",
+            symbol=symbol,
+            interval=interval,
+            error=str(exc),
+        )
         return None
 
 
@@ -494,6 +549,124 @@ _TF_HIERARCHY: dict[str, tuple[str, str]] = {
 }
 
 
+def apply_hysteresis_and_persistence(
+    results: list,
+    timeframe: str,
+    signal_state: dict,
+    now_mono: float,
+) -> None:
+    """
+    Hystérésis flip-flop + persistence_score (Sprint 4), mutation in-place de `results`.
+    Règles :
+      - Un signal BUY/SELL doit être produit _HYSTERESIS_CONFIRM fois consécutivement pour être "confirmé".
+      - Un signal confirmé repasse NEUTRAL seulement si la confidence descend sous 25 (bande morte).
+      - L'état expire après _HYSTERESIS_TTL secondes sans scan.
+      - persistence_score (0-100%) : fraction des _PERSISTENCE_WINDOW derniers scans allant
+        dans la même direction que le signal courant — enrichit le compteur binaire d'hystérésis.
+    """
+    for r in results:
+        sig = r.get("signal", "NEUTRAL")
+        key = f"{r['symbol']}:{timeframe}:{r.get('strategy_id', 'default')}"
+        state = signal_state.get(key)
+
+        # Expiration TTL
+        if state and (now_mono - state["ts"]) > _HYSTERESIS_TTL:
+            state = None
+            signal_state.pop(key, None)
+
+        if sig in ("BUY", "SELL"):
+            if state and state["signal"] == sig:
+                state["count"] = min(state["count"] + 1, _HYSTERESIS_CONFIRM + 1)
+                state["ts"] = now_mono
+            else:
+                # Nouvelle direction — réinitialiser compteur et historique
+                state = {"signal": sig, "count": 1, "ts": now_mono, "history": []}
+                signal_state[key] = state
+
+            history = state.setdefault("history", [])
+            history.append(sig)
+            del history[:-_PERSISTENCE_WINDOW]
+            r["persistence_score"] = round(100 * history.count(sig) / _PERSISTENCE_WINDOW, 2)
+
+            # Pas encore confirmé : dégrader en NEUTRAL pour les notifications
+            # (le signal reste dans results avec signal_pending=True pour info)
+            if state["count"] < _HYSTERESIS_CONFIRM:
+                r["signal_pending"] = True
+        else:
+            if state:
+                history = state.setdefault("history", [])
+                history.append("NEUTRAL")
+                del history[:-_PERSISTENCE_WINDOW]
+
+            # Signal NEUTRAL : si l'état précédent était confirmé, appliquer bande morte
+            if state and state.get("count", 0) >= _HYSTERESIS_CONFIRM:
+                conf = r.get("confidence", 0)
+                if conf >= 25:
+                    # Score encore dans la bande morte → maintenir le signal précédent
+                    r["signal"] = state["signal"]
+                    r["signal_sticky"] = True
+                    history = state.get("history", [])
+                    r["persistence_score"] = round(100 * history.count(state["signal"]) / _PERSISTENCE_WINDOW, 2)
+                else:
+                    signal_state.pop(key, None)
+                    r["persistence_score"] = 0
+            else:
+                signal_state.pop(key, None)
+                r["persistence_score"] = 0
+
+
+def _analyze_synthetic_candles(symbol: str, timeframe: str, df: pd.DataFrame) -> dict:
+    """Route synthetic indices through the statistical engine (no trend-following)."""
+    close = df["close"].astype(float)
+    deriv_sym = SYNTHETIC_SYMBOLS.get(symbol)
+    category = "volatility"
+    if deriv_sym:
+        from routers.synthetic_engine import DERIV_SYMBOLS as _DERIV_CATS
+        category = _DERIV_CATS.get(deriv_sym, "volatility")
+
+    if category == "boom_crash":
+        direction = "boom" if "BOOM" in symbol.upper() else "crash"
+        stats = analyze_boom_crash(close, direction=direction)
+    else:
+        stats = analyze_synthetic(close, category=category)
+
+    entry = round(float(close.iloc[-1]), 6)
+    confidence = int(min(95, stats.get("spike_probability", 0) + stats.get("mean_reversion_prob", 0) * 0.5))
+
+    synthetic_regime = {"regime": stats.get("regime"), "state": stats.get("state")}
+    # reuse the same universal concept layer for synthetic indices
+    market_concept_vector = compute_market_concept_vector(
+        symbol, df, "SYNTHETIC", regime=synthetic_regime, mtf_regime=synthetic_regime
+    )
+    market_embedding = build_market_embedding(market_concept_vector, symbol, timeframe)
+    feature_vector = build_feature_vector(symbol, timeframe, df)
+
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "asset_type": "SYNTHETIC",
+        "signal": "NEUTRAL",
+        "confidence": confidence,
+        "entry_price": entry,
+        "stop_loss": None,
+        "take_profit_1": None,
+        "take_profit_2": None,
+        "risk_reward": None,
+        "explanation": f"Synthetic {category}: {stats.get('state')} | regime={stats.get('regime')}",
+        "indicators": {"close": entry, "atr": round(close.iloc[-20:].std(), 6)},
+        "session": {},
+        "price_action": {},
+        "sr_zones": {},
+        "patterns": {},
+        "regime": synthetic_regime,
+        "smc": {},
+        "synthetic_stats": stats,
+        "market_concept_vector": market_concept_vector,
+        "market_embedding": market_embedding,
+        "feature_vector": feature_vector,
+    }
+
+
 def analyze_candles(
     symbol: str,
     timeframe: str,
@@ -501,9 +674,18 @@ def analyze_candles(
     htf_regime: Optional[dict] = None,   # régime TF supérieur (HTF2 = top)
     mtf_regime: Optional[dict] = None,   # régime TF intermédiaire (HTF1)
     strategy: Optional[dict] = None,
+    onchain: Optional[dict] = None,      # contexte on-chain crypto (funding, fear&greed)
+    entry_context: Optional[dict] = None,  # dernière clôture sur l'entry_timeframe (Sprint 3)
+    forex_context: Optional[dict] = None,  # macro calendrier + DXY momentum
+    tokenomics_context: Optional[dict] = None,  # token unlocks / concentration risk
+    social_context: Optional[dict] = None,  # LunarCrush social sentiment
 ) -> dict:
     if len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data"}
+
+    asset_type = get_asset_type(symbol)
+    if asset_type == "SYNTHETIC":
+        return _analyze_synthetic_candles(symbol, timeframe, df)
 
     close    = df["close"]
     high     = df["high"]
@@ -672,9 +854,25 @@ def analyze_candles(
         if bb_bw_v and bb_bw_v < 0.02:
             reasons.append(f"BB squeeze (bw={bb_bw_v:.3f}) — breakout imminent")
 
+    # ── Session context ──
+    session_info = get_session_info()
+
     # ── Price Action Phase 1 : Structure ──
-    pa = detect_market_structure(high, low, close)
+    pa = detect_market_structure(high, low, close, volume=df["volume"])
     temp_signal = "BUY" if score >= 20 else ("SELL" if score <= -20 else "NEUTRAL")
+
+    # Session overlap bonus (London/NY = highest probability window)
+    if session_info.get("overlap") == "London_New_York" and temp_signal != "NEUTRAL":
+        score += 8
+        reasons.append("Session: London/NY overlap (+8)")
+    elif session_info.get("overlap") and temp_signal != "NEUTRAL":
+        score += 3
+        reasons.append(f"Session: {session_info['overlap']} (+3)")
+
+    # Low-quality BOS hard block (No Trade Engine)
+    if pa.get("bos") and pa.get("bos_dir") == temp_signal and pa.get("bos_score", 0) < 40:
+        temp_signal = "NEUTRAL"
+        reasons.append(f"PA: BOS quality too low ({pa.get('bos_score')}) → No Trade")
     if temp_signal != "NEUTRAL":
         pa_bonus, pa_reasons = price_action_bonus(pa, temp_signal)
         score += pa_bonus
@@ -689,6 +887,9 @@ def analyze_candles(
 
     # ── Phase 2 : Candlestick Patterns ──
     pats = scan_last_patterns(open_col, high, low, close)
+    chart_patterns = detect_chart_patterns(df) if len(df) >= 15 else []
+    if chart_patterns:
+        reasons.append(f"Pattern chartiste détecté: {chart_patterns[0]['name']} ({chart_patterns[0]['direction']})")
     if temp_signal != "NEUTRAL":
         b, r = patterns_bonus(pats, temp_signal)
         score += b
@@ -703,12 +904,64 @@ def analyze_candles(
         reasons += r
 
     # ── Phase 3 : SMC (FVG + Order Blocks + Liquidité) ──
-    smc = analyze_smc(open_col, high, low, close)
+    smc = analyze_smc(open_col, high, low, close, volume=df["volume"])
     temp_signal3 = "BUY" if score >= 40 else ("SELL" if score <= -40 else "NEUTRAL")
     if temp_signal3 != "NEUTRAL":
         b, r = smc_bonus(smc["fvg"], smc["ob"], smc["liquidity"], temp_signal3)
         score += b
         reasons += r
+
+    # ── On-chain (crypto uniquement) : Fear&Greed contrarian + Funding squeeze ──
+    advanced_flags = {}
+    if onchain and temp_signal3 != "NEUTRAL":
+        b, r = onchain_bonus(
+            onchain.get("context") or {}, temp_signal3, onchain.get("fear_greed")
+        )
+        score += b
+        reasons += r
+
+        adv_ctx = onchain.get("advanced") or {}
+        if adv_ctx:
+            b, r, f = advanced_onchain_bonus(adv_ctx, temp_signal3)
+            score += b
+            reasons += r
+            advanced_flags = f
+
+    # ── Tokenomics risk (crypto uniquement) : unlocks + concentration ──
+    tokenomics_flags = {}
+    if asset_type == "CRYPTO" and tokenomics_context:
+        penalty, r, f = tokenomics_penalty(tokenomics_context, temp_signal3)
+        if penalty:
+            score -= penalty
+            reasons += r
+        if f.get("danger_flag"):
+            tokenomics_flags["danger_flag"] = True
+        if f.get("concentration_flag"):
+            tokenomics_flags["concentration_flag"] = True
+
+    # ── Social sentiment (crypto uniquement) : LunarCrush momentum ──
+    if asset_type == "CRYPTO" and social_context and temp_signal3 != "NEUTRAL":
+        b, r = social_bonus(social_context, temp_signal3)
+        if b:
+            score += b
+            reasons += r
+
+    # ── Universal Market Representation (Phase A++) ──
+    market_concept_vector = compute_market_concept_vector(
+        symbol,
+        df,
+        asset_type,
+        regime=regime,
+        htf_regime=htf_regime,
+        mtf_regime=mtf_regime,
+        pa=pa,
+        smc=smc,
+        sr=sr,
+        onchain_context=onchain if asset_type == "CRYPTO" else None,
+        forex_context=forex_context if asset_type == "FOREX" else None,
+    )
+    market_embedding = build_market_embedding(market_concept_vector, symbol, timeframe)
+    feature_vector = build_feature_vector(symbol, timeframe, df)
 
     # ── Confluence multi-timeframe (3-TF hierarchy) ──
     # Règle : on applique d'abord le TF intermédiaire (MTF, poids fort)
@@ -756,6 +1009,13 @@ def analyze_candles(
             score -= 10
             reasons.append(f"HTF({htf_label}): VOLATILE — réduction score")
 
+    # ── Forex macro context : DXY momentum adjustment ──
+    if asset_type == "FOREX" and forex_context:
+        dxy_adj = forex_context.get("score_adjustment", 0)
+        if dxy_adj:
+            score += dxy_adj
+            reasons.extend(forex_context.get("reasons", []))
+
     provisional_signal = "BUY" if score >= 40 else ("SELL" if score <= -40 else "NEUTRAL")
 
     # Appliquer le filtre de régime (hard block) — bloque VOLATILE et contre-tendance confirmée
@@ -767,6 +1027,18 @@ def analyze_candles(
     else:
         signal = provisional_signal
         confidence = min(abs(score), 95) if signal != "NEUTRAL" else 0
+
+    # ── Forex macro risk : suspend new signals before high-impact news ──
+    if asset_type == "FOREX" and forex_context and forex_context.get("macro_risk"):
+        signal = "NEUTRAL"
+        confidence = 0
+        reasons.append("Macro risk: événement HIGH dans <2h — scan forex suspendu")
+
+    # Tokenomics danger : gros unlock imminent → signal désactivé
+    if asset_type == "CRYPTO" and tokenomics_flags.get("danger_flag"):
+        signal = "NEUTRAL"
+        confidence = 0
+        reasons.append("Tokenomics: unlock >20% supply <30j — signal désactivé")
 
     # Price levels — multiplicateurs ATR adaptés au régime
     # RANGING      : TP serré (objectif souvent irréaliste au-delà de 2×ATR)
@@ -794,6 +1066,44 @@ def analyze_candles(
           round(c_val - atr_v * _tp1_mult, 6) if atr_v and signal == "SELL" else None)
     tp2 = round(c_val + atr_v * _tp2_mult, 6) if atr_v and signal == "BUY"  else (
           round(c_val - atr_v * _tp2_mult, 6) if atr_v and signal == "SELL" else None)
+
+    # ── SL liquidity-aware : éviter de poser le SL dans une zone EQL/EQH de stop hunt ──
+    if sl is not None and atr_v:
+        sl_buffer = atr_v * 0.3
+        liq = smc.get("liquidity", {})
+        if signal == "BUY":
+            eql_zones = [z for z in liq.get("equal_lows", []) if z["price"] <= entry]
+            if eql_zones:
+                nearest = max(eql_zones, key=lambda z: z["price"])
+                cluster_min = nearest["min"]
+                if sl >= cluster_min - sl_buffer:
+                    sl = round(cluster_min - sl_buffer, 6)
+                    reasons.append(f"SL moved below equal-low cluster {cluster_min:.2f}")
+        elif signal == "SELL":
+            eqh_zones = [z for z in liq.get("equal_highs", []) if z["price"] >= entry]
+            if eqh_zones:
+                nearest = min(eqh_zones, key=lambda z: z["price"])
+                cluster_max = nearest["max"]
+                if sl <= cluster_max + sl_buffer:
+                    sl = round(cluster_max + sl_buffer, 6)
+                    reasons.append(f"SL moved above equal-high cluster {cluster_max:.2f}")
+
+    # ── TP market-adaptive : TP1 = prochaine zone de liquidité (EQH/EQL) ──
+    if tp1 is not None and atr_v:
+        liq = smc.get("liquidity", {})
+        if signal == "BUY":
+            eqh_zones = [z for z in liq.get("equal_highs", []) if z["price"] > entry]
+            if eqh_zones:
+                nearest = min(eqh_zones, key=lambda z: z["price"])
+                tp1 = round(nearest["price"], 6)
+                reasons.append(f"TP1 set to next equal-high {tp1:.2f}")
+        elif signal == "SELL":
+            eql_zones = [z for z in liq.get("equal_lows", []) if z["price"] < entry]
+            if eql_zones:
+                nearest = max(eql_zones, key=lambda z: z["price"])
+                tp1 = round(nearest["price"], 6)
+                reasons.append(f"TP1 set to next equal-low {tp1:.2f}")
+
     rr  = round(abs(tp1 - entry) / abs(entry - sl), 2) if sl and tp1 and abs(entry - sl) > 0 else None
 
     _mtf_tf, _htf_tf = _TF_HIERARCHY.get(timeframe, ("4h", "1d"))
@@ -825,6 +1135,8 @@ def analyze_candles(
             smc=smc,
             regime=regime,
             timeframe=timeframe,
+            onchain=onchain,
+            entry_context=entry_context,
         )
         signal = ev["signal"]
         confidence = ev["confidence"]
@@ -871,6 +1183,18 @@ def analyze_candles(
         (htf_regime or {}).get("regime", "UNKNOWN") == "TRENDING_BEAR" and signal == "SELL"
     ) if htf_regime else None
 
+    # --- Confluence scoring on detected chart/harmonic patterns ---
+    if chart_patterns:
+        scored_patterns = []
+        mtf_ctx = {"mtf_aligned": _mtf_aligned, "htf_aligned": _htf_aligned}
+        for p in chart_patterns:
+            conf, tags = score_pattern_confluence(p, pa, smc, mtf_context=mtf_ctx, regime=regime)
+            p["confluenceScore"] = conf
+            p["confluenceTags"] = tags
+            scored_patterns.append(p)
+        scored_patterns.sort(key=lambda x: x.get("confluenceScore", 0), reverse=True)
+        chart_patterns = scored_patterns
+
     # --- Predictive metrics for default hardcoded path (Sprint 4) ---
     if not strategy:
         from utils.predictive import compute_predictive_metrics
@@ -895,6 +1219,12 @@ def analyze_candles(
         success_probability = predictive["success_probability"]
         expected_move = predictive["expected_move"]
 
+        # --- DPS filter (Sprint 4) — signal directionnel peu fiable → non persisté ---
+        if signal != "NEUTRAL" and dps is not None and dps < 60.0:
+            reasons.append(f"DPS {dps}% < seuil 60% — filtré")
+            signal = "NEUTRAL"
+            confidence = 0
+
     return {
         "symbol":       symbol,
         "strategy_id":  strategy_id,
@@ -909,6 +1239,7 @@ def analyze_candles(
         "success_probability": success_probability,
         "expected_move": expected_move,
         "timeframe":    timeframe,
+        "asset_type":   asset_type,
         "signal":       signal,
         "confidence":   confidence,
         "_confidence_before_sentiment": confidence,  # snapshot avant enrichissement sentiment
@@ -925,11 +1256,20 @@ def analyze_candles(
             "bb_upper": bb_upper_v, "bb_mid": bb_mid_v, "bb_lower": bb_lower_v, "bb_bw": bb_bw_v,
             "score_total": score,
         },
+        "session": {
+            "session": session_info.get("session"),
+            "overlap": session_info.get("overlap"),
+            "minutes_after_session_open": session_info.get("minutes_after_session_open"),
+            "hour": session_info.get("hour"),
+            "weekday": session_info.get("weekday"),
+            "is_weekend": session_info.get("is_weekend"),
+        },
         "price_action": {
             "trend":      pa.get("trend"),
             "structure":  pa.get("structure"),
             "bos":        pa.get("bos"),
             "bos_dir":    pa.get("bos_dir"),
+            "bos_score":  pa.get("bos_score"),
             "choch":      pa.get("choch"),
             "last_swing_high": pa.get("last_swing_high"),
             "last_swing_low":  pa.get("last_swing_low"),
@@ -941,6 +1281,11 @@ def analyze_candles(
             "near_resistance": sr.get("near_resistance"),
         },
         "patterns": pats,
+        "detectedPatterns": chart_patterns,
+        "prz": chart_patterns[0].get("prz") if chart_patterns else None,
+        "fibTargets": chart_patterns[0].get("targets") if chart_patterns else None,
+        "confluenceScore": chart_patterns[0].get("confluenceScore") if chart_patterns else None,
+        "confluenceTags": chart_patterns[0].get("confluenceTags") if chart_patterns else [],
         "regime":   {
             "regime":         regime.get("regime"),
             "adx":            regime.get("adx"),
@@ -969,6 +1314,19 @@ def analyze_candles(
                 "near_eql":   smc["liquidity"].get("near_eql"),
             },
         },
+        "forex_context": forex_context if asset_type == "FOREX" else {},
+        "onchain_context": (
+            {**(onchain or {}), "flags": advanced_flags}
+            if asset_type == "CRYPTO" else {}
+        ),
+        "tokenomics_context": (
+            {"data": tokenomics_context, "flags": tokenomics_flags}
+            if asset_type == "CRYPTO" else {}
+        ),
+        "social_context": social_context if asset_type == "CRYPTO" else {},
+        "market_concept_vector": market_concept_vector,
+        "market_embedding": market_embedding,
+        "feature_vector": feature_vector,
         "mtf_context": {
             "ltf":         timeframe,
             "mtf":         _mtf_tf,
@@ -997,8 +1355,41 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
         df = await fetch_twelvedata_klines(symbol, tf)
     if df is None or len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
+
+    # Forex macro context (DXY momentum + economic calendar) — computed async before sync analysis
+    forex_context = None
+    if get_asset_type(symbol) == "FOREX":
+        _, forex_context = await should_suspend_forex(symbol)
+
+    # Tokenomics risk (crypto) — computed async before sync analysis
+    tokenomics_context = None
+    if get_asset_type(symbol) == "CRYPTO":
+        try:
+            tokenomics_context = await asyncio.wait_for(fetch_tokenomics(symbol), timeout=3.0)
+        except Exception as exc:
+            logger.warning("tokenomics_context_failed", symbol=symbol, error=str(exc))
+            tokenomics_context = None
+
+    # Social sentiment (crypto) — computed async before sync analysis
+    social_context = None
+    if get_asset_type(symbol) == "CRYPTO":
+        try:
+            social_context = await asyncio.wait_for(fetch_social_metrics(symbol), timeout=3.0)
+        except Exception as exc:
+            logger.warning("social_context_failed", symbol=symbol, error=str(exc))
+            social_context = None
+
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, analyze_candles, symbol, timeframe, df, htf_regime)
+    return await loop.run_in_executor(
+        _executor,
+        lambda: analyze_candles(
+            symbol, timeframe, df,
+            htf_regime=htf_regime,
+            forex_context=forex_context,
+            tokenomics_context=tokenomics_context,
+            social_context=social_context,
+        ),
+    )
 
 
 async def warmup_fast():
@@ -1073,6 +1464,7 @@ async def scan_multi(req: ScanRequest):
     # 0b. Cache lookup rapide pour les actifs non-BRVM
     cached_results = []
     missing_symbols = []
+    provider_failures: dict[str, list[str]] = defaultdict(list)
     if req.strategies:
         missing_symbols = other_symbols
     else:
@@ -1087,17 +1479,28 @@ async def scan_multi(req: ScanRequest):
         # Essai Binance en premier
         df = await fetch_binance_klines(sym, tf)
         if df is not None:
+            provider_failures.pop(sym, None)
             return df
+        provider_failures[sym].append("binance")
         # Fallback Deriv pour indices synthétiques
         df = await fetch_deriv_klines(sym, tf)
         if df is not None:
+            provider_failures.pop(sym, None)
             return df
+        provider_failures[sym].append("deriv")
         # Fallback Twelve Data pour Forex/métaux (si clé configurée)
         df = await fetch_twelvedata_klines(sym, tf)
         if df is not None:
+            provider_failures.pop(sym, None)
             return df
+        provider_failures[sym].append("twelvedata")
         # Fallback yfinance (gratuit, sans clé API)
-        return await fetch_yfinance_klines(sym, tf)
+        df = await fetch_yfinance_klines(sym, tf)
+        if df is not None:
+            provider_failures.pop(sym, None)
+            return df
+        provider_failures[sym].append("yfinance")
+        return None
 
     # 1a. Fetch régimes MTF + HTF en parallèle selon la hiérarchie 3-TF
     # 5m  -> MTF=1h,  HTF=4h
@@ -1134,8 +1537,13 @@ async def scan_multi(req: ScanRequest):
                 if df_htf is not None and len(df_htf) >= 50:
                     r = detect_regime(df_htf["high"], df_htf["low"], df_htf["close"])
                     return sym, interval, r
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "regime_fetch_failed",
+                    symbol=sym,
+                    interval=interval,
+                    error=str(exc),
+                )
             return sym, interval, None
 
         # Fetch MTF et HTF simultanément — si MTF == HTF (cas 4h) on ne déduplique pas
@@ -1161,7 +1569,130 @@ async def scan_multi(req: ScanRequest):
     dfs = [None if isinstance(d, Exception) else d for d in dfs_raw]
 
     async def _no_data(s: str):
-        return {"symbol": s, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
+        payload = {"symbol": s, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
+        if provider_failures.get(s):
+            payload["missing_sources"] = provider_failures[s]
+        return payload
+
+    # 1c. Contexte on-chain (crypto uniquement) : Fear&Greed partagé + funding/OI par symbole
+    onchain_contexts: dict[str, dict] = {}
+    tokenomics_contexts: dict[str, dict] = {}
+    social_contexts: dict[str, dict] = {}
+    crypto_symbols = [s for s in missing_symbols if is_crypto_symbol(s)]
+    if crypto_symbols:
+        try:
+            fg = await asyncio.wait_for(fear_greed(), timeout=3.0)
+            fg_value = fg.get("value") if isinstance(fg, dict) else None
+        except Exception as exc:
+            logger.warning("fear_greed_failed", error=str(exc))
+            fg_value = None
+
+        async def _fetch_onchain(sym: str):
+            try:
+                ctx = await asyncio.wait_for(onchain_context(sym), timeout=3.0)
+            except Exception as exc:
+                logger.warning("onchain_context_failed", symbol=sym, error=str(exc))
+                ctx = {}
+            return sym, ctx
+
+        onchain_results = await asyncio.gather(
+            *[_fetch_onchain(sym) for sym in crypto_symbols], return_exceptions=True
+        )
+        for item in onchain_results:
+            if not isinstance(item, Exception):
+                sym, ctx = item
+                onchain_contexts[sym] = {"context": ctx, "fear_greed": fg_value}
+
+        # 1c-bis. Advanced on-chain context (exchange netflow, MVRV, dev, TVL)
+        async def _fetch_advanced(sym: str):
+            try:
+                adv = await asyncio.wait_for(get_advanced_onchain_context(sym), timeout=4.0)
+            except Exception as exc:
+                logger.warning("advanced_onchain_failed", symbol=sym, error=str(exc))
+                adv = {}
+            return sym, adv
+
+        advanced_results = await asyncio.gather(
+            *[_fetch_advanced(sym) for sym in crypto_symbols], return_exceptions=True
+        )
+        for item in advanced_results:
+            if not isinstance(item, Exception):
+                sym, adv = item
+                onchain_contexts.setdefault(sym, {})
+                onchain_contexts[sym]["advanced"] = adv
+
+        # 1c-ter. Tokenomics context (unlock schedule + concentration)
+        tokenomics_contexts: dict[str, dict] = {}
+
+        async def _fetch_tokenomics(sym: str):
+            try:
+                tctx = await asyncio.wait_for(fetch_tokenomics(sym), timeout=3.0)
+            except Exception as exc:
+                logger.warning("tokenomics_batch_failed", symbol=sym, error=str(exc))
+                tctx = {}
+            return sym, tctx
+
+        tokenomics_results = await asyncio.gather(
+            *[_fetch_tokenomics(sym) for sym in crypto_symbols], return_exceptions=True
+        )
+        for item in tokenomics_results:
+            if not isinstance(item, Exception):
+                sym, tctx = item
+                tokenomics_contexts[sym] = tctx
+
+        # 1c-quater. Social sentiment context (LunarCrush)
+        social_contexts: dict[str, dict] = {}
+
+        async def _fetch_social(sym: str):
+            try:
+                sctx = await asyncio.wait_for(fetch_social_metrics(sym), timeout=3.0)
+            except Exception as exc:
+                logger.warning("social_batch_failed", symbol=sym, error=str(exc))
+                sctx = {}
+            return sym, sctx
+
+        social_results = await asyncio.gather(
+            *[_fetch_social(sym) for sym in crypto_symbols], return_exceptions=True
+        )
+        for item in social_results:
+            if not isinstance(item, Exception):
+                sym, sctx = item
+                social_contexts[sym] = sctx
+
+    # 1d. Scheduler différencié analysis_timeframe/entry_timeframe (Sprint 3) — dernière
+    # clôture sur le(s) entry_timeframe(s) distincts déclarés par les stratégies actives.
+    entry_contexts: dict[tuple[str, str], dict] = {}   # (symbol, entry_timeframe) -> {"close": float}
+    entry_tfs_needed = {
+        strat["rules"].get("entry_timeframe")
+        for strat in (req.strategies or [])
+        if strat.get("rules", {}).get("entry_timeframe")
+        and strat["rules"].get("entry_timeframe") != req.timeframe
+    }
+    if entry_tfs_needed and missing_symbols:
+        async def _fetch_entry_close(sym: str, etf: str):
+            etf_mapped = TF_MAP.get(etf, etf)
+            try:
+                df_e = await fetch_binance_klines(sym, etf_mapped, limit=5)
+                if df_e is None:
+                    df_e = await fetch_deriv_klines(sym, etf_mapped, limit=5)
+                if df_e is None:
+                    df_e = await fetch_twelvedata_klines(sym, etf_mapped, limit=5)
+                if df_e is None:
+                    df_e = await fetch_yfinance_klines(sym, etf_mapped, limit=5)
+                if df_e is not None and len(df_e) > 0:
+                    return sym, etf, {"close": float(df_e["close"].iloc[-1])}
+            except Exception as exc:
+                logger.warning("entry_close_fetch_failed", symbol=sym, entry_tf=etf, error=str(exc))
+            return sym, etf, None
+
+        entry_tasks = [
+            _fetch_entry_close(sym, etf) for sym in missing_symbols for etf in entry_tfs_needed
+        ]
+        entry_results = await asyncio.gather(*entry_tasks, return_exceptions=True)
+        for item in entry_results:
+            if not isinstance(item, Exception) and item[2] is not None:
+                sym, etf, ctx = item
+                entry_contexts[(sym, etf)] = ctx
 
     # 2. Analyse CPU dans un thread pool pour ne pas bloquer l'event loop
     analyze_tasks = []
@@ -1171,14 +1702,25 @@ async def scan_multi(req: ScanRequest):
         else:
             htf_r = htf_regimes.get(sym)
             mtf_r = mtf_regimes.get(sym)
+            onchain_ctx = onchain_contexts.get(sym)
+            tokenomics_ctx = tokenomics_contexts.get(sym)
+            social_ctx = social_contexts.get(sym)
             if req.strategies:
                 for strat in req.strategies:
+                    etf = strat.get("rules", {}).get("entry_timeframe")
+                    entry_ctx = entry_contexts.get((sym, etf)) if etf else None
                     analyze_tasks.append(
-                        loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df, htf_r, mtf_r, strat)
+                        loop.run_in_executor(
+                            _executor, analyze_candles, sym, req.timeframe, df,
+                            htf_r, mtf_r, strat, onchain_ctx, entry_ctx, None, tokenomics_ctx, social_ctx,
+                        )
                     )
             else:
                 analyze_tasks.append(
-                    loop.run_in_executor(_executor, analyze_candles, sym, req.timeframe, df, htf_r, mtf_r)
+                    loop.run_in_executor(
+                        _executor, analyze_candles, sym, req.timeframe, df,
+                        htf_r, mtf_r, None, onchain_ctx, None, None, tokenomics_ctx, social_ctx,
+                    )
                 )
 
     computed_results = list(await asyncio.gather(*analyze_tasks))
@@ -1288,47 +1830,8 @@ async def scan_multi(req: ScanRequest):
         except asyncio.TimeoutError:
             logger.warning("market_context_timeout", symbols=len(active_symbols))
 
-    # 5. Hystérésis flip-flop — évite BUY→NEUTRAL→BUY sur scans successifs
-    # Règles :
-    #   - Un signal BUY/SELL doit être produit 2× consécutivement pour être "confirmé"
-    #   - Un signal confirmé repasse NEUTRAL seulement si le score descend sous 25 (bande morte)
-    #   - L'état expire après _HYSTERESIS_TTL secondes sans scan
-    now_mono = time.monotonic()
-    for r in results:
-        sig = r.get("signal", "NEUTRAL")
-        key = f"{r['symbol']}:{req.timeframe}:{r.get('strategy_id', 'default')}"
-        state = _signal_state.get(key)
-
-        # Expiration TTL
-        if state and (now_mono - state["ts"]) > _HYSTERESIS_TTL:
-            state = None
-            _signal_state.pop(key, None)
-
-        if sig in ("BUY", "SELL"):
-            if state and state["signal"] == sig:
-                state["count"] = min(state["count"] + 1, _HYSTERESIS_CONFIRM + 1)
-                state["ts"] = now_mono
-            else:
-                # Nouvelle direction — réinitialiser compteur
-                _signal_state[key] = {"signal": sig, "count": 1, "ts": now_mono}
-                state = _signal_state[key]
-
-            # Pas encore confirmé : dégrader en NEUTRAL pour les notifications
-            # (le signal reste dans results avec signal_pending=True pour info)
-            if state["count"] < _HYSTERESIS_CONFIRM:
-                r["signal_pending"] = True
-        else:
-            # Signal NEUTRAL : si l'état précédent était confirmé, appliquer bande morte
-            if state and state.get("count", 0) >= _HYSTERESIS_CONFIRM:
-                conf = r.get("confidence", 0)
-                if conf >= 25:
-                    # Score encore dans la bande morte → maintenir le signal précédent
-                    r["signal"] = state["signal"]
-                    r["signal_sticky"] = True
-                else:
-                    _signal_state.pop(key, None)
-            else:
-                _signal_state.pop(key, None)
+    # 5. Hystérésis flip-flop + persistence_score — évite BUY→NEUTRAL→BUY sur scans successifs
+    apply_hysteresis_and_persistence(results, req.timeframe, _signal_state, time.monotonic())
 
     # 6. Analyse du risque portefeuille — clustering signaux corrélés
     portfolio_risk = analyze_portfolio_risk(results)
@@ -1352,11 +1855,18 @@ async def scan_multi(req: ScanRequest):
     inc("scan:sell_signals", sum(1 for r in results if r.get("signal") == "SELL"))
     observe("scan:duration_ms", elapsed_ms)
 
+    data_gaps = [
+        {"symbol": sym, "providers": providers}
+        for sym, providers in provider_failures.items()
+        if providers
+    ]
+
     return {
         "scanned":        len(results),
         "timeframe":      req.timeframe,
         "elapsed_ms":     round(elapsed_ms, 2),
         "results":        results,
         "portfolio_risk": portfolio_risk,
+        "data_gaps":      data_gaps,
     }
 

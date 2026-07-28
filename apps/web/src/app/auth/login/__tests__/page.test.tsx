@@ -44,7 +44,7 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /se connecter/i }));
 
     await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith('test@example.com', 'password123');
+      expect(mockLogin).toHaveBeenCalledWith('test@example.com', 'password123', undefined);
       expect(mockReplace).toHaveBeenCalledWith('/dashboard');
     });
   });
@@ -62,7 +62,7 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /se connecter/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/email ou mot de passe incorrect/i)).toBeInTheDocument();
+      expect(screen.getByText(/email, mot de passe ou code 2fa incorrect/i)).toBeInTheDocument();
     });
   });
 });

@@ -1,0 +1,30 @@
+"""Standardized Redis TTLs per data category (seconds)."""
+
+# Market data
+TTL_KLINES_BINANCE = 60
+TTL_KLINES_TWELVEDATA = 300
+
+# Computed features / scans
+TTL_FEATURES = 30
+TTL_SCAN_RESULT = 30
+
+# Context / macro
+TTL_FEAR_GREED = 3600
+TTL_FUNDING_RATES = 300
+TTL_ECONOMIC_CALENDAR = 1800
+TTL_SPOT_PERP_BASIS = 300
+TTL_COT = 86400  # weekly data
+
+# On-chain / sentiment / alternative data
+TTL_ONCHAIN = 300
+TTL_TOKENOMICS = 3600
+TTL_SOCIAL_SENTIMENT = 900
+TTL_NEWS_SENTIMENT = 900
+
+# BRVM
+TTL_BRVM_QUOTE = 3600
+TTL_BRVM_REPORTS = 86400
+
+# Synthetic / tick
+TTL_TICK_STATS = 5
+TTL_SYNTHETIC_STATS = 30

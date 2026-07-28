@@ -36,6 +36,8 @@ const mockSignals = [
     entryPrice: '100',
     stopLoss: '95',
     takeProfit1: '110',
+    takeProfit2: '120',
+    takeProfit3: '130',
     riskReward: '2.0',
     asset: { symbol: 'BTC/USDT' },
     createdAt: new Date().toISOString(),
@@ -46,6 +48,7 @@ const mockSignals = [
 describe('SignalsPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    localStorage.clear();
     useTradingStore.setState({
       signals: [],
       signalsLoading: false,
@@ -83,6 +86,80 @@ describe('SignalsPage', () => {
     });
     expect(screen.getByText(/BUY/)).toBeInTheDocument();
     expect(screen.getAllByText('1h').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('displays TP1/TP2/TP3 probabilities for a signal', async () => {
+    useTradingStore.setState({ signals: mockSignals as any, signalsFetchedAt: Date.now() });
+
+    render(
+      <Wrapper>
+        <SignalsPage />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('BTC/USDT')).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText('TP1').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('TP2').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('TP3').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('filters signals by trader profile', async () => {
+    useTradingStore.setState({
+      signals: [
+        { ...mockSignals[0], id: 's1', asset: { symbol: 'BTC/USDT' }, profileSuitability: ['conservative', 'moderate'] },
+        { ...mockSignals[0], id: 's2', asset: { symbol: 'ETH/USDT' }, profileSuitability: ['aggressive'] },
+      ] as any,
+      signalsFetchedAt: Date.now(),
+    });
+
+    render(
+      <Wrapper>
+        <SignalsPage />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('BTC/USDT')).toBeInTheDocument();
+    });
+    expect(screen.getByText('ETH/USDT')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Agressif/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('BTC/USDT')).not.toBeInTheDocument();
+      expect(screen.getByText('ETH/USDT')).toBeInTheDocument();
+    });
+  });
+
+  it('filters signals by market', async () => {
+    useTradingStore.setState({
+      signals: [
+        { ...mockSignals[0], id: 's1', asset: { symbol: 'BTC/USDT' } },
+        { ...mockSignals[0], id: 's2', asset: { symbol: 'EUR/USD' } },
+      ] as any,
+      signalsFetchedAt: Date.now(),
+    });
+
+    render(
+      <Wrapper>
+        <SignalsPage />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('BTC/USDT')).toBeInTheDocument();
+    });
+    expect(screen.getByText('EUR/USD')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Forex/i })[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText('BTC/USDT')).not.toBeInTheDocument();
+      expect(screen.getByText('EUR/USD')).toBeInTheDocument();
+    });
   });
 
   it('calls scan mutation when button clicked', async () => {

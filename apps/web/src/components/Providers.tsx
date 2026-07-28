@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { TradingStoreProvider } from './providers/TradingStoreProvider';
+import { ToastProvider } from './ui/ToastProvider';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -18,9 +19,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <TradingStoreProvider>{children}</TradingStoreProvider>
-      </QueryClientProvider>
+      <ToastProvider>
+        <QueryClientProvider client={queryClient}>
+          <TradingStoreProvider>{children}</TradingStoreProvider>
+        </QueryClientProvider>
+      </ToastProvider>
     </ErrorBoundary>
   );
 }

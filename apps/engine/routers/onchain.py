@@ -143,14 +143,61 @@ async def btc_dominance():
         raise HTTPException(status_code=503, detail=f"BTC dominance unavailable: {e}") from e
 
 
+CRYPTO_BASES = {"BTC", "ETH", "SOL", "BNB", "AVAX", "XRP", "LINK", "ADA", "DOT", "MATIC"}
+
+
+def is_crypto_symbol(symbol: str) -> bool:
+    return symbol.endswith("/USDT") and symbol.split("/")[0] in CRYPTO_BASES
+
+
+def onchain_bonus(
+    context: dict,
+    signal_direction: str,
+    fear_greed_value: Optional[int] = None,
+) -> tuple[int, list[str]]:
+    """
+    Bonus/malus de score basé sur le contexte on-chain (Fear&Greed + Funding Rate).
+    signal_direction : 'BUY' | 'SELL'. Max : ±25 pts.
+    """
+    bonus = 0
+    reasons: list[str] = []
+
+    # Fear & Greed (contrarian)
+    if fear_greed_value is not None:
+        if fear_greed_value < 20:
+            if signal_direction == "BUY":
+                bonus += 20
+                reasons.append(f"On-chain: Fear&Greed extreme fear ({fear_greed_value}) — contrarian BUY")
+            else:
+                bonus -= 15
+                reasons.append(f"On-chain: Fear&Greed extreme fear ({fear_greed_value}) — SELL affaibli")
+        elif fear_greed_value > 80:
+            if signal_direction == "SELL":
+                bonus += 20
+                reasons.append(f"On-chain: Fear&Greed extreme greed ({fear_greed_value}) — contrarian SELL")
+            else:
+                bonus -= 15
+                reasons.append(f"On-chain: Fear&Greed extreme greed ({fear_greed_value}) — BUY affaibli")
+
+    # Funding rate (squeeze)
+    funding = (context or {}).get("funding_rate") or {}
+    rate = funding.get("funding_rate")
+    if rate is not None:
+        if rate < -0.01 and signal_direction == "BUY":
+            bonus += 15
+            reasons.append(f"On-chain: funding négatif ({rate}%) — shorts surpeuplés, long squeeze")
+        elif rate > 0.05 and signal_direction == "SELL":
+            bonus += 15
+            reasons.append(f"On-chain: funding élevé ({rate}%) — longs surpeuplés, short squeeze")
+
+    bonus = max(-25, min(25, bonus))
+    return bonus, reasons
+
+
 @router.get("/context/{symbol}")
 async def onchain_context(symbol: str):
     """Agrège les données on-chain pour un symbole crypto."""
-    base = symbol.split("/")[0]
-    is_crypto = symbol.endswith("/USDT") and base in {
-        "BTC", "ETH", "SOL", "BNB", "AVAX", "XRP", "LINK", "ADA", "DOT", "MATIC"
-    }
-    if not is_crypto:
+    if not is_crypto_symbol(symbol):
         return {}
 
     results = await asyncio.gather(

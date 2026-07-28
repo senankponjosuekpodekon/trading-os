@@ -74,11 +74,14 @@ class TestAnalyzeCandles:
         df = _make_bearish_df(n=250)
         result = analyze_candles("BTC/USDT", "1h", df)
         assert result["symbol"] == "BTC/USDT"
-        assert result["signal"] == "SELL"
-        assert result["confidence"] >= 40
+        assert result["score"] <= -20
+        # Signal SELL sauf si filtré par le seuil qualité DPS (Sprint 4, DPS < 60%)
+        assert result["signal"] in ("SELL", "NEUTRAL")
         assert result["entry_price"] is not None
-        assert result["stop_loss"] is not None
-        assert result["take_profit_1"] is not None
+        if result["signal"] != "NEUTRAL":
+            assert result["confidence"] >= 40
+            assert result["stop_loss"] is not None
+            assert result["take_profit_1"] is not None
 
     def test_analysis_sections_present(self):
         df = _make_bullish_df(n=250)
@@ -93,3 +96,29 @@ class TestAnalyzeCandles:
         if result["signal"] == "BUY":
             assert result["take_profit_1"] > result["entry_price"]
             assert result["stop_loss"] < result["entry_price"]
+
+    def test_profile_suitability_present(self):
+        df = _make_bullish_df(n=250)
+        result = analyze_candles("BTC/USDT", "1h", df)
+        assert isinstance(result.get("profile_suitability"), list)
+
+    def test_detected_patterns_field_present(self):
+        df = _make_bullish_df(n=250)
+        result = analyze_candles("BTC/USDT", "1h", df)
+        assert "detectedPatterns" in result
+        assert isinstance(result["detectedPatterns"], list)
+
+
+class TestSyntheticAssets:
+    def test_synthetic_symbol_routes_to_synthetic_engine(self):
+        df = _make_bullish_df(n=250)
+        result = analyze_candles("VIX75/USD", "1h", df)
+        assert result["asset_type"] == "SYNTHETIC"
+        assert "synthetic_stats" in result
+        assert result["signal"] == "NEUTRAL"
+
+    def test_boom_crash_symbol_routes_to_boom_crash_model(self):
+        df = _make_bullish_df(n=250)
+        result = analyze_candles("BOOM1000/USD", "1h", df)
+        assert result["asset_type"] == "SYNTHETIC"
+        assert result["explanation"].startswith("Synthetic")

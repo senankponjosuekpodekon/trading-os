@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
@@ -8,6 +8,34 @@ import { Play, TrendingUp, TrendingDown, BarChart2, AlertCircle, ChevronDown, Ch
 
 const MiniEquityChart = dynamic(
   () => import('@/components/backtest/MiniEquityChart').then(mod => mod.MiniEquityChart),
+  { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
+const MonteCarloChart = dynamic(
+  () => import('@/components/backtest/MonteCarloChart').then(mod => mod.MonteCarloChart),
+  { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
+const CalibrationCurve = dynamic(
+  () => import('@/components/backtest/CalibrationCurve').then(mod => mod.CalibrationCurve),
+  { ssr: false, loading: () => <div className="h-28 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
+const WalkForwardResults = dynamic(
+  () => import('@/components/backtest/WalkForwardResults').then(mod => mod.WalkForwardResults),
+  { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
+const RegimeBreakdown = dynamic(
+  () => import('@/components/backtest/RegimeBreakdown').then(mod => mod.RegimeBreakdown),
+  { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
+const AssetBreakdown = dynamic(
+  () => import('@/components/backtest/AssetBreakdown').then(mod => mod.AssetBreakdown),
+  { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
+const ChampionModelBadge = dynamic(
+  () => import('@/components/backtest/ChampionModelBadge').then(mod => mod.ChampionModelBadge),
+  { ssr: false, loading: () => <div className="h-16 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
+const PatternBreakdown = dynamic(
+  () => import('@/components/backtest/PatternBreakdown').then(mod => mod.PatternBreakdown),
   { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
 );
 
@@ -26,6 +54,23 @@ interface TradeItem {
   signal_reasons: string[];
   win:            boolean;
   exit_reason:    string;
+  regime?:        string;
+  duration_bars?: number;
+  pattern_name?:  string;
+  pattern_direction?: string;
+  pattern_confluence_score?: number;
+  pattern_confluence_tags?: string[];
+}
+
+interface RegimeBreakdown {
+  [regime: string]: { trades: number; wins: number; pnl: number; win_rate: number };
+}
+
+interface PatternBreakdown {
+  [pattern: string]: {
+    trades: number; wins: number; losses: number; pnl: number; win_rate: number;
+    avg_pnl_pct: number; avg_rr: number; avg_duration_bars: number; avg_confluence_score: number;
+  };
 }
 
 interface BacktestResult {
@@ -46,6 +91,11 @@ interface BacktestResult {
   final_capital:    number;
   equity_curve:     number[];
   trade_list:       TradeItem[];
+  regime_breakdown: RegimeBreakdown;
+  pattern_breakdown: PatternBreakdown;
+  model_version:    string;
+  benchmark_pnl_pct: number;
+  outperformance_pct: number;
 }
 
 const SYMBOLS   = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT'];
@@ -85,6 +135,19 @@ export default function BacktestPage() {
   });
 
   const pnlPos = (result?.total_pnl ?? 0) >= 0;
+
+  const assetBreakdown = useMemo(() => {
+    if (!result) return {};
+    return result.trade_list.reduce((acc, t) => {
+      const asset = result.symbol;
+      if (!acc[asset]) acc[asset] = { trades: 0, wins: 0, pnl: 0, win_rate: 0 };
+      acc[asset].trades += 1;
+      if (t.win) acc[asset].wins += 1;
+      acc[asset].pnl += t.pnl;
+      acc[asset].win_rate = acc[asset].trades > 0 ? (acc[asset].wins / acc[asset].trades) * 100 : 0;
+      return acc;
+    }, {} as { [asset: string]: { trades: number; wins: number; pnl: number; win_rate: number } });
+  }, [result]);
 
   return (
     <AppLayout title="Backtest">
@@ -193,6 +256,28 @@ export default function BacktestPage() {
 
             {/* Equity curve */}
             <MiniEquityChart curve={result.equity_curve} />
+
+            {/* Champion model & benchmark */}
+            <ChampionModelBadge
+              modelVersion={result.model_version ?? 'engine-1.0.0'}
+              winRate={result.win_rate}
+              profitFactor={result.profit_factor}
+              sharpe={result.sharpe_ratio}
+            />
+
+            {/* Monte-Carlo & Walk-forward & Calibration */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <MonteCarloChart tradePnls={result.trade_list.map(t => t.pnl)} initialCapital={capital} />
+              <CalibrationCurve trades={result.trade_list.map(t => ({ confidence: t.confidence, win: t.win }))} />
+            </div>
+            <WalkForwardResults trades={result.trade_list} />
+
+            {/* Regime, Asset & Pattern breakdowns */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <RegimeBreakdown breakdown={result.regime_breakdown ?? {}} />
+              <AssetBreakdown breakdown={assetBreakdown} />
+              <PatternBreakdown breakdown={result.pattern_breakdown ?? {}} />
+            </div>
 
             {/* Liste des trades */}
             {result.trade_list.length > 0 && (

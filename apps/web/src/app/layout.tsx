@@ -1,21 +1,31 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Providers } from '@/components/Providers';
-
-const inter = Inter({ subsets: ['latin'] });
+import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
 
 export const metadata: Metadata = {
   title: 'Trading OS — AI Investment System',
   description: "Système d'investissement assisté par IA",
-  icons: { icon: '/favicon.svg' },
+  manifest: '/manifest.json',
+  icons: {
+    icon: '/favicon.svg',
+    apple: '/icon-192.svg',
+    shortcut: '/icon-192.svg',
+  },
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent' },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#111827',
+  colorScheme: 'dark light',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <body className={`${inter.className} antialiased bg-gray-950 text-gray-100`}>
+      <body className="antialiased bg-gray-950 text-gray-100" style={{ fontFamily: 'var(--font-sans)' }}>
         <Providers>{children}</Providers>
+        <ServiceWorkerRegistration />
       </body>
     </html>
   );

@@ -8,7 +8,7 @@ interface AuthState {
   token: string | null;
   refreshToken: string | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, totpToken?: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   init: () => void;
@@ -44,9 +44,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  login: async (email, password) => {
+  login: async (email, password, totpToken) => {
     set({ isLoading: true });
-    const { data } = await api.post('/auth/login', { email, password });
+    const { data } = await api.post('/auth/login', { email, password, totpToken });
     storeTokens(data);
     set({ user: data.user, token: data.access_token, refreshToken: data.refresh_token, isLoading: false });
   },

@@ -1,9 +1,11 @@
 'use client';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Settings, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle } from 'lucide-react';
+import Link from 'next/link';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
+import { OnboardingModal, TraderProfile } from '@/components/onboarding/OnboardingModal';
 
 interface Strategy {
   id: string;
@@ -39,12 +41,29 @@ function RulesBadges({ rules }: { rules: Record<string, any> }) {
   );
 }
 
+const LS_PROFILE = 'trading_profile';
+const PROFILES = [
+  { key: 'conservative', label: 'Conservateur', desc: 'Risque réduit, R/R modérés, capital protégé.' },
+  { key: 'moderate',     label: 'Modéré',      desc: 'Équilibre risque/rendement standard.' },
+  { key: 'aggressive',   label: 'Agressif',    desc: 'Risque élevé, R/R étendus, croissance rapide.' },
+];
+
 export default function SettingsPage() {
   const [showForm, setShowForm] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', description: '', rules: JSON.stringify(DEFAULT_RULES, null, 2) });
   const [formError, setFormError] = useState('');
+  const [profile, setProfile] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'moderate';
+    return localStorage.getItem(LS_PROFILE) ?? 'moderate';
+  });
   const qc = useQueryClient();
+
+  const saveProfile = (p: string) => {
+    setProfile(p);
+    localStorage.setItem(LS_PROFILE, p);
+  };
 
   const { data: strategies, isLoading, error, refetch } = useQuery<Strategy[]>({
     queryKey: ['strategies'],
@@ -59,12 +78,36 @@ export default function SettingsPage() {
   const toggle = useMutation({
     mutationFn: ({ id, isEnabled }: { id: string; isEnabled: boolean }) =>
       api.patch(`/strategies/${id}/toggle`, { isEnabled }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['strategies'] }),
+    onMutate: async ({ id, isEnabled }) => {
+      await qc.cancelQueries({ queryKey: ['strategies'] });
+      const previous = qc.getQueryData<Strategy[]>(['strategies']);
+      if (previous) {
+        qc.setQueryData(['strategies'], previous.map(s =>
+          s.id === id ? { ...s, isEnabledByUser: isEnabled } : s,
+        ));
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(['strategies'], context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['strategies'] }),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/strategies/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['strategies'] }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ['strategies'] });
+      const previous = qc.getQueryData<Strategy[]>(['strategies']);
+      if (previous) {
+        qc.setQueryData(['strategies'], previous.filter(s => s.id !== id));
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(['strategies'], context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['strategies'] }),
   });
 
   const handleCreate = (e: React.FormEvent) => {
@@ -87,13 +130,62 @@ export default function SettingsPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
+            <h2 className="text-white font-semibold text-lg">Paramètres</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/settings/2fa"
+              className="flex items-center gap-2 px-4 py-2 border border-gray-700 hover:border-emerald-500/40 text-gray-300 hover:text-white rounded-lg text-sm transition-colors">
+              <Shield className="w-4 h-4" />2FA
+            </Link>
+            <button onClick={() => setShowForm(v => !v)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-lg text-sm transition-colors">
+              <Plus className="w-4 h-4" />{showForm ? 'Annuler' : 'Nouvelle stratégie'}
+            </button>
+          </div>
+        </div>
+
+        {/* Profil trader */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-white font-semibold">Profil trader</h3>
+            <button
+              onClick={() => setShowOnboarding(true)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-violet-500/30 text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 transition-colors"
+            >
+              <UserCircle className="w-3.5 h-3.5" />Questionnaire
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {PROFILES.map(p => (
+              <button
+                key={p.key}
+                onClick={() => saveProfile(p.key)}
+                className={`text-left p-3 rounded-lg border transition-colors ${
+                  profile === p.key
+                    ? 'bg-emerald-500/10 border-emerald-500/40'
+                    : 'bg-gray-800 border-gray-700 hover:border-gray-500'
+                }`}>
+                <div className="text-sm font-medium text-white">{p.label}</div>
+                <div className="text-xs text-gray-400 mt-1">{p.desc}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            Profil actuel : <span data-testid="current-profile" className="text-emerald-400 capitalize">{profile}</span>
+          </p>
+        </div>
+
+        <OnboardingModal
+          isOpen={showOnboarding}
+          onClose={() => setShowOnboarding(false)}
+          onSelectProfile={(p: TraderProfile) => saveProfile(p)}
+        />
+
+        <div className="flex items-center justify-between">
+          <div>
             <h2 className="text-white font-semibold text-lg">Stratégies de trading</h2>
             <p className="text-gray-500 text-sm mt-0.5">{activeCount} stratégie(s) activée(s)</p>
           </div>
-          <button onClick={() => setShowForm(v => !v)}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-lg text-sm transition-colors">
-            <Plus className="w-4 h-4" />{showForm ? 'Annuler' : 'Nouvelle stratégie'}
-          </button>
         </div>
 
         {/* Erreurs */}
@@ -189,7 +281,9 @@ export default function SettingsPage() {
                         : <ToggleLeft className="w-7 h-7 text-gray-600 hover:text-gray-400" />}
                     </button>
 
-                    <button onClick={() => { if (confirm(`Supprimer "${s.name}" ?`)) remove.mutate(s.id); }}
+                    <button
+                      title="Supprimer"
+                      onClick={() => { if (confirm(`Supprimer "${s.name}" ?`)) remove.mutate(s.id); }}
                       disabled={remove.isPending}
                       className="p-1.5 text-gray-600 hover:text-red-400 transition-colors">
                       <Trash2 className="w-4 h-4" />

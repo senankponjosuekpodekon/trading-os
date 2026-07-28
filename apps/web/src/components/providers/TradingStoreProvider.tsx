@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef } from 'react';
 import { useTradingStore } from '@/store/trading.store';
+import { useToast } from '@/hooks/useToast';
 
 const ENGINE_WS = process.env.NEXT_PUBLIC_ENGINE_WS_URL || 'ws://localhost:8000';
 
@@ -15,7 +16,11 @@ export function TradingStoreProvider({ children }: { children: React.ReactNode }
   const setWsConnected= useTradingStore(s => s.setWsConnected);
   const setSignals    = useTradingStore(s => s.setSignals);
   const fetchSignals  = useTradingStore(s => s.fetchSignals);
+  const signalsError  = useTradingStore(s => s.signalsError);
   const wsRef = useRef<WebSocket | null>(null);
+  const wsWarnedRef = useRef(false);
+  const lastSignalsErrorRef = useRef<string | null>(null);
+  const { toast } = useToast();
 
   // ── WebSocket prix ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -28,14 +33,34 @@ export function TradingStoreProvider({ children }: { children: React.ReactNode }
       try {
         const ws = new WebSocket(`${ENGINE_WS}/ws/prices`);
         wsRef.current = ws;
-        ws.onopen  = () => { setWsConnected(true); retryDelay = 3000; };
+        ws.onopen  = () => {
+          setWsConnected(true);
+          retryDelay = 3000;
+          wsWarnedRef.current = false;
+        };
         ws.onclose = () => {
           setWsConnected(false);
+          if (!wsWarnedRef.current) {
+            wsWarnedRef.current = true;
+            toast('Reconnexion automatique en cours…', {
+              title: 'Perte du flux temps réel',
+              type: 'warning',
+            });
+          }
           if (stopped) return;
           retryDelay = Math.min(retryDelay * 1.5, 60_000);
           retryTimer = setTimeout(connect, retryDelay);
         };
-        ws.onerror   = () => ws.close();
+        ws.onerror   = () => {
+          if (!wsWarnedRef.current) {
+            wsWarnedRef.current = true;
+            toast('Impossible de joindre le moteur. Vérifiez que l’engine tourne et que NEXT_PUBLIC_ENGINE_WS_URL est correct.', {
+              title: 'WebSocket erreur',
+              type: 'error',
+            });
+          }
+          ws.close();
+        };
         ws.onmessage = (e) => {
           try {
             const msg = JSON.parse(e.data);
@@ -65,6 +90,20 @@ export function TradingStoreProvider({ children }: { children: React.ReactNode }
     const interval = setInterval(() => fetchSignals(), 30_000);
     return () => clearInterval(interval);
   }, [fetchSignals]);
+
+  // Surfacer les erreurs de récupération des signaux
+  useEffect(() => {
+    if (!signalsError) {
+      lastSignalsErrorRef.current = null;
+      return;
+    }
+    if (lastSignalsErrorRef.current === signalsError) return;
+    lastSignalsErrorRef.current = signalsError;
+    toast(signalsError, {
+      title: 'Signaux indisponibles',
+      type: 'error',
+    });
+  }, [signalsError, toast]);
 
   return <>{children}</>;
 }

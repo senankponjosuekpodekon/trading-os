@@ -71,12 +71,33 @@ describe('DashboardPage', () => {
     });
   });
 
-  it('renders dashboard with portfolio data', async () => {
-    // Ordre réel : portfolios, signals (enabled immédiatement), summary (enabled après portfolio)
-    (api.get as jest.Mock)
-      .mockResolvedValueOnce({ data: [{ id: 'p1', name: 'Main', type: 'PAPER', initialCapital: '10000', currentCapital: '11200' }] })
-      .mockResolvedValueOnce({ data: { data: [] } })
-      .mockResolvedValueOnce({ data: { totalPnl: 1200, winRate: 0.65, open: 2, closed: 5 } });
+  it('renders dashboard with portfolio data and expected move widget', async () => {
+    const expectedMovePayload = {
+      symbol: 'BTC/USDT',
+      timeframe: '1h',
+      close: 100,
+      atr: 2,
+      atr_pct: 2,
+      atr_percentile: 75,
+      volatility_regime: 'HIGH',
+      volume_ratio: 1.2,
+      ranges: [
+        { horizon: 5, move: 4.47, move_pct: 4.47, upper: 104.47, lower: 95.53 },
+      ],
+    };
+
+    (api.get as jest.Mock).mockImplementation((url: string) => {
+      if (url === '/portfolios') {
+        return Promise.resolve({ data: [{ id: 'p1', name: 'Main', type: 'PAPER', initialCapital: '10000', currentCapital: '11200' }] });
+      }
+      if (url.startsWith('/positions/summary')) {
+        return Promise.resolve({ data: { totalPnl: 1200, winRate: 0.65, open: 2, closed: 5 } });
+      }
+      if (url === '/expected-move') {
+        return Promise.resolve({ data: expectedMovePayload });
+      }
+      return Promise.resolve({ data: [] });
+    });
 
     render(
       <Wrapper>
@@ -94,6 +115,8 @@ describe('DashboardPage', () => {
     expect(screen.getAllByText(/11 200,00/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/positions ouvertes/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/signaux actifs/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/Expected Move Engine/i)).toBeInTheDocument();
+    expect(screen.getByText(/Volatilité élevée/i)).toBeInTheDocument();
   });
 
   it('shows skeleton cards while loading', async () => {

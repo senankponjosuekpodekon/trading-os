@@ -100,6 +100,15 @@ class WeeklyReportRequest(BaseModel):
     language:    str = "fr"
 
 
+class ChatRequest(BaseModel):
+    message:        str
+    history:        List[dict] = []
+    language:       str = "fr"
+    asset:          Optional[str] = None
+    signal_context: Optional[dict] = None
+    market_context: Optional[dict] = None
+
+
 def _build_signal_prompt(req: ExplainRequest) -> str:
     ind  = req.indicators
     pa   = req.price_action or {}
@@ -580,6 +589,99 @@ async def weekly_report(req: WeeklyReportRequest):
         "total_pnl": req.total_pnl,
         "model":    _effective_model(),
     }
+
+
+def _build_chat_system_prompt(req: ChatRequest) -> str:
+    base = (
+        "Tu es Trading Copilot, un assistant trading professionnel. "
+        "Réponds de manière concise, factuelle et actionnable en français. "
+        "Tu peux expliquer des signaux, aider à lire les indicateurs, discuter de gestion du risque, "
+        "et proposer des idées de stratégies. Ne donne pas de conseils financiers réglementés."
+    )
+    ctx_parts = []
+    if req.asset:
+        ctx_parts.append(f"Actif discuté : {req.asset}.")
+    if req.signal_context:
+        sig = req.signal_context
+        summary = (
+            f"Signal : {sig.get('signal')} sur {sig.get('symbol')} ({sig.get('timeframe')}), "
+            f"confiance {sig.get('confidence')}%, prix d'entrée {sig.get('entry_price')}, "
+            f"stop {sig.get('stop_loss')}, TP1 {sig.get('take_profit_1')}, R/R {sig.get('risk_reward')}."
+        )
+        ctx_parts.append(summary)
+    if req.market_context:
+        mc = req.market_context
+        ctx_parts.append("Contexte marché :")
+        if mc.get("fearGreed"):
+            fg = mc["fearGreed"]
+            ctx_parts.append(f"- Fear & Greed : {fg.get('value')} ({fg.get('classification')}).")
+        if mc.get("onChainBtc"):
+            btc = mc["onChainBtc"]
+            ctx_parts.append(f"- BTC on-chain : prix ${btc.get('price')}, mempool {btc.get('mempoolSize')}, fee reco {btc.get('suggestedFee')} sat/vB.")
+        if mc.get("onChainEth"):
+            eth = mc["onChainEth"]
+            ctx_parts.append(f"- ETH on-chain : prix ${eth.get('price')}, gas median {eth.get('gasPriceMedian')} gwei.")
+        if mc.get("spotPerpBasis"):
+            for b in mc["spotPerpBasis"]:
+                ctx_parts.append(f"- Basis {b.get('symbol')} : {b.get('basis')}%.")
+        for cot_key in ("cotBtc", "cotEth"):
+            cot = mc.get(cot_key)
+            if cot:
+                ctx_parts.append(
+                    f"- COT {cot.get('asset')} CME (report {cot.get('reportDate')}) : "
+                    f"net non-commercial {cot.get('nonCommercialNet')}, open interest {cot.get('openInterest')}."
+                )
+    if not ctx_parts:
+        return base
+    return base + "\n\n" + "\n".join(ctx_parts) + "\n\n" + "Utilise ce contexte pour affiner tes réponses si pertinent."
+
+
+@router.post("/llm/chat")
+async def chat(req: ChatRequest):
+    system = _build_chat_system_prompt(req)
+    messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
+    provider = _effective_provider()
+    try:
+        from openai import AsyncOpenAI
+        if provider == "ollama":
+            client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama")
+            model = OLLAMA_MODEL
+        else:
+            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            model = OPENAI_MODEL
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7,
+        )
+        reply = response.choices[0].message.content.strip()
+    except Exception as e:
+        reply = _mock_chat_response(req.message, error=str(e))
+        model = "mock"
+        provider = "mock"
+
+    return {
+        "reply":    reply,
+        "model":    model if provider != "mock" else "mock",
+        "provider": provider,
+        "language": req.language,
+    }
+
+
+def _mock_chat_response(message: str, error: str = "") -> str:
+    msg = message.lower()
+    if any(w in msg for w in ("salut", "bonjour", "coucou")):
+        return "Bonjour ! Je suis Trading Copilot. Comment puis-je vous aider aujourd'hui ?"
+    if "stratégie" in msg:
+        return "Une stratégie robuste combine tendance (EMA), momentum (RSI/MACD) et gestion du risque (R/R > 1.5, stop-loss serré). Testez-la dans le Lab avant production."
+    if any(w in msg for w in ("signal", "buy", "sell", "achat", "vente")):
+        return "Pour analyser un signal, je regarde la confiance, le R/R, le régime de marché et le sentiment. Envoyez-moi l'ID du signal pour une explication détaillée."
+    if any(w in msg for w in ("risque", "stop loss", "stop-loss", "sizing")):
+        return "Ne risquez jamais plus de 1-2% du capital par trade. Placez le stop-loss sur un niveau technique (support/résistance ou ATR)."
+    if error:
+        return f"[Mode démo — LLM indisponible : {error[:100]}] Configurez OPENAI_API_KEY ou Ollama."
+    return "Je peux vous aider sur les signaux, les stratégies, le backtesting et la gestion du risque. Quel est votre sujet ?"
 
 
 @router.get("/llm/health")

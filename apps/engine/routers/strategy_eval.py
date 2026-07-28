@@ -18,6 +18,7 @@ class StrategyRules:
     rsi_bullish_zone: float = 45.0   # RSI > cette valeur → bullish zone
     rsi_bearish_zone: float = 55.0   # RSI < cette valeur → bearish zone
     min_confidence:   float = 55.0
+    min_dps:          float = 60.0   # Sprint 4 — DPS minimum pour persister le signal
     volume_spike_min: float = 1.3    # ratio vs moyenne 20
     use_price_action: bool  = True
     use_sr_zones:     bool  = True
@@ -203,6 +204,8 @@ def evaluate_strategy(
     regime: Optional[dict] = None,
     timeframe: Optional[str] = None,
     market: Optional[str] = None,
+    onchain: Optional[dict] = None,
+    entry_context: Optional[dict] = None,
 ) -> dict:
     """
     Évalue si les conditions de la stratégie sont remplies.
@@ -318,6 +321,15 @@ def evaluate_strategy(
             score += b
             reasons += r
 
+    # ── On-chain (crypto uniquement) : Fear&Greed contrarian + Funding squeeze ──
+    if onchain:
+        from routers.onchain import onchain_bonus
+        temp_dir = "BUY" if score >= 20 else ("SELL" if score <= -20 else "NEUTRAL")
+        if temp_dir != "NEUTRAL":
+            b, r = onchain_bonus(onchain.get("context") or {}, temp_dir, onchain.get("fear_greed"))
+            score += b
+            reasons += r
+
     # ── Signal final ───────────────────────────────────────────
     confidence = min(abs(score), 95)
     if score >= 40:
@@ -365,6 +377,21 @@ def evaluate_strategy(
         if signal == "NEUTRAL":
             confidence = 0
             score = 0
+
+    # --- Scheduler différencié analysis_timeframe / entry_timeframe (Sprint 3) ---
+    # L'analyse (biais/score) est faite sur `timeframe` (= analysis_timeframe côté DSL).
+    # Si la stratégie déclare un entry_timeframe distinct, on affine le prix d'entrée avec
+    # la dernière clôture de ce TF plus bas (timing d'exécution plus précis).
+    entry_tf = getattr(rules, "entry_timeframe", None)
+    if (
+        signal != "NEUTRAL"
+        and entry_tf
+        and entry_tf != (getattr(rules, "analysis_timeframe", None) or timeframe)
+        and entry_context
+        and entry_context.get("close") is not None
+    ):
+        entry_price = round(entry_context["close"], 6)
+        reasons.append(f"Entrée affinée sur {entry_tf} (close={entry_price})")
 
     # --- Price levels / exit rules ---
     atr_val = indicators.get("atr")
@@ -421,6 +448,13 @@ def evaluate_strategy(
         trigger=trigger,
         proximity_pct=(getattr(rules, "entry_rules", None) or {}).get("fvg_proximity_pct", 1.0),
     )
+
+    # --- DPS filter (Sprint 4) — signal directionnel peu fiable → non persisté ---
+    if signal != "NEUTRAL" and predictive["dps"] < rules.min_dps:
+        reasons.append(f"DPS {predictive['dps']}% < seuil {rules.min_dps}% — filtré")
+        signal = "NEUTRAL"
+        confidence = 0
+        score = 0
 
     return {
         "score":               score,

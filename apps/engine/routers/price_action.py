@@ -2,47 +2,48 @@
 Price Action Phase 1 — Swing Points + Structure de marché (BOS / CHoCH)
 La PA ne génère pas de signal seul : elle booste le score via price_action_bonus()
 """
+import numpy as np
 import pandas as pd
+
+from indicators.swing import find_pivot_highs, find_pivot_lows, get_last_swing_points
 
 
 # ─── Swing Points ─────────────────────────────────────────────────────────────
 
 def find_swing_highs(high: pd.Series, left: int = 3, right: int = 3) -> pd.Series:
     """Retourne True aux indices qui sont des swing highs."""
-    n = len(high)
-    result = pd.Series(False, index=high.index)
-    for i in range(left, n - right):
-        window = high.iloc[i - left: i + right + 1]
-        if high.iloc[i] == window.max():
-            result.iloc[i] = True
-    return result
+    return find_pivot_highs(high, left=left, right=right)
 
 
 def find_swing_lows(low: pd.Series, left: int = 3, right: int = 3) -> pd.Series:
     """Retourne True aux indices qui sont des swing lows."""
-    n = len(low)
-    result = pd.Series(False, index=low.index)
-    for i in range(left, n - right):
-        window = low.iloc[i - left: i + right + 1]
-        if low.iloc[i] == window.min():
-            result.iloc[i] = True
-    return result
+    return find_pivot_lows(low, left=left, right=right)
 
 
-def get_last_swings(high: pd.Series, low: pd.Series, n_swings: int = 5):
-    """Retourne les n derniers swing highs et swing lows."""
-    sh = find_swing_highs(high)
-    sl = find_swing_lows(low)
-
-    swing_highs = [(i, float(high.iloc[i])) for i in range(len(high)) if sh.iloc[i]][-n_swings:]
-    swing_lows  = [(i, float(low.iloc[i]))  for i in range(len(low))  if sl.iloc[i]][-n_swings:]
-
-    return swing_highs, swing_lows
+def get_last_swings(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    n_swings: int = 5,
+    volume: pd.Series | None = None,
+):
+    """Retourne les n derniers swing highs et swing lows + scores."""
+    high_points, low_points = get_last_swing_points(
+        high, low, close, volume=volume, method="pivot", n_swings=n_swings
+    )
+    swing_highs = [(p["idx"], p["price"]) for p in high_points]
+    swing_lows = [(p["idx"], p["price"]) for p in low_points]
+    return swing_highs, swing_lows, high_points, low_points
 
 
 # ─── Structure de marché ───────────────────────────────────────────────────────
 
-def detect_market_structure(high: pd.Series, low: pd.Series, close: pd.Series):
+def detect_market_structure(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    volume: pd.Series | None = None,
+) -> dict:
     """
     Détecte :
     - HH / HL  → uptrend
@@ -50,7 +51,9 @@ def detect_market_structure(high: pd.Series, low: pd.Series, close: pd.Series):
     - BOS (Break of Structure)
     - CHoCH (Change of Character)
     """
-    swing_highs, swing_lows = get_last_swings(high, low, n_swings=6)
+    swing_highs, swing_lows, high_points, low_points = get_last_swings(
+        high, low, close, n_swings=6, volume=volume
+    )
 
     if len(swing_highs) < 2 or len(swing_lows) < 2:
         return {"trend": "NEUTRAL", "bos": False, "choch": False, "structure": "insufficient data"}
@@ -106,12 +109,69 @@ def detect_market_structure(high: pd.Series, low: pd.Series, close: pd.Series):
         "structure": structure,
         "bos":       bos,
         "bos_dir":   bos_dir,
+        "bos_score": round(bos_quality_score(
+            bos, bos_dir, swing_highs, swing_lows, close, volume
+        ), 1),
         "choch":     choch,
         "last_swing_high": last_sh,
         "last_swing_low":  last_sl,
-        "swing_highs": [{"idx": i, "price": v} for i, v in swing_highs[-3:]],
-        "swing_lows":  [{"idx": i, "price": v} for i, v in swing_lows[-3:]],
+        "swing_highs": [{"idx": i, "price": v, "score": hp.get("score")} for (i, v), hp in zip(swing_highs[-3:], high_points[-3:])],
+        "swing_lows":  [{"idx": i, "price": v, "score": lp.get("score")} for (i, v), lp in zip(swing_lows[-3:], low_points[-3:])],
     }
+
+
+def bos_quality_score(
+    bos: bool,
+    bos_dir: str | None,
+    swing_highs: list[tuple],
+    swing_lows: list[tuple],
+    close: pd.Series,
+    volume: pd.Series | None = None,
+) -> float:
+    """
+    Score 0-100 de la qualité du BOS.
+    Prend en compte :
+    - distance de cassure par rapport au swing précédent
+    - volume sur la bougie de cassure
+    - score du swing cassé
+    """
+    if not bos or not swing_highs or not swing_lows or len(close) < 2:
+        return 0.0
+
+    last_idx = len(close) - 1
+    last_close = float(close.iloc[-1])
+    atr_raw = pd.concat([
+        pd.Series(close.index, index=close.index),  # placeholder, recalculated below
+    ], axis=1).max(axis=1)
+    # compute true range manually for this small series
+    prev_close = close.shift(1)
+    tr1 = pd.Series(close.index, index=close.index) * 0  # dummy
+    high = pd.Series(close).combine(prev_close, max)
+    low = pd.Series(close).combine(prev_close, min)
+    tr = high - low
+    atr = float(tr.rolling(14).mean().iloc[-1]) if len(close) >= 14 else float(tr.mean())
+    if not atr or atr == 0:
+        return 50.0
+
+    if bos_dir == "BULLISH" and len(swing_highs) >= 2:
+        prev_swing_price = swing_highs[-2][1]
+        break_distance = last_close - prev_swing_price
+    elif bos_dir == "BEARISH" and len(swing_lows) >= 2:
+        prev_swing_price = swing_lows[-2][1]
+        break_distance = prev_swing_price - last_close
+    else:
+        return 0.0
+
+    distance_score = min(40, max(0, (break_distance / atr) * 10))
+
+    vol = volume if volume is not None else pd.Series(np.ones(len(close)), index=close.index)
+    cur_vol = float(vol.iloc[last_idx])
+    avg_vol = float(vol.iloc[max(0, last_idx - 14):last_idx + 1].mean())
+    volume_score = min(30, max(0, ((cur_vol / avg_vol - 1) * 30))) if avg_vol and avg_vol > 0 else 0.0
+
+    # momentum alignment : close is extending in direction
+    extension_score = 20.0 if break_distance > 0 else 0.0
+    return min(100.0, distance_score + volume_score + extension_score + 10.0)
 
 
 # ─── Bonus score Price Action ─────────────────────────────────────────────────

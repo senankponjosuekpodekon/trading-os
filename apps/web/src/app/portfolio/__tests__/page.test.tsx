@@ -45,6 +45,9 @@ const mockPosition = {
   stopLoss: '95',
   takeProfit1: '110',
   takeProfit: '110',
+  trailingStop: '96',
+  trailingMethod: 'atr',
+  trailingActive: true,
   status: 'OPEN',
   openedAt: new Date().toISOString(),
   livePrice: 105,
@@ -105,5 +108,67 @@ describe('PortfolioPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /historique/i }));
 
     expect(screen.getByRole('button', { name: /historique/i })).toHaveClass('bg-emerald-500/20');
+  });
+
+  it('fetches and displays continuation advice for an open position', async () => {
+    (api.post as jest.Mock).mockImplementation((url: string) => {
+      if (url === '/positions/pos1/continuation-advice') {
+        return Promise.resolve({ data: { score: 72, action: 'ACTIVATE_TRAILING', reason: 'Momentum' } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    (api.get as jest.Mock).mockImplementation((url: string) => {
+      if (url === '/portfolios') return Promise.resolve({ data: [mockPortfolio] });
+      if (url === '/signals?limit=10') return Promise.resolve({ data: { data: [] } });
+      if (url.startsWith('/positions/summary')) return Promise.resolve({ data: { totalPnl: 0, winRate: 0, open: 1, closed: 0 } });
+      if (url === '/positions/live') return Promise.resolve({ data: [mockPosition] });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <Wrapper>
+        <PortfolioPage />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect((screen.getAllByText('BTC/USDT', { hidden: true } as any)[0])).toBeInTheDocument();
+    });
+
+    const adviceButtons = screen.getAllByRole('button', { name: /Conseil/i, hidden: true } as any);
+    fireEvent.click(adviceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('ACTIVATE TRAILING', { hidden: true } as any)).toBeInTheDocument();
+    });
+
+    expect(api.post).toHaveBeenCalledWith('/positions/pos1/continuation-advice', {});
+  });
+
+  it('displays and updates trailing stop controls', async () => {
+    (api.get as jest.Mock).mockImplementation((url: string) => {
+      if (url === '/portfolios') return Promise.resolve({ data: [mockPortfolio] });
+      if (url === '/signals?limit=10') return Promise.resolve({ data: { data: [] } });
+      if (url.startsWith('/positions/summary')) return Promise.resolve({ data: { totalPnl: 0, winRate: 0, open: 1, closed: 0 } });
+      if (url === '/positions/live') return Promise.resolve({ data: [mockPosition] });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <Wrapper>
+        <PortfolioPage />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByDisplayValue('ATR')[0]).toBeInTheDocument();
+    });
+
+    const methodSelect = screen.getAllByDisplayValue('ATR')[0];
+    fireEvent.change(methodSelect, { target: { value: 'ema' } });
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith('/positions/pos1/trailing-stop', { method: 'ema' });
+    });
   });
 });
