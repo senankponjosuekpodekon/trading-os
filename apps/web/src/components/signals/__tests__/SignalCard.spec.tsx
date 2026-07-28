@@ -3,9 +3,11 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SignalCard, SignalCardProps } from '../SignalCard';
 import { useModeStore } from '@/store/mode.store';
 
-jest.mock('next/link', () => ({ children, href }: { children: React.ReactNode; href: string }) => (
+const MockLink = ({ children, href }: { children: React.ReactNode; href: string }) => (
   <a href={href}>{children}</a>
-));
+);
+MockLink.displayName = 'MockLink';
+jest.mock('next/link', () => MockLink);
 
 function buildSignal(): SignalCardProps['signal'] {
   return {

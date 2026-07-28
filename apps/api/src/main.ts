@@ -28,7 +28,7 @@ async function bootstrap() {
   }));
 
   // ── CORS strict ────────────────────────────────────────────────
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:3001')
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://169.58.80.46:3000,http://localhost:3000,http://localhost:3001')
     .split(',')
     .map(o => o.trim());
 

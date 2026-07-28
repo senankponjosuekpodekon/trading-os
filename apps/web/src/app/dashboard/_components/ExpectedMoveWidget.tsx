@@ -51,7 +51,7 @@ export function ExpectedMoveWidget({
             <span className="text-2xl font-semibold">{symbol}</span>
             <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-slate-300">{timeframe.toUpperCase()}</span>
           </div>
-          <p className="mt-1 text-sm text-slate-400">Projection des ranges probables sur la base de l'ATR et du régime de volatilité.</p>
+          <p className="mt-1 text-sm text-slate-400">Projection des ranges probables sur la base de l&apos;ATR et du régime de volatilité.</p>
         </div>
 
         <div className="flex flex-wrap gap-3">
@@ -104,7 +104,7 @@ export function ExpectedMoveWidget({
           ) : (
             <p className="mt-2 text-xl font-semibold text-white">—</p>
           )}
-          <p className="mt-1 text-xs text-slate-500">Mesuré via percentile d'ATR. &gt;70% = HIGH.</p>
+          <p className="mt-1 text-xs text-slate-500">Mesuré via percentile d&apos;ATR. &gt;70% = HIGH.</p>
         </div>
       </div>
 

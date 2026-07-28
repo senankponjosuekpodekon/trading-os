@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-import './globals.css';
 import { Providers } from '@/components/Providers';
 import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
 
@@ -23,6 +22,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
+      <head>
+        <script src="https://cdn.tailwindcss.com"></script>
+      </head>
       <body className="antialiased bg-gray-950 text-gray-100" style={{ fontFamily: 'var(--font-sans)' }}>
         <Providers>{children}</Providers>
         <ServiceWorkerRegistration />
