@@ -128,6 +128,7 @@ describe('SignalsService', () => {
             { symbol: 'BTC/USDT', signal: 'BUY', confidence: 75, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test', news_sentiment: { score: 0.5 }, feature_vector: { levels: { trend: 0.8 } } },
             { symbol: 'ETH/USDT', signal: 'NEUTRAL', confidence: 40 },
           ],
+          data_gaps: [{ symbol: 'XAU/USD', providers: ['binance', 'twelvedata'] }],
         },
       }));
       mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
@@ -138,6 +139,7 @@ describe('SignalsService', () => {
 
       expect(result.saved).toHaveLength(1);
       expect(mockAlertService.sendSignal).toHaveBeenCalled();
+      expect(result.data_gaps).toEqual([{ symbol: 'XAU/USD', providers: ['binance', 'twelvedata'] }]);
       expect(mockQuota.assertSignalQuota).not.toHaveBeenCalled();
       expect(mockPredictorImpl.predict).toHaveBeenCalled();
       expect(mockRegimePredict).toHaveBeenCalled();

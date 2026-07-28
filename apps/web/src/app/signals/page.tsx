@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, RefreshCw, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Scale, Brain, UserCircle } from 'lucide-react';
+import { TrendingUp, RefreshCw, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Scale, Brain, UserCircle, AlertTriangle } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { SignalCard } from '@/components/signals/SignalCard';
 import { SkeletonSignalCard } from '@/components/ui/Skeleton';
@@ -123,7 +123,9 @@ export default function SignalsPage() {
     },
   });
 
-  const portfolioRisk = (scan.data?.data as any)?.portfolio_risk ?? null;
+  const engineResponse = (scan.data?.data as any) ?? null;
+  const portfolioRisk = engineResponse?.portfolio_risk ?? null;
+  const dataGaps = Array.isArray(engineResponse?.data_gaps) ? engineResponse.data_gaps : [];
 
   const filteredSignals = signals?.filter((s: any) => {
     const profileOk = profileFilter === 'all' || s.profileSuitability?.includes(profileFilter);
@@ -315,8 +317,35 @@ export default function SignalsPage() {
         </div>
 
         {scan.isSuccess && (
-          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 text-sm">
-            ✅ {Array.isArray(scan.data?.data) ? scan.data.data.length : 0} nouveau(x) signal(aux) générés
+          <div className="space-y-3">
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 text-sm">
+              ✅ {Array.isArray(scan.data?.data) ? scan.data.data.length : 0} nouveau(x) signal(aux) générés
+            </div>
+            {dataGaps.length > 0 && (
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-200">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <AlertTriangle className="w-4 h-4" />
+                  {dataGaps.length} actif{dataGaps.length > 1 ? 's' : ''} sans données complètes
+                </div>
+                <p className="text-xs text-amber-300 mt-1">
+                  Certaines sources (Binance, TwelveData, etc.) n&apos;ont pas répondu. Vérifie que l&apos;engine a accès au réseau,
+                  sinon les trailing stop ou analyses avancées peuvent échouer.
+                </p>
+                <div className="mt-2 space-y-1 text-xs">
+                  {dataGaps.slice(0, 5).map((gap: any) => (
+                    <div key={`${gap.symbol}-${gap.providers?.join?.('-') ?? 'na'}`} className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-amber-100">{gap.symbol}</span>
+                      {Array.isArray(gap.providers) && gap.providers.length > 0 && (
+                        <span className="text-amber-300">{gap.providers.join(', ')}</span>
+                      )}
+                    </div>
+                  ))}
+                  {dataGaps.length > 5 && (
+                    <p className="text-amber-300">+ {dataGaps.length - 5} autre{dataGaps.length - 5 > 1 ? 's' : ''}…</p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -70,16 +70,17 @@ export class PositionsService {
   ): Promise<{ recommendedStop: number | null; activated: boolean; reason: string } | null> {
     if (!candles.length) return null;
     try {
+      const payload = {
+        symbol,
+        direction,
+        entry_price: entryPrice,
+        stop_loss: stopLoss,
+        candles,
+        method,
+        activation_r: 0,
+      };
       const { data } = await firstValueFrom(
-        this.http.post(`${this.engineUrl}/trailing-stop/compute`, {
-          symbol,
-          direction,
-          entry_price: entryPrice,
-          stop_loss: stopLoss,
-          candles,
-          method,
-          activation_r: 0,
-        }),
+        this.http.post(`${this.engineUrl}/trailing-stop/compute`, payload),
       );
       return {
         recommendedStop: data.recommended_stop ?? null,
@@ -87,7 +88,17 @@ export class PositionsService {
         reason: data.reason ?? '',
       };
     } catch (e: any) {
-      this.logger.warn(`computeTrailingStopFromEngine failed for ${symbol}: ${e?.message}`);
+      const status = e?.response?.status;
+      const detail = e?.response?.data?.detail || e?.response?.data?.message;
+      this.logger.warn('compute_trailing_stop_failed', {
+        symbol,
+        status,
+        error: e?.message,
+        detail,
+      });
+      if (status === 400) {
+        throw new BadRequestException(`Trailing stop invalide: ${detail ?? 'payload rejected by engine'}`);
+      }
       return null;
     }
   }

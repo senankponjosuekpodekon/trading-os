@@ -257,6 +257,13 @@ export class SignalsService {
       const { data } = await firstValueFrom(
         this.http.post(`${this.engineUrl}/scan/multi`, payload),
       );
+      const dataGaps = Array.isArray((data as any)?.data_gaps) ? (data as any).data_gaps : [];
+      if (dataGaps.length) {
+        this.logger.warn('engine_scan_data_gaps', {
+          count: dataGaps.length,
+          preview: dataGaps.slice(0, 5),
+        });
+      }
       const alertUserId = opts?.userId ?? '*';
       const saved = await this.saveSignals(data.results, alertUserId, {
         signalAllowance,
@@ -265,7 +272,7 @@ export class SignalsService {
       // Pass 2 : enrichissement sentiment asynchrone (non bloquant)
       // Met à jour confidence + potentiellement invalide le signal
       setImmediate(() => Promise.resolve(this._enrichSentimentPass2(saved, data.results, alertUserId)).catch(() => {}));
-      return { saved, portfolio_risk: data.portfolio_risk ?? null };
+      return { saved, portfolio_risk: data.portfolio_risk ?? null, data_gaps: dataGaps };
     } catch (e: any) {
       throw new Error(`Engine scan failed: ${e?.message}`);
     }
