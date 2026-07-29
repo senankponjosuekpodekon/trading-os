@@ -4,7 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { of } from 'rxjs';
 import { PositionsService } from './positions.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JournalService } from '../journal/journal.service';
 import { AuditService } from '../audit/audit.service';
@@ -64,6 +64,7 @@ describe('PositionsService', () => {
       providers: [
         PositionsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: PrismaSystemService, useValue: mockPrisma },
         { provide: HttpService, useValue: mockHttp },
         { provide: ConfigService, useValue: mockConfig },
         { provide: NotificationsService, useValue: mockNotifications },

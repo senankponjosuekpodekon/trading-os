@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PriceAlertsService } from './price-alerts.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 describe('PriceAlertsService', () => {
@@ -25,6 +25,7 @@ describe('PriceAlertsService', () => {
       providers: [
         PriceAlertsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: PrismaSystemService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();

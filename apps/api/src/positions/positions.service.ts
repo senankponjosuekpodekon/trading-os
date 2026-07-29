@@ -3,7 +3,8 @@ import { Cron } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
+import { rlsContext } from '../prisma/rls-context';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JournalService } from '../journal/journal.service';
 import { AuditService } from '../audit/audit.service';
@@ -24,6 +25,7 @@ export class PositionsService {
 
   constructor(
     private prisma: PrismaService,
+    private systemPrisma: PrismaSystemService,
     private http: HttpService,
     private config: ConfigService,
     private notifications: NotificationsService,
@@ -420,7 +422,10 @@ export class PositionsService {
   @Cron('*/30 * * * * *')
   async syncTrailingStops() {
     this.logger.log('TRAILING: synchronisation des trailing stops');
-    const open = await this.prisma.position.findMany({
+    // Cross-user read: this cron scans every user's open positions, so it
+    // must bypass RLS (systemPrisma, owner role) — per-position writes below
+    // are re-scoped to that position's own user via rlsContext.run.
+    const open = await this.systemPrisma.position.findMany({
       where: { status: { in: ['OPEN', 'PARTIAL'] } },
       include: {
         asset: { select: { symbol: true } },
@@ -431,8 +436,16 @@ export class PositionsService {
 
     for (const pos of open) {
       try {
+        await rlsContext.run(pos.portfolio.userId, () => this._syncOneTrailingStop(pos));
+      } catch (e: any) {
+        this.logger.warn(`syncTrailingStops failed for ${pos.asset.symbol}: ${e?.message}`);
+      }
+    }
+  }
+
+  private async _syncOneTrailingStop(pos: any) {
         const price = await this.fetchLivePrice(pos.asset.symbol);
-        if (!price) continue;
+        if (!price) return;
 
         const entry = parseFloat(pos.entryPrice.toString());
         const sl = pos.stopLoss ? parseFloat(pos.stopLoss.toString()) : null;
@@ -446,28 +459,28 @@ export class PositionsService {
         if (pos.direction === 'BUY') {
           if (pos.status === 'OPEN' && tp1 && tp2 && price >= tp1) {
             await this.partialCloseByWatcher(pos.id, price);
-            continue;
+            return;
           }
           if (pos.status === 'PARTIAL' && tp2 && price >= tp2) {
             await this.closeByWatcher(pos.id, price, 'TP');
-            continue;
+            return;
           }
           if (pos.status === 'OPEN' && tp1 && !tp2 && price >= tp1) {
             await this.closeByWatcher(pos.id, price, 'TP');
-            continue;
+            return;
           }
         } else {
           if (pos.status === 'OPEN' && tp1 && tp2 && price <= tp1) {
             await this.partialCloseByWatcher(pos.id, price);
-            continue;
+            return;
           }
           if (pos.status === 'PARTIAL' && tp2 && price <= tp2) {
             await this.closeByWatcher(pos.id, price, 'TP');
-            continue;
+            return;
           }
           if (pos.status === 'OPEN' && tp1 && !tp2 && price <= tp1) {
             await this.closeByWatcher(pos.id, price, 'TP');
-            continue;
+            return;
           }
         }
 
@@ -503,11 +516,11 @@ export class PositionsService {
 
         if (pos.direction === 'BUY' && price <= trailingStop) {
           await this.closeByWatcher(pos.id, price, 'TRAILING');
-          continue;
+          return;
         }
         if (pos.direction === 'SELL' && price >= trailingStop) {
           await this.closeByWatcher(pos.id, price, 'TRAILING');
-          continue;
+          return;
         }
 
         const currentStop = pos.trailingStop ? parseFloat(pos.trailingStop.toString()) : null;
@@ -517,10 +530,6 @@ export class PositionsService {
             data: { trailingStop },
           });
         }
-      } catch (e: any) {
-        this.logger.warn(`syncTrailingStops failed for ${pos.asset.symbol}: ${e?.message}`);
-      }
-    }
   }
 
   private async partialCloseByWatcher(positionId: string, exitPrice: number) {

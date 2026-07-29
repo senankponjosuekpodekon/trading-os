@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HttpService } from '@nestjs/axios';
 import { of } from 'rxjs';
 import { WatcherService } from './watcher.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { PositionsService } from '../positions/positions.service';
 import { JournalService } from '../journal/journal.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -47,6 +47,7 @@ describe('WatcherService', () => {
       providers: [
         WatcherService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: PrismaSystemService, useValue: mockPrisma },
         { provide: PositionsService, useValue: mockPositions },
         { provide: JournalService, useValue: mockJournal },
         { provide: HttpService, useValue: mockHttp },

@@ -7,7 +7,7 @@ import * as request from 'supertest';
 import { SignalsModule } from './signals.module';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { PrismaModule } from '../prisma/prisma.module';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { QuotaService } from '../billing/quota.service';
 
@@ -56,6 +56,8 @@ describe('SignalsController (integration)', () => {
       .overrideProvider(HttpService)
       .useValue(httpService)
       .overrideProvider(PrismaService)
+      .useValue(prismaMock as any)
+      .overrideProvider(PrismaSystemService)
       .useValue(prismaMock as any)
       .overrideProvider(SignalOutcomeService)
       .useValue(outcomeService as any)

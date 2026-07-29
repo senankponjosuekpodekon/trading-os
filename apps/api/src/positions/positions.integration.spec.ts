@@ -5,7 +5,7 @@ import { HttpService } from '@nestjs/axios';
 import * as request from 'supertest';
 import { PositionsModule } from './positions.module';
 import { PrismaModule } from '../prisma/prisma.module';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -57,6 +57,8 @@ describe('PositionsController (integration)', () => {
       .overrideProvider(HttpService)
       .useValue(httpService)
       .overrideProvider(PrismaService)
+      .useValue(prismaMock as any)
+      .overrideProvider(PrismaSystemService)
       .useValue(prismaMock as any)
       .overrideProvider(NotificationsService)
       .useValue({ send: jest.fn() } as any)

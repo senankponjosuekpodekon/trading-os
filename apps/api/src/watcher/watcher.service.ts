@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
+import { rlsContext } from '../prisma/rls-context';
 import { PositionsService } from '../positions/positions.service';
 import { JournalService } from '../journal/journal.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -21,6 +22,7 @@ export class WatcherService {
 
   constructor(
     private prisma: PrismaService,
+    private systemPrisma: PrismaSystemService,
     private positions: PositionsService,
     private journal: JournalService,
     private http: HttpService,
@@ -30,7 +32,8 @@ export class WatcherService {
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async watchPositions() {
-    const openPositions = await this.prisma.position.findMany({
+    // Cross-user read: scans every user's open positions, must bypass RLS.
+    const openPositions = await this.systemPrisma.position.findMany({
       where: { status: 'OPEN' },
       include: {
         asset:     { select: { symbol: true } },
@@ -72,61 +75,10 @@ export class WatcherService {
     let closed = 0;
 
     for (const pos of openPositions) {
-      const binSym = SYM_MAP[pos.asset.symbol];
-      if (!binSym) continue;
-
-      const livePrice = prices[binSym];
-      if (!livePrice) continue;
-
-      const entry = parseFloat(pos.entryPrice.toString());
-      const sl    = pos.stopLoss   ? parseFloat(pos.stopLoss.toString())   : null;
-      const tp    = pos.takeProfit ? parseFloat(pos.takeProfit.toString()) : null;
-
-      let triggered: 'SL' | 'TP' | null = null;
-
-      if (pos.direction === 'BUY') {
-        if (sl && livePrice <= sl) triggered = 'SL';
-        if (tp && livePrice >= tp) triggered = 'TP';
-      } else {
-        if (sl && livePrice >= sl) triggered = 'SL';
-        if (tp && livePrice <= tp) triggered = 'TP';
-      }
-
-      if (!triggered) continue;
-
-      const result = await this.positions.closeByWatcher(pos.id, livePrice, triggered);
-      if (!result) continue;
-
-      closed++;
-      const pnlNum = parseFloat(result.pnl);
-      this.logger.log(
-        `Watcher: ${pos.asset.symbol} ${triggered} @ ${livePrice} | PnL ${result.pnl}`,
+      const wasClosed = await rlsContext.run(pos.portfolio.userId, () =>
+        this._watchOnePosition(pos, prices),
       );
-
-      this.notifications.push({
-        userId: pos.portfolio.userId,
-        type: 'POSITION',
-        title: `${triggered} touché — ${pos.asset.symbol}`,
-        message: `Position ${pos.direction} fermée à ${livePrice} | PnL ${pnlNum > 0 ? '+' : ''}${pnlNum.toFixed(2)}`,
-        data: { positionId: pos.id, symbol: pos.asset.symbol, triggered, pnl: pnlNum },
-      });
-
-      // Enregistrement automatique dans le journal (J19)
-      try {
-        await this.journal.createAuto({
-          userId:    pos.portfolio.userId,
-          assetSymbol: pos.asset.symbol,
-          direction: pos.direction,
-          entryPrice: entry,
-          exitPrice:  livePrice,
-          pnl:        parseFloat(result.pnl),
-          pnlPct:     parseFloat(result.pnlPercent),
-          closeReason: triggered,
-          positionId:  pos.id,
-        });
-      } catch {
-        this.logger.warn(`Watcher: journal auto failed for ${pos.id}`);
-      }
+      if (wasClosed) closed++;
     }
 
     if (closed > 0) {
@@ -145,6 +97,66 @@ export class WatcherService {
     } catch (e: any) {
       this.logger.warn(`Watcher: price alert check failed — ${e?.message}`);
     }
+  }
+
+  /** Returns true if the position was closed. */
+  private async _watchOnePosition(pos: any, prices: Record<string, number>): Promise<boolean> {
+    const binSym = SYM_MAP[pos.asset.symbol];
+    if (!binSym) return false;
+
+    const livePrice = prices[binSym];
+    if (!livePrice) return false;
+
+    const entry = parseFloat(pos.entryPrice.toString());
+    const sl    = pos.stopLoss   ? parseFloat(pos.stopLoss.toString())   : null;
+    const tp    = pos.takeProfit ? parseFloat(pos.takeProfit.toString()) : null;
+
+    let triggered: 'SL' | 'TP' | null = null;
+
+    if (pos.direction === 'BUY') {
+      if (sl && livePrice <= sl) triggered = 'SL';
+      if (tp && livePrice >= tp) triggered = 'TP';
+    } else {
+      if (sl && livePrice >= sl) triggered = 'SL';
+      if (tp && livePrice <= tp) triggered = 'TP';
+    }
+
+    if (!triggered) return false;
+
+    const result = await this.positions.closeByWatcher(pos.id, livePrice, triggered);
+    if (!result) return false;
+
+    const pnlNum = parseFloat(result.pnl);
+    this.logger.log(
+      `Watcher: ${pos.asset.symbol} ${triggered} @ ${livePrice} | PnL ${result.pnl}`,
+    );
+
+    this.notifications.push({
+      userId: pos.portfolio.userId,
+      type: 'POSITION',
+      title: `${triggered} touché — ${pos.asset.symbol}`,
+      message: `Position ${pos.direction} fermée à ${livePrice} | PnL ${pnlNum > 0 ? '+' : ''}${pnlNum.toFixed(2)}`,
+      data: { positionId: pos.id, symbol: pos.asset.symbol, triggered, pnl: pnlNum },
+    });
+
+    // Enregistrement automatique dans le journal (J19)
+    try {
+      await this.journal.createAuto({
+        userId:    pos.portfolio.userId,
+        assetSymbol: pos.asset.symbol,
+        direction: pos.direction,
+        entryPrice: entry,
+        exitPrice:  livePrice,
+        pnl:        parseFloat(result.pnl),
+        pnlPct:     parseFloat(result.pnlPercent),
+        closeReason: triggered,
+        positionId:  pos.id,
+      });
+    } catch {
+      this.logger.warn(`Watcher: journal auto failed for ${pos.id}`);
+    }
+
+    return true;
   }
 
   // Sprint 3 — Cycle de vie PENDING → ACTIVE / INVALIDATED pour les setups RETEST/LIMIT.

@@ -6,7 +6,7 @@ import { of } from 'rxjs';
 import * as request from 'supertest';
 import { BacktestModule } from './backtest.module';
 import { PrismaModule } from '../prisma/prisma.module';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 const fakeGuard: CanActivate = {
@@ -29,6 +29,10 @@ describe('BacktestController (integration)', () => {
       .overrideProvider(HttpService)
       .useValue(httpService)
       .overrideProvider(PrismaService)
+      .useValue({
+        strategy: { findFirst: jest.fn().mockResolvedValue({ id: 's1', name: 'Test', rules: {} }) },
+      } as any)
+      .overrideProvider(PrismaSystemService)
       .useValue({
         strategy: { findFirst: jest.fn().mockResolvedValue({ id: 's1', name: 'Test', rules: {} }) },
       } as any)

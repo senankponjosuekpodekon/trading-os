@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD, APP_FILTER } from '@nestjs/core';
+import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { RlsContextInterceptor } from './prisma/rls-context.interceptor';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
@@ -73,6 +74,7 @@ import { ExpectedMoveModule } from './expected-move/expected-move.module';
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
     RolesGuard,
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: APP_INTERCEPTOR, useClass: RlsContextInterceptor },
   ],
 })
 export class AppModule {}

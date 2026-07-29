@@ -6,7 +6,7 @@ import { WatcherModule } from '../watcher/watcher.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { WatcherService } from '../watcher/watcher.service';
 import { PositionsService } from './positions.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JournalService } from '../journal/journal.service';
 
@@ -51,6 +51,8 @@ describe('openPosition → watcher → closePosition flow', () => {
       .overrideProvider(HttpService)
       .useValue(httpService)
       .overrideProvider(PrismaService)
+      .useValue(prismaMock)
+      .overrideProvider(PrismaSystemService)
       .useValue(prismaMock)
       .overrideProvider(NotificationsService)
       .useValue(notifications as any)

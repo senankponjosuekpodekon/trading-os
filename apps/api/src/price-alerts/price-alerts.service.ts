@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
+import { rlsContext } from '../prisma/rls-context';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePriceAlertDto } from './dto/create-price-alert.dto';
 
@@ -7,6 +8,7 @@ import { CreatePriceAlertDto } from './dto/create-price-alert.dto';
 export class PriceAlertsService {
   constructor(
     private prisma: PrismaService,
+    private systemPrisma: PrismaSystemService,
     private notifications: NotificationsService,
   ) {}
 
@@ -41,7 +43,8 @@ export class PriceAlertsService {
   }
 
   async checkAlerts(prices: Record<string, number>) {
-    const pending = await this.db.findMany({
+    // Cross-user read: scans every user's pending alerts, must bypass RLS.
+    const pending = await this.systemPrisma.priceAlert.findMany({
       where: { triggered: false },
     });
 
@@ -56,10 +59,12 @@ export class PriceAlertsService {
 
       if (!hit) continue;
 
-      await this.db.update({
-        where: { id: alert.id },
-        data: { triggered: true, triggeredAt: new Date() },
-      });
+      await rlsContext.run(alert.userId, () =>
+        this.db.update({
+          where: { id: alert.id },
+          data: { triggered: true, triggeredAt: new Date() },
+        }),
+      );
 
       this.notifications.push({
         userId: alert.userId,

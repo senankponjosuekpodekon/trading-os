@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { rlsContext } from '../prisma/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { TwoFactorService } from './two-factor.service';
 import { RegisterDto } from './dto/register.dto';
@@ -33,13 +34,18 @@ export class AuthService {
       },
     });
 
-    await this.prisma.portfolio.create({
-      data: {
-        name: 'Mon Portfolio',
-        type: 'PAPER',
-        userId: user.id,
-      },
-    });
+    // No JWT/authenticated request context exists yet for this brand-new
+    // user — the RLS-enforced client would otherwise reject this insert
+    // (fail-closed). We explicitly scope it to the user we just created.
+    await rlsContext.run(user.id, () =>
+      this.prisma.portfolio.create({
+        data: {
+          name: 'Mon Portfolio',
+          type: 'PAPER',
+          userId: user.id,
+        },
+      }),
+    );
 
     const tokens = await this.generateTokenPair(user.id, user.email);
     const { password: _password, ...userWithoutPassword } = user;
@@ -63,7 +69,11 @@ export class AuthService {
 
     const tokens = await this.generateTokenPair(user.id, user.email);
     const { password: _password, ...userWithoutPassword } = user;
-    await this.audit.log({ userId: user.id, action: 'LOGIN', resource: 'auth', details: { email: dto.email } });
+    // Same reasoning as register(): no request-scoped RLS context exists
+    // during login itself, audit_logs is RLS-protected.
+    await rlsContext.run(user.id, () =>
+      this.audit.log({ userId: user.id, action: 'LOGIN', resource: 'auth', details: { email: dto.email } }),
+    );
     return { user: userWithoutPassword, ...tokens };
   }
 
@@ -94,7 +104,9 @@ export class AuthService {
     const hash = this.hashToken(refreshToken);
     const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash: hash } });
     if (stored) {
-      await this.audit.log({ userId: stored.userId, action: 'LOGOUT', resource: 'auth' });
+      await rlsContext.run(stored.userId, () =>
+        this.audit.log({ userId: stored.userId, action: 'LOGOUT', resource: 'auth' }),
+      );
     }
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash: hash },

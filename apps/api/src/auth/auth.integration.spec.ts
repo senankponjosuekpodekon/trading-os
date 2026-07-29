@@ -4,7 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import * as request from 'supertest';
 import { AuthModule } from './auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 
 describe('AuthController (integration)', () => {
   let app: INestApplication;
@@ -58,6 +58,8 @@ describe('AuthController (integration)', () => {
       imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule],
     })
       .overrideProvider(PrismaService)
+      .useValue(prismaMock as any)
+      .overrideProvider(PrismaSystemService)
       .useValue(prismaMock as any)
       .compile();
 
