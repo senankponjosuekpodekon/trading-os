@@ -1,28 +1,28 @@
 # Trading-OS deployment guide
 
-## Prerequisites
+## Current setup (this VPS)
 
-- VPS with Ubuntu 22.04+
-- Docker Engine + Docker Compose plugin
-- GitHub repository with `ghcr.io` image registry enabled
-- Domain name pointed to the VPS (A/AAAA records)
+- **Server**: single Ubuntu VPS (`169.58.80.46`) running everything via Docker.
+- **Postgres 17** and **Redis 7** run as **standalone containers** managed outside this repo
+  (network `postgres_default`) — they hold real production data and are **not** started by
+  `docker-compose.prod.yml`.
+- **`nginx-proxy-manager`**, **netdata**, **uptime-kuma**, **ollama** also run independently on
+  this VPS (see `docker ps`).
+- **No image registry (ghcr.io) is used.** Images for `api`, `engine`, `web` are built **locally
+  on the VPS** by `docker-compose.prod.yml` from the checked-out source.
+- **Production branch is `vps`**, not `main`. `main` is currently stale/unmaintained.
 
-## 1. Provision the VPS
-
-Run the setup script as root or a sudo user:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/your-org/trading-os/main/scripts/setup-vps.sh | bash
-```
-
-Or manually:
+## 1. Provision a new VPS (only for a fresh server)
 
 ```bash
-cd /opt
-git clone https://github.com/your-org/trading-os.git
+cd /opt   # or wherever you want the repo
+git clone <repo-url> trading-os
 cd trading-os
+git checkout vps
 chmod +x scripts/*.sh
 ```
+
+Run `scripts/setup-vps.sh` to install Docker/Compose if needed.
 
 ## 2. Configure environment
 
@@ -31,66 +31,63 @@ cp .env.production.example .env
 nano .env
 ```
 
-Required values:
+Required values (see `.env.production.example` for the full list):
 
-- `DATABASE_URL` — must point to the Postgres container (`postgres:5432`) or an external managed DB.
+- `DATABASE_URL` — points to the external `postgres` container.
 - `JWT_SECRET` — generate with `openssl rand -base64 32`.
-- `NEXT_PUBLIC_API_URL` — public URL of the API.
-- `FRONTEND_ORIGIN` — public URL of the web app.
+- `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_ENGINE_URL` / `NEXT_PUBLIC_WS_URL` — public URLs, baked
+  into the Next.js build (build ARGs, not just runtime env).
+- `SENTRY_DSN_API` / `SENTRY_DSN_ENGINE` / `NEXT_PUBLIC_SENTRY_DSN` — optional, leave empty to
+  disable error tracking.
 
-## 3. Start the stack
+## 3. Deploy / redeploy
 
 ```bash
-./scripts/deploy.sh latest
+./scripts/deploy.sh
 ```
 
 This will:
 
-1. Pull the latest code.
-2. Pull or build Docker images.
-3. Start Postgres, Redis, API, Web, Engine.
-4. Run Prisma migrations.
-5. Restart dependent services.
+1. `git pull origin vps`.
+2. `docker compose -f docker-compose.prod.yml build` (local build, no registry pull).
+3. `docker compose -f docker-compose.prod.yml up -d` (api, engine, web — postgres/redis untouched).
+4. Run Prisma migrations against the external Postgres.
+5. Prune dangling images.
 
-## 4. SSL / reverse proxy (optional)
+## 4. SSL / reverse proxy
 
-The compose file exposes ports `80` and `443`. For production, place a reverse proxy in front:
-
-```bash
-# Example with Caddy
-docker run -d -p 80:80 -p 443:443 \
-  -v /opt/trading-os/Caddyfile:/etc/caddy/Caddyfile \
-  -v caddy_data:/data -v caddy_config:/config \
-  --name caddy --network trading-os_default \
-  caddy:2
-```
+Already handled by the existing `nginx-proxy-manager` container on this VPS — no extra reverse
+proxy needs to be started from this repo.
 
 ## 5. CI/CD
 
-The repository includes `.github/workflows/deploy.yml`:
+`.github/workflows/deploy.yml`:
 
-- On every push to `main`, images are built and pushed to `ghcr.io`.
-- `deploy-staging` then `deploy-production` jobs run after the build.
-- Required GitHub secrets:
-  - `PROD_HOST`
-  - `PROD_USER`
-  - `PROD_SSH_KEY`
+- Triggered on every push to **`vps`**.
+- SSHes into the VPS (`PROD_HOST` / `PROD_USER` / `PROD_SSH_KEY` GitHub secrets) and runs
+  `scripts/deploy.sh` there — no image build/push happens on GitHub's side.
+
+`.github/workflows/ci.yml`:
+
+- Runs lint/tests/build checks on push/PR to `main`, `develop`, `dev`, `vps`. Does **not** deploy.
 
 ## 6. Backups
 
-Create a cron job for Postgres backups:
+Already configured via cron on this VPS:
 
 ```bash
-0 2 * * * docker compose -f /opt/trading-os/docker-compose.prod.yml exec -T postgres pg_dump -U postgres trading_os > /opt/backups/trading-os-$(date +\%Y\%m\%d).sql
+0 2 * * * /root/projects/trading-os/scripts/backup-db.sh >> /opt/backups/backup.log 2>&1
 ```
 
-## 7. Monitoring
+Dumps go to `/opt/backups/trading-os-*.sql.gz`, 7-day retention (see `scripts/backup-db.sh`).
 
-View logs:
+## 7. Monitoring
 
 ```bash
 docker compose -f docker-compose.prod.yml logs -f api
 docker compose -f docker-compose.prod.yml logs -f web
+docker compose -f docker-compose.prod.yml logs -f engine
 ```
 
-Scale horizontally by adding more engine replicas in `docker-compose.prod.yml`.
+`netdata` (port `19999`) and `uptime-kuma` (port `3001` on the host, separate from the `api`
+container's internal `3001`) provide additional system/uptime monitoring.
