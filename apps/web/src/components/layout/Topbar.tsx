@@ -60,7 +60,11 @@ export function Topbar({ title }: { title: string }) {
 
         {/* Notif */}
         <div className="relative">
-          <button onClick={toggleNotifs} className="relative p-2 text-gray-400 hover:text-white transition-colors">
+          <button
+            onClick={toggleNotifs}
+            aria-label="Notifications"
+            className="relative p-2 text-gray-400 hover:text-white transition-colors"
+          >
             <Bell className="w-5 h-5" />
             {unread > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-emerald-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
@@ -73,7 +77,7 @@ export function Topbar({ title }: { title: string }) {
             <div className="absolute right-0 top-full mt-2 w-80 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                 <span className="text-sm font-semibold text-white">Notifications</span>
-                <button onClick={() => setShowNotifs(false)} className="text-gray-500 hover:text-white">
+                <button onClick={() => setShowNotifs(false)} aria-label="Fermer" className="text-gray-500 hover:text-white">
                   <X className="w-4 h-4" />
                 </button>
               </div>
