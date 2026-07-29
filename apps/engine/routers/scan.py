@@ -105,6 +105,9 @@ SYMBOL_TO_BINANCE = {
     "ATOM/USDT":  "ATOMUSDT",
     "LTC/USDT":   "LTCUSDT",
     "XRP/USDT":   "XRPUSDT",
+    "DOGE/USDT":  "DOGEUSDT",
+    "TRX/USDT":   "TRXUSDT",
+    "TON/USDT":   "TONUSDT",
     "EUR/USDT":   "EURUSDT",
     "GBP/USDT":   "GBPUSDT",
     "PAXG/USDT":  "PAXGUSDT",
@@ -169,10 +172,10 @@ SYMBOL_TO_DERIV = {
     "VIX75/USD":   "R_75",
     "VIX100/USD":  "R_100",
     # Boom & Crash
-    "BOOM300/USD":   "BOOM300",
+    "BOOM300/USD":   "BOOM300N",
     "BOOM500/USD":   "BOOM500",
     "BOOM1000/USD":  "BOOM1000",
-    "CRASH300/USD":  "CRASH300",
+    "CRASH300/USD":  "CRASH300N",
     "CRASH500/USD":  "CRASH500",
     "CRASH1000/USD": "CRASH1000",
     # Jump Indices

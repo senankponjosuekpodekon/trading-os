@@ -187,10 +187,20 @@ async def _deriv_request(payload: dict, timeout: float = 10.0) -> dict:
         return {"error": {"message": str(e)}}
 
 
+# Deriv a renommé certains indices legacy côté API (suffixe "N") sans changer
+# le symbole d'affichage/interne utilisé partout ailleurs (frontend, DERIV_SYMBOLS,
+# SYMBOL_TO_DERIV). Traduction appliquée uniquement au point d'appel réseau réel.
+_DERIV_WIRE_ALIASES = {"BOOM300": "BOOM300N", "CRASH300": "CRASH300N"}
+
+
+def _to_wire_symbol(symbol: str) -> str:
+    return _DERIV_WIRE_ALIASES.get(symbol, symbol)
+
+
 async def _fetch_v75_candles(symbol: str = V75_SYMBOL, count: int = 100) -> list:
     """Récupère les bougies 1min du V75 depuis l'API Deriv."""
     payload = {
-        "ticks_history": symbol,
+        "ticks_history": _to_wire_symbol(symbol),
         "adjust_start_time": 1,
         "count": count,
         "end": "latest",
@@ -351,7 +361,7 @@ async def scalp_v75(req: DerivScalpRequest):
 @router.get("/deriv/tick/{symbol}")
 async def get_latest_tick(symbol: str = V75_SYMBOL):
     """Dernier tick du symbole."""
-    resp = await _deriv_request({"ticks": symbol, "subscribe": 0}, timeout=8)
+    resp = await _deriv_request({"ticks": _to_wire_symbol(symbol), "subscribe": 0}, timeout=8)
     if "error" in resp:
         return {"symbol": symbol, "price": None, "source": "mock",
                 "note": "API Deriv inaccessible"}
