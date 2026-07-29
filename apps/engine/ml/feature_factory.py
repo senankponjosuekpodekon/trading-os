@@ -110,7 +110,7 @@ def _compute_level3(df: pd.DataFrame) -> dict:
 
     ema_bullish = False
     if e200 is not None:
-        ema_bullish = e20.iloc[-1] > e50.iloc[-1] > e200.iloc[-1]
+        ema_bullish = bool(e20.iloc[-1] > e50.iloc[-1] > e200.iloc[-1])
 
     bb_width = 0.0
     if bb_mid.iloc[-1] and bb_mid.iloc[-1] != 0:
@@ -255,8 +255,8 @@ def _compute_level5(
     return {
         "confluence_score": confluence_score,
         "trend_fatigue": trend_fatigue,
-        "compression_flag": compression_expansion["compression_score"] > 0.5,
-        "expansion_flag": compression_expansion["expansion_score"] > 0.5,
+        "compression_flag": bool(compression_expansion["compression_score"] > 0.5),
+        "expansion_flag": bool(compression_expansion["expansion_score"] > 0.5),
         "compression_expansion": compression_expansion,
         "liquidity_sweep": liquidity_sweep,
         "rsi_divergence": rsi_divergence,

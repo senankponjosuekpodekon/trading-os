@@ -78,7 +78,7 @@ export function SyntheticRegimeCard({ analysis, color }: SyntheticRegimeCardProp
       <div className="space-y-3">
         <GaugeRow label="Spike prob" value={analysis.spike_probability} color={analysis.spike_probability > 50 ? 'text-red-400' : 'text-gray-400'} />
         <GaugeRow label="Mean rev." value={analysis.mean_reversion_prob} color="text-blue-400" />
-        <GaugeRow label="ATR z-score" value={Math.min(100, Math.max(0, (analysis.atr_z + 3) * 16.6))} display={`${analysis.atr_z.toFixed(2)}`} color="text-purple-400" />
+        <GaugeRow label="ATR z-score" value={Math.min(100, Math.max(0, ((analysis.atr_z ?? 0) + 3) * 16.6))} display={`${(analysis.atr_z ?? 0).toFixed(2)}`} color="text-purple-400" />
       </div>
 
       {analysis.caution && (

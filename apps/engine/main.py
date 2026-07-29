@@ -12,8 +12,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-# from middleware.security import SecurityHeadersMiddleware
-# from middleware.errors import ErrorFormatterMiddleware
+from middleware.security import SecurityHeadersMiddleware
+from middleware.errors import ErrorFormatterMiddleware
 from routers import (
     health,
     indicators,
@@ -21,8 +21,8 @@ from routers import (
     scan,
     ws,
     risk,
-    # probability,
-    # trailing_stop,
+    probability,
+    trailing_stop,
     backtest,
     llm,
     brvm,
@@ -33,13 +33,13 @@ from routers import (
     news_scraper,
     macro,
     onchain,
-    # synthetic_engine,
-    # tick_stats,
-    # tokenomics,
-    # social_sentiment,
-    # ml_feedback,
-    # expected_move,
-    # ml_regime,
+    synthetic_engine,
+    tick_stats,
+    tokenomics,
+    social_sentiment,
+    ml_feedback,
+    expected_move,
+    ml_regime,
     ml_signals,
 )
 from utils.errors import EngineException, format_error_response
@@ -83,7 +83,7 @@ app = FastAPI(
 )
 
 # ── Security headers ─────────────────────────────────────────────
-# app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # ── Rate limiting ──────────────────────────────────────────────
 app.state.limiter = limiter
@@ -92,12 +92,12 @@ app.add_exception_handler(EngineException, format_error_response)
 app.add_middleware(SlowAPIMiddleware)
 
 # ── Catch-all error formatting ───────────────────────────────────
-# app.add_middleware(ErrorFormatterMiddleware)
+app.add_middleware(ErrorFormatterMiddleware)
 
 # ── CORS strict ──────────────────────────────────────────────
 _allowed_origins = [
     o.strip() for o in
-    os.getenv("ALLOWED_ORIGINS", "http://169.58.80.46:3000,http://localhost:3000,http://localhost:3001").split(",")
+    os.getenv("ALLOWED_ORIGINS", "http://169.58.80.46:3000,http://169.58.80.46:3001,http://localhost:3000,http://localhost:3001").split(",")
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -113,26 +113,26 @@ app.include_router(analyze.router, prefix="/analyze", tags=["Analyze"])
 app.include_router(scan.router, prefix="/scan", tags=["Scan"])
 app.include_router(ws.router, tags=["WebSocket"])
 app.include_router(risk.router,          prefix="", tags=["Risk"])
-# app.include_router(probability.router,    prefix="", tags=["Probability"])
-# app.include_router(trailing_stop.router, prefix="", tags=["Trailing Stop"])
+app.include_router(probability.router,    prefix="", tags=["Probability"])
+app.include_router(trailing_stop.router, prefix="", tags=["Trailing Stop"])
 app.include_router(backtest.router, prefix="",  tags=["Backtest"])
 app.include_router(llm.router,      prefix="",  tags=["LLM"])
 app.include_router(brvm.router,     prefix="",  tags=["BRVM"])
 app.include_router(brvm_reports.router, prefix="", tags=["BRVM Reports"])
 app.include_router(deriv.router,    prefix="",  tags=["Deriv"])
-# app.include_router(synthetic_engine.router, prefix="", tags=["Synthetic"])
-# app.include_router(tick_stats.router, prefix="", tags=["Tick Stats"])
+app.include_router(synthetic_engine.router, prefix="", tags=["Synthetic"])
+app.include_router(tick_stats.router, prefix="", tags=["Tick Stats"])
 app.include_router(rag.router,      prefix="",  tags=["RAG"])
 app.include_router(news.router,         prefix="",  tags=["News"])
 app.include_router(news_scraper.router, prefix="",  tags=["News Scraper"])
 app.include_router(macro.router,        prefix="/macro", tags=["Macro"])
 app.include_router(onchain.router,      prefix="/onchain", tags=["On-chain"])
-# app.include_router(tokenomics.router,   prefix="/tokenomics", tags=["Tokenomics"])
-# app.include_router(social_sentiment.router, prefix="/social", tags=["Social Sentiment"])
-# app.include_router(ml_feedback.router, prefix="/ml-feedback", tags=["ML Feedback"])
+app.include_router(tokenomics.router,   prefix="/tokenomics", tags=["Tokenomics"])
+app.include_router(social_sentiment.router, prefix="/social", tags=["Social Sentiment"])
+app.include_router(ml_feedback.router, prefix="/ml-feedback", tags=["ML Feedback"])
 app.include_router(ml_signals.router, tags=["ML"])
-# app.include_router(expected_move.router)
-# app.include_router(ml_regime.router, prefix="", tags=["ML"])
+app.include_router(expected_move.router)
+app.include_router(ml_regime.router, prefix="", tags=["ML"])
 
 if __name__ == "__main__":
     import uvicorn

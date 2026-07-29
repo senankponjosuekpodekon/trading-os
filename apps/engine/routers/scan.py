@@ -312,8 +312,8 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
     try:
         data = await retry_async(
             _do_fetch,
-            max_retries=2,
-            base_delay=1.0,
+            max_retries=1,
+            base_delay=0.5,
             exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
             on_retry=lambda attempt, exc: logger.warning(
                 "twelvedata_retry", symbol=symbol, attempt=attempt, error=str(exc)
@@ -1563,8 +1563,8 @@ async def scan_multi(req: ScanRequest):
         if htf_tf == mtf_tf:
             htf_regimes = dict(mtf_regimes)
 
-    # 1b. Fetch toutes les klines LTF en parallèle — Binance + Twelve Data fallback, timeout 4s
-    fetch_coros = [asyncio.wait_for(_fetch(sym), timeout=4.0) for sym in missing_symbols]
+    # 1b. Fetch toutes les klines LTF en parallèle — Binance + Twelve Data + yfinance fallback, timeout 7s
+    fetch_coros = [asyncio.wait_for(_fetch(sym), timeout=7.0) for sym in missing_symbols]
     dfs_raw = await asyncio.gather(*fetch_coros, return_exceptions=True)
     dfs = [None if isinstance(d, Exception) else d for d in dfs_raw]
 

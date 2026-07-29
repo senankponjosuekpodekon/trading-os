@@ -197,7 +197,7 @@ def _autocorrelation_tail(close: pd.Series, lag: int = 1) -> float:
 def _monte_carlo_range(close: pd.Series, n_sims: int = 1000, horizon: int = 20) -> dict:
     """Simple GBM-style Monte Carlo from historical returns."""
     if len(close) < 2:
-        return {"expected_low": None, "expected_high": None, "expected_range": None}
+        return {"p10": None, "p50": None, "p90": None}
     returns = close.pct_change().dropna()
     mu = float(returns.mean())
     sigma = float(returns.std()) or 1e-9
@@ -205,12 +205,11 @@ def _monte_carlo_range(close: pd.Series, n_sims: int = 1000, horizon: int = 20) 
     paths = last * np.exp(
         np.cumsum(np.random.normal(mu, sigma, size=(n_sims, horizon)), axis=1)
     )
-    low = float(np.percentile(paths[:, -1], 5))
-    high = float(np.percentile(paths[:, -1], 95))
+    final = paths[:, -1]
     return {
-        "expected_low": round(low, 6),
-        "expected_high": round(high, 6),
-        "expected_range": round(abs(high - low), 6),
+        "p10": round(float(np.percentile(final, 10)), 6),
+        "p50": round(float(np.percentile(final, 50)), 6),
+        "p90": round(float(np.percentile(final, 90)), 6),
     }
 
 
@@ -229,6 +228,8 @@ def analyze_synthetic(
             "spike_probability": 0.0,
             "mean_reversion_prob": 0.0,
             "regime": "INSUFFICIENT_DATA",
+            "last_price": float(close.iloc[-1]) if len(close) else None,
+            "caution": False,
         }
 
     atr = _rolling_atr(close, 14)
@@ -277,6 +278,7 @@ def analyze_synthetic(
             state = "NEUTRAL"
 
     mc = _monte_carlo_range(close, n_sims=n_sims)
+    caution = bool(regime == "EXPANSION" or spike_prob > 70)
 
     return {
         "state": state,
@@ -284,11 +286,16 @@ def analyze_synthetic(
         "mean_reversion_prob": round(mr_prob, 2),
         "regime": regime,
         "compression_score": round(compression, 2),
-        "atr_zscore": round(z_atr, 2),
-        "bb_width_zscore": round(bbw_z, 2),
+        "atr_z": round(z_atr, 2),
+        "bb_width_z": round(bbw_z, 2),
         "tick_velocity": velocity["velocity"],
         "tick_acceleration": velocity["acceleration"],
         "autocorr_lag1": round(autocorr, 3),
+        "last_price": round(float(close.iloc[-1]), 6),
+        "caution": caution,
+        "expected_range": (
+            [mc["p10"], mc["p90"]] if mc.get("p10") is not None else None
+        ),
         "monte_carlo": mc,
     }
 
@@ -296,7 +303,8 @@ def analyze_synthetic(
 @router.get("/synthetic/analyze/{symbol}")
 async def analyze_synthetic_symbol(symbol: str):
     """GET /synthetic/analyze/{symbol} → statistical state for synthetic indices."""
-    deriv_sym = SYMBOL_TO_DERIV.get(symbol.upper())
+    upper_symbol = symbol.upper()
+    deriv_sym = upper_symbol if upper_symbol in DERIV_SYMBOLS else SYMBOL_TO_DERIV.get(upper_symbol)
     if not deriv_sym:
         return {"symbol": symbol, "error": "unknown synthetic symbol"}
 

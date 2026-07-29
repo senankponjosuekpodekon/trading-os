@@ -26,10 +26,9 @@ interface TokenomicsMetric {
 }
 
 interface SocialMetric {
-  source: string;
-  symbol: string;
+  assetSymbol: string;
   sentimentScore: number;
-  mentionCount: number;
+  mentionCount24h: number;
   trending?: boolean;
 }
 
@@ -37,16 +36,14 @@ interface BrvmStock {
   symbol: string;
   name: string;
   sector: string;
-  price: number;
-  changePct: number;
+  priceXof: number;
+  changePercent: number;
 }
 
 interface SyntheticAsset {
-  name: string;
+  symbol: string;
   underlying: string;
   price: number;
-  volatility: number;
-  indexName?: string;
 }
 
 interface MlLeaderboardRow {
@@ -106,10 +103,10 @@ function SocialWidget() {
       ) : (
         <div className="space-y-2">
           {data.slice(0, 3).map((s) => (
-            <div key={`${s.source}-${s.symbol}`} className="flex justify-between text-sm">
-              <span className="text-white">{s.symbol}</span>
+            <div key={s.assetSymbol} className="flex justify-between text-sm">
+              <span className="text-white">{s.assetSymbol}</span>
               <span className={s.sentimentScore >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                {s.sentimentScore.toFixed(2)}
+                {(s.sentimentScore ?? 0).toFixed(2)}
               </span>
             </div>
           ))}
@@ -139,8 +136,8 @@ function BrvmWidget() {
           {data.slice(0, 3).map((b) => (
             <div key={b.symbol} className="flex justify-between text-sm">
               <span className="text-white">{b.symbol}</span>
-              <span className={b.changePct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                {b.changePct >= 0 ? '+' : ''}{b.changePct.toFixed(2)}%
+              <span className={(b.changePercent ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                {(b.changePercent ?? 0) >= 0 ? '+' : ''}{(b.changePercent ?? 0).toFixed(2)}%
               </span>
             </div>
           ))}
@@ -168,8 +165,8 @@ function SyntheticWidget() {
       ) : (
         <div className="space-y-2">
           {data.slice(0, 3).map((s) => (
-            <div key={s.name} className="flex justify-between text-sm">
-              <span className="text-white">{s.name}</span>
+            <div key={s.symbol} className="flex justify-between text-sm">
+              <span className="text-white">{s.symbol}</span>
               <span className="text-gray-400">{s.underlying}</span>
             </div>
           ))}

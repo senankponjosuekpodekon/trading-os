@@ -113,7 +113,7 @@ async def _fetch_klines(symbol: str, timeframe: str, limit: int) -> pd.DataFrame
     return df
 
 
-@router.get("/{symbol}")
+@router.get("/{symbol:path}")
 async def expected_move(
     symbol: str,
     timeframe: str = Query("1h"),

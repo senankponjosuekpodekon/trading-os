@@ -30,9 +30,9 @@ describe('PhaseBPage', () => {
     jest.clearAllMocks();
     (api.get as jest.Mock).mockImplementation((url: string) => {
       if (url === '/phase-b/tokenomics') return Promise.resolve({ data: { data: [{ assetSymbol: 'ETH', marketCap: 250000000000, supply: 120000000, holders: 1000000, volume24h: 15000000000 }] } });
-      if (url === '/phase-b/social') return Promise.resolve({ data: { data: [{ source: 'X', symbol: 'BTC', sentimentScore: 0.42, mentionCount: 1200, trending: true }] } });
-      if (url === '/phase-b/brvm') return Promise.resolve({ data: { data: [{ symbol: 'SNTS', name: 'Sonatel', sector: 'Telecom', price: 8000, changePct: 1.25 }] } });
-      if (url === '/phase-b/synthetic') return Promise.resolve({ data: { data: [{ name: 'sBTC', underlying: 'BTC', price: 65000, volatility: 0.35 }] } });
+      if (url === '/phase-b/social') return Promise.resolve({ data: { data: [{ assetSymbol: 'BTC', sentimentScore: 0.42, mentionCount24h: 1200, trending: true }] } });
+      if (url === '/phase-b/brvm') return Promise.resolve({ data: { data: [{ symbol: 'SNTS', name: 'Sonatel', sector: 'Telecom', priceXof: 8000, changePercent: 1.25 }] } });
+      if (url === '/phase-b/synthetic') return Promise.resolve({ data: { data: [{ symbol: 'sBTC', underlying: 'BTC', price: 65000 }] } });
       if (url === '/phase-b/ml-feedback/leaderboard') return Promise.resolve({ data: { data: [{ userId: 'u1', feedbackCount: 12, averageGrade: 4.2 }] } });
       return Promise.resolve({ data: { data: [] } });
     });
