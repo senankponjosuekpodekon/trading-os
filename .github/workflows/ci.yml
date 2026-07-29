@@ -79,6 +79,8 @@ jobs:
         run: ruff check .
       - name: Run Python tests
         working-directory: apps/engine
+        env:
+          DATABASE_URL: postgresql://trading_user:trading_pass@localhost:5432/app
         run: |
           if [ -d tests ]; then pytest -q; else echo "No tests yet"; fi
 

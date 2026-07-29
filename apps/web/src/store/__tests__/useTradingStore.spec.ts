@@ -16,6 +16,11 @@ describe('useTradingStore', () => {
       signalsFetchedAt: null,
     });
     jest.clearAllMocks();
+    localStorage.setItem('trading_os_token', 'test-token');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('trading_os_token');
   });
 
   it('updates prices', () => {

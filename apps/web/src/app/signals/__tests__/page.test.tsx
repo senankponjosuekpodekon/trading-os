@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import SignalsPage from '../page';
 import { createTestQueryClient } from '@/lib/test-utils';
 import { useTradingStore } from '@/store/trading.store';
+import { ToastProvider } from '@/components/ui/ToastProvider';
 
 jest.mock('@/lib/api', () => ({
   api: {
@@ -21,9 +22,11 @@ jest.mock('@/components/layout/AppLayout', () => ({
 
 function Wrapper({ children }: { children: React.ReactNode }) {
   return (
-    <QueryClientProvider client={createTestQueryClient()}>
-      {children}
-    </QueryClientProvider>
+    <ToastProvider>
+      <QueryClientProvider client={createTestQueryClient()}>
+        {children}
+      </QueryClientProvider>
+    </ToastProvider>
   );
 }
 
