@@ -15,11 +15,11 @@ jobs:
         env:
           POSTGRES_USER: trading_user
           POSTGRES_PASSWORD: trading_pass
-          POSTGRES_DB: trading_os
+          POSTGRES_DB: app
         ports:
           - 5433:5432
         options: >-
-          --health-cmd pg_isready -U trading_user -d trading_os
+          --health-cmd pg_isready -U trading_user -d app
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
