@@ -1118,7 +1118,56 @@ Les indicateurs cités dans le document (MVRV Z-score, RSI weekly, SMA 200 semai
 
 La prochaine étape logique serait de créer **le schéma complet de données (database schema + APIs + features + modèles ML)** pour construire ton "Crypto AI Trading Agent".
 
-bot de trading
+bot de trading, connecter ollama, est ce que aujourd'hui, je peux lancer une requete de me scanner coninmarketcap ou coingecko, afin de me retrouver des monnaies potentiels sur lequel insvestir via une analyse approfondie et detaillé pour decider d'investir ou non avec la potentialité de gains, nous devons pouvour reconnaitre les monnaies moonshot, 1000X?
+
+In the cryptocurrency market, a moonshot is a high-risk, high-reward investment in a coin expected to experience massive, rapid price growth. The term comes from the phrase "mooning," which describes a cryptocurrency token climbing drastically in price and value, metaphorically traveling "to the moon." [1, 2, 3, 4, 5] 
+------------------------------
+## Key Characteristics of Moonshots
+
+* 
+* Low Market Cap: These are usually small, lesser-known tokens with a low market capitalization.
+* High Volatility: Prices can spike by 1,000% or more, but they can also crash to zero just as quickly.
+* Speculative Nature: They rely heavily on social media hype, community backing, or viral trends rather than underlying utility or financial fundamentals. [6, 7, 8, 9, 10] 
+* 
+
+------------------------------
+## Alternative Names and Slang
+Investors use several other terms to describe a moonshot or the assets associated with it:
+
+* 
+* Gem: A hidden, low-market-cap token that investors believe has strong potential but has not yet been discovered by the wider public.
+* 100x Coin: A token with the perceived potential to multiply its price by 100 times its current value. [11] 
+* Shitcoin / Memecoin: Often used to describe tokens with no real-world utility or underlying product that rely entirely on internet memes and speculation to pump in value. [12, 13, 14] 
+* Lottery Ticket: A term highlighting that buying these tokens is purely a gamble, where you risk losing your entire investment for a small chance at a massive payout.
+* Penny Crypto: Cryptocurrencies trading at a fraction of a cent, making it cheap to buy millions of tokens in hopes of a price surge.
+* 
+
+------------------------------
+If you want to evaluate a specific token, tell me:
+
+* 
+* What is the token name or ticker?
+* What is its current market capitalization?
+* Where did you hear about it (e.g., X/Twitter, Reddit, Telegram)?
+* 
+
+I can help you analyze the project's risk factors and community metrics.
+
+[1] [https://bitcoinfoundation.org](https://bitcoinfoundation.org/news/analysis/what-is-moonshot-crypto-surge-high-risk-tokens/)
+[2] [https://coindcx.com](https://coindcx.com/blog/cryptocurrency/is-moonshot-legit/)
+[3] [https://coindcx.com](https://coindcx.com/blog/crypto-news-global/moonshot-solana-why-the-term-is-trending/)
+[4] [https://bitcoinfoundation.org](https://bitcoinfoundation.org/news/analysis/what-is-moonshot-crypto-surge-high-risk-tokens/)
+[5] [https://www.coinspot.com.au](https://www.coinspot.com.au/learn/6-common-crypto-terms-and-what-they-mean)
+[6] [https://bitcoinfoundation.org](https://bitcoinfoundation.org/news/analysis/what-is-moonshot-crypto-surge-high-risk-tokens/)
+[7] [https://www.chipin.com](https://www.chipin.com/cryptocurrency-token-guide/)
+[8] [https://bitcoinfoundation.org](https://bitcoinfoundation.org/news/analysis/what-is-moonshot-crypto-surge-high-risk-tokens/)
+[9] [https://www.moonshotplatform.org](https://www.moonshotplatform.org/contest-rules)
+[10] [https://bookmap.com](https://bookmap.com/blog/crypto-bubbles-how-to-spot-and-protect-your-investments-from-the-next-crash)
+[11] [https://bitcoinfoundation.org](https://bitcoinfoundation.org/news/opinion/what-is-crypto-slang-most-popular-crypto-terms-every-trader-should-know-in-2026/)
+[12] [https://www.coinmetro.com](https://www.coinmetro.com/glossary/)
+[13] [https://bitcoinmagazine.com](https://bitcoinmagazine.com/bitcoin-glossary)
+[14] [https://pintu.co.id](https://pintu.co.id/en/academy/glossary)
+
 
 
 Honnêtement, il y a un mélange de choses solides et de choses qui m'interrogent. Je vous donne mon avis franc, brique par brique.
