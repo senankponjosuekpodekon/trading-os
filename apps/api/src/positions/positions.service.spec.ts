@@ -24,10 +24,12 @@ describe('PositionsService', () => {
       findUnique: jest.fn(),
     },
     $transaction: jest.fn(async (ops: any) => {
+      if (typeof ops === 'function') return ops(mockPrisma);
       const results: any[] = [];
       for (const op of Array.isArray(ops) ? ops : []) results.push(await op);
       return results;
     }),
+    $executeRaw: jest.fn(),
     position: {
       create: jest.fn(),
       findFirst: jest.fn(),

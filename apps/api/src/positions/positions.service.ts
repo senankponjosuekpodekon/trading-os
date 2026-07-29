@@ -35,6 +35,22 @@ export class PositionsService {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
 
+  // Runs `fn` inside a single Postgres transaction, manually re-injecting the
+  // current RLS user context first. Needed because the multi-statement
+  // atomic updates below (position + portfolio together) use Prisma's
+  // interactive transaction form, whose `tx` handle is the RAW client — it
+  // does not go through the RLS-enforcing Proxy from prisma-rls.extension.ts
+  // (that Proxy only wraps single, non-batched calls on `this.prisma`).
+  private rlsTransaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+    const userId = rlsContext.getStore();
+    return this.prisma.$transaction(async (tx) => {
+      if (userId) {
+        await tx.$executeRaw`SELECT set_config('app.current_user_id', ${userId}, true)`;
+      }
+      return fn(tx);
+    });
+  }
+
   private async fetchLivePrice(symbol: string): Promise<number | null> {
     const binSym = SYM_MAP[symbol];
     if (!binSym) return null;
@@ -140,8 +156,8 @@ export class PositionsService {
     });
     if (duplicate) throw new ConflictException('DUPLICATE_POSITION');
 
-    const [position] = await this.prisma.$transaction([
-      this.prisma.position.create({
+    const position = await this.rlsTransaction(async (tx) => {
+      const created = await tx.position.create({
         data: {
           portfolioId: dto.portfolioId,
           assetId: asset.id,
@@ -158,12 +174,13 @@ export class PositionsService {
           status: 'OPEN',
         },
         include: { asset: { select: { symbol: true, name: true } } },
-      }),
-      this.prisma.portfolio.update({
+      });
+      await tx.portfolio.update({
         where: { id: dto.portfolioId },
         data: { currentCapital: { decrement: cost } },
-      }),
-    ]);
+      });
+      return created;
+    });
 
     await this.audit.log({
       userId,
@@ -232,8 +249,8 @@ export class PositionsService {
     const pnlPct = originalQty > 0 ? ((pnl / (entry * originalQty)) * 100) : 0;
     const proceeds = exitPrice * qty;
 
-    await this.prisma.$transaction([
-      this.prisma.position.update({
+    await this.rlsTransaction(async (tx) => {
+      await tx.position.update({
         where: { id: positionId },
         data: {
           status: 'CLOSED',
@@ -242,12 +259,12 @@ export class PositionsService {
           pnlPercent: pnlPct,
           closedAt: new Date(),
         },
-      }),
-      this.prisma.portfolio.update({
+      });
+      await tx.portfolio.update({
         where: { id: position.portfolioId },
         data: { currentCapital: { increment: proceeds } },
-      }),
-    ]);
+      });
+    });
 
     try {
       await this.journal.createAuto({
@@ -384,8 +401,8 @@ export class PositionsService {
       `Capital insuffisant : coût estimé $${cost.toFixed(2)} > capital disponible $${capital.toFixed(2)}`
     );
 
-    const [position] = await this.prisma.$transaction([
-      this.prisma.position.create({
+    const position = await this.rlsTransaction(async (tx) => {
+      const created = await tx.position.create({
         data: {
           portfolioId: portfolio.id,
           assetId:     signal.assetId,
@@ -401,12 +418,13 @@ export class PositionsService {
           status:      'OPEN',
         },
         include: { asset: { select: { symbol: true, name: true } } },
-      }),
-      this.prisma.portfolio.update({
+      });
+      await tx.portfolio.update({
         where: { id: portfolio.id },
         data:  { currentCapital: { decrement: cost } },
-      }),
-    ]);
+      });
+      return created;
+    });
 
     this.notifications.push({
       userId,
@@ -557,8 +575,8 @@ export class PositionsService {
       ? Math.max(prevTrailing, entry)
       : Math.min(prevTrailing, entry);
 
-    await this.prisma.$transaction([
-      this.prisma.position.update({
+    await this.rlsTransaction(async (tx) => {
+      await tx.position.update({
         where: { id: positionId },
         data: {
           status: 'PARTIAL',
@@ -569,12 +587,12 @@ export class PositionsService {
           partialExitAt: new Date(),
           partialPnl,
         },
-      }),
-      this.prisma.portfolio.update({
+      });
+      await tx.portfolio.update({
         where: { id: pos.portfolioId },
         data:  { currentCapital: { increment: proceeds } },
-      }),
-    ]);
+      });
+    });
 
     this.notifications.push({
       userId: pos.portfolio.userId,
@@ -611,16 +629,16 @@ export class PositionsService {
     const pnl   = realizedPartial + pnlOnRemaining;
     const pnlPct = originalQty > 0 ? (pnl / (entry * originalQty)) * 100 : 0;
 
-    await this.prisma.$transaction([
-      this.prisma.position.update({
+    await this.rlsTransaction(async (tx) => {
+      await tx.position.update({
         where: { id: positionId },
         data: { status: 'CLOSED', exitPrice, pnl, pnlPercent: pnlPct, closedAt: new Date() },
-      }),
-      this.prisma.portfolio.update({
+      });
+      await tx.portfolio.update({
         where: { id: pos.portfolioId },
         data:  { currentCapital: { increment: exitPrice * qty } },
-      }),
-    ]);
+      });
+    });
 
     const userId = pos.portfolio.userId;
 

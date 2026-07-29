@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
  * Useful in unit tests to avoid repeating the same mock shape.
  */
 export function createMockPrisma(overrides?: Partial<Record<keyof PrismaService, any>>) {
-  return {
+  const mock: any = {
     user: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -101,12 +101,15 @@ export function createMockPrisma(overrides?: Partial<Record<keyof PrismaService,
       count: jest.fn(),
     },
     $transaction: jest.fn(async (ops: any) => {
+      if (typeof ops === 'function') return ops(mock);
       const results: any[] = [];
       for (const op of Array.isArray(ops) ? ops : []) results.push(await op);
       return results;
     }),
+    $executeRaw: jest.fn(),
     $connect: jest.fn(),
     $disconnect: jest.fn(),
-    ...overrides,
-  } as any;
+  };
+  Object.assign(mock, overrides);
+  return mock;
 }

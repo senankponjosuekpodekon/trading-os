@@ -47,7 +47,10 @@ describe('PositionsController (integration)', () => {
       create: jest.fn().mockResolvedValue(position),
       update: jest.fn().mockResolvedValue({ ...position, status: 'CLOSED' }),
     },
-    $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
+    $transaction: jest.fn((ops: any) =>
+      typeof ops === 'function' ? ops(prismaMock) : Promise.all(ops),
+    ),
+    $executeRaw: jest.fn(),
   };
 
   beforeAll(async () => {

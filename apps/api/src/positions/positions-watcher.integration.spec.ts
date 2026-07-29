@@ -41,7 +41,10 @@ describe('openPosition → watcher → closePosition flow', () => {
       update: jest.fn().mockResolvedValue({}),
       count: jest.fn().mockResolvedValue(0),
     },
-    $transaction: jest.fn(async (ops: any[]) => Promise.all(ops)),
+    $transaction: jest.fn(async (ops: any) =>
+      typeof ops === 'function' ? ops(prismaMock) : Promise.all(ops),
+    ),
+    $executeRaw: jest.fn(),
   };
 
   beforeAll(async () => {
