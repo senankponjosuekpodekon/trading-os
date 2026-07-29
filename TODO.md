@@ -2079,3 +2079,7 @@ Faire des analyses long termes du genres et autres Q1, Q2, Q3, Q4; les dominance
 Fibonacci? Notion de divergence haussiere, baissiere
 
 Google trends
+
+
+
+bot de trading, connecter ollama
