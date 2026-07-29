@@ -65,6 +65,8 @@ api.interceptors.response.use(
           const newToken = await doRefresh();
           isRefreshing = false;
           onRefreshed(newToken);
+          original.headers.Authorization = `Bearer ${newToken}`;
+          return api(original);
         } catch {
           isRefreshing = false;
           clearTokens();
