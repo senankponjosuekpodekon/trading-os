@@ -10,9 +10,6 @@ from routers.onchain_advanced import (
     fetch_mvrv,
     fetch_developer_activity,
     fetch_defi_tvl,
-    fetch_stablecoin_flow,
-    fetch_nvt,
-    fetch_whale_alert,
     get_advanced_onchain_context,
     advanced_onchain_bonus,
 )

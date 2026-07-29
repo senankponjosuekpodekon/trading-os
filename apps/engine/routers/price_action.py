@@ -140,12 +140,8 @@ def bos_quality_score(
 
     last_idx = len(close) - 1
     last_close = float(close.iloc[-1])
-    atr_raw = pd.concat([
-        pd.Series(close.index, index=close.index),  # placeholder, recalculated below
-    ], axis=1).max(axis=1)
     # compute true range manually for this small series
     prev_close = close.shift(1)
-    tr1 = pd.Series(close.index, index=close.index) * 0  # dummy
     high = pd.Series(close).combine(prev_close, max)
     low = pd.Series(close).combine(prev_close, min)
     tr = high - low

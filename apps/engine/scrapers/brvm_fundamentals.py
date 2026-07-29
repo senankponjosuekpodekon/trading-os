@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
-from scrapers.brvm_scraper import BRVM_SYMBOLS, HEADERS
+from scrapers.brvm_scraper import HEADERS
 
 BRVM_REPORTS_INDEX = "https://www.brvm.org/fr/rapports-societes-cotees"
 BRVM_COMPANY_BASE  = "https://www.brvm.org/fr/rapports-societe-cotes"

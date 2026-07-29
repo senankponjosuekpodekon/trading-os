@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 
 from geometry.core import (
-    Pivot, Swing, PriceZone,
+    Pivot, PriceZone,
     alternating_pivots, filter_significant, build_swings,
     leg_ratio, zone_overlap, score_fib_errors,
 )

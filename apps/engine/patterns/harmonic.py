@@ -5,7 +5,6 @@ Supports ABCD, Gartley, Bat, Butterfly, Crab (Shark & 5-0 placeholders).
 from __future__ import annotations
 
 import pandas as pd
-import numpy as np
 
 from indicators.swing import find_pivot_highs, find_pivot_lows
 from patterns.pattern import MarketPattern

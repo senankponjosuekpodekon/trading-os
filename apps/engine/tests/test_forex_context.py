@@ -3,11 +3,9 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import asyncio
 from datetime import datetime, timezone, timedelta
 
 from scrapers.forex_calendar_scraper import (
-    get_macro_context,
     _parse_iso,
     invalidate_cache,
 )

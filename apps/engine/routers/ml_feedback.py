@@ -1,6 +1,5 @@
-import os
 from typing import Dict, List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 router = APIRouter()

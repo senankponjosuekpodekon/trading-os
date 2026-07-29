@@ -2,7 +2,7 @@
 Forex macro context — DXY momentum + economic calendar macro risk.
 Used by scan.py for FOREX assets only.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 import httpx
 import pandas as pd

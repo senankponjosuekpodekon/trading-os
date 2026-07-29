@@ -3,7 +3,6 @@ Tokenomics pre-signal analysis.
 Detects dangerous unlock schedules and concentration risk.
 External APIs are optional; when missing/unreachable we fallback to a mock table.
 """
-import os
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List

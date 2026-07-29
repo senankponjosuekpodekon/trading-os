@@ -12,7 +12,6 @@ Niveaux:
 
 Toutes les features sont calculées sans look-ahead (données disponibles à T).
 """
-from typing import Optional
 from datetime import datetime, timezone
 import numpy as np
 import pandas as pd

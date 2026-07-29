@@ -9,7 +9,7 @@ import pandas as pd
 import pandas_ta as ta
 from concurrent.futures import ThreadPoolExecutor
 
-from routers.price_action import detect_market_structure, price_action_bonus, bos_quality_score
+from routers.price_action import detect_market_structure, price_action_bonus
 from routers.synthetic_engine import analyze_synthetic, SYMBOL_TO_DERIV as SYNTHETIC_SYMBOLS
 from routers.boom_crash_model import analyze_boom_crash
 from routers.sr_zones import get_sr_zones, sr_bonus
@@ -22,7 +22,7 @@ from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
 from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
-from routers.forex_context import get_forex_context, should_suspend_forex
+from routers.forex_context import should_suspend_forex
 from routers.portfolio_risk import analyze_portfolio_risk, get_cluster
 from routers.strategy_eval import parse_rules, evaluate_strategy, derive_profile_suitability
 from routers.onchain import is_crypto_symbol, onchain_context, onchain_bonus

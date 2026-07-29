@@ -7,7 +7,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 import pandas as pd
-import numpy as np
 
 from indicators.swing import find_pivot_highs, find_pivot_lows
 

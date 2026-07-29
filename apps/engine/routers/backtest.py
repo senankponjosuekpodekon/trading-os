@@ -158,6 +158,11 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
     take_profit = 0.0
     trade_conf  = 0.0
     trade_reasons: list[str] = []
+    result: dict = {}
+    trade_pattern_name = None
+    trade_pattern_direction = None
+    trade_pattern_confluence_score = None
+    trade_pattern_confluence_tags: list = []
 
     for i in range(warm_up, len(df)):
         bar_close = float(df["close"].iloc[i])

@@ -9,7 +9,6 @@ import asyncio
 from datetime import datetime
 
 from scrapers.brvm_scraper import (
-    BRVM_SYMBOLS,
     TOP_SYMBOLS,
     fetch_brvm_quotes,
     _mock_brvm_quotes,

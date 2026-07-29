@@ -7,7 +7,7 @@ Heuristic predictors consumed by the Feature Factory and signal scoring.
 
 All calculations are look-ahead free (only data up to the latest closed bar).
 """
-from typing import Optional, Literal
+from typing import Optional
 import numpy as np
 import pandas as pd
 

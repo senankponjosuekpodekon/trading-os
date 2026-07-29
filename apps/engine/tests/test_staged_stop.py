@@ -3,7 +3,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import pytest
 from routers.risk import compute_staged_stop
 
 

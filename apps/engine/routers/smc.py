@@ -131,7 +131,7 @@ def detect_order_blocks(
         vol_ratio = float(vol.iloc[i]) / avg_volume if avg_volume else 1.0
 
         # Status : fresh = zone jamais testée, tested_once = prix dedans, mitigated = traversée
-        def _status(ob_type: str) -> str:
+        def _status(ob_type: str, l: float = l, h: float = h) -> str:
             if ob_type == "BULLISH":
                 if current_low < l:
                     return "mitigated"
