@@ -23,6 +23,7 @@ describe('SignalsService', () => {
     },
     strategy: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     signal: {
       create: jest.fn(),
@@ -248,6 +249,61 @@ describe('SignalsService', () => {
       const status = await service.getPredictorStatus();
       expect(mockPredictorImpl.getStatus).toHaveBeenCalled();
       expect(status.trained).toBe(true);
+    });
+  });
+
+  describe('scheduled scans (cron)', () => {
+    it('scheduledMorningScan scans every active asset on 1h with the active strategies', async () => {
+      mockPrisma.asset.findMany.mockResolvedValue([{ symbol: 'BTC/USDT' }, { symbol: 'ETH/USDT' }]);
+      const strategies = [{ id: 's1', name: 'EMA Trend', rules: {}, analysisTimeframe: '1h', entryTimeframe: '1h' }];
+      mockPrisma.strategy.findMany.mockResolvedValue(strategies);
+      const triggerScanSpy = jest.spyOn(service, 'triggerScan').mockResolvedValue({ saved: [] } as any);
+
+      await service.scheduledMorningScan();
+
+      expect(mockPrisma.asset.findMany).toHaveBeenCalledWith({
+        where: { isActive: true },
+        select: { symbol: true },
+      });
+      expect(mockPrisma.strategy.findMany).toHaveBeenCalledWith({
+        where: { isActive: true },
+        select: { id: true, name: true, rules: true, analysisTimeframe: true, entryTimeframe: true },
+      });
+      expect(triggerScanSpy).toHaveBeenCalledWith(['BTC/USDT', 'ETH/USDT'], '1h', { strategies });
+    });
+
+    it('scheduledDayScan scans every active asset on 1h', async () => {
+      mockPrisma.asset.findMany.mockResolvedValue([{ symbol: 'BTC/USDT' }]);
+      mockPrisma.strategy.findMany.mockResolvedValue([]);
+      const triggerScanSpy = jest.spyOn(service, 'triggerScan').mockResolvedValue({ saved: [] } as any);
+
+      await service.scheduledDayScan();
+
+      expect(triggerScanSpy).toHaveBeenCalledWith(['BTC/USDT'], '1h', { strategies: [] });
+    });
+
+    it('skips the scan entirely when there are no active assets', async () => {
+      mockPrisma.asset.findMany.mockResolvedValue([]);
+      mockPrisma.strategy.findMany.mockResolvedValue([]);
+      const triggerScanSpy = jest.spyOn(service, 'triggerScan');
+
+      await service.scheduledMorningScan();
+
+      expect(triggerScanSpy).not.toHaveBeenCalled();
+    });
+
+    it('scheduledPredictorTraining trains the CRYPTO/1h predictor', async () => {
+      const trainSpy = jest.spyOn(service, 'trainPredictor').mockResolvedValue({ trained: true } as any);
+
+      await service.scheduledPredictorTraining();
+
+      expect(trainSpy).toHaveBeenCalledWith({ market: 'CRYPTO', timeframe: '1h' });
+    });
+
+    it('scheduledPredictorTraining swallows training errors without throwing', async () => {
+      jest.spyOn(service, 'trainPredictor').mockRejectedValue(new Error('training failed'));
+
+      await expect(service.scheduledPredictorTraining()).resolves.toBeUndefined();
     });
   });
 });
