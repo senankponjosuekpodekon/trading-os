@@ -545,7 +545,6 @@ export class SignalsService {
       // Confidence finale après sentiment
       const newConf = raw.confidence;
       const prevConf = signal.confidence;
-      const delta = Math.abs(newConf - prevConf);
 
       // Si le sentiment invalide le signal (confidence tombe sous 50)
       if (newConf < 50) {
