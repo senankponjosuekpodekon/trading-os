@@ -47,3 +47,7 @@ backup_*.sql
 
 # Docker
 *.env.docker
+
+coverage/
+apps/api/coverage/
+apps/web/coverage/
