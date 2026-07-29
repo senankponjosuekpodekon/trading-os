@@ -122,8 +122,8 @@ async def expected_move(
 ):
     try:
         horizon_values = sorted({int(h.strip()) for h in horizons.split(',') if h.strip()})
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid horizons format")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid horizons format") from exc
     if not horizon_values:
         horizon_values = DEFAULT_HORIZONS
 
