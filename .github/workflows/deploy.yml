@@ -2,76 +2,17 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
-
-env:
-  REGISTRY: ghcr.io
-  REPO: ${{ github.repository }}
+    branches: [vps]
 
 jobs:
-  build-and-push:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push API
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/api
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.REPO }}/api:${{ github.sha }},${{ env.REGISTRY }}/${{ env.REPO }}/api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build & push Web
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/web
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.REPO }}/web:${{ github.sha }},${{ env.REGISTRY }}/${{ env.REPO }}/web:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build & push Engine
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/engine
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.REPO }}/engine:${{ github.sha }},${{ env.REGISTRY }}/${{ env.REPO }}/engine:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    environment: staging
-    steps:
-      - uses: actions/checkout@v4
-      - name: Deploy to staging
-        run: |
-          echo "Deploy ${{ github.sha }} to staging server"
-          # ssh staging "docker compose pull && docker compose up -d"
-
-  deploy-production:
-    runs-on: ubuntu-latest
-    needs: deploy-staging
-    if: github.ref == 'refs/heads/main'
     environment: production
     steps:
-      - uses: actions/checkout@v4
-      - name: Deploy to production VPS
+      - name: Deploy to VPS
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
-            "cd /opt/trading-os && git pull origin main && ./scripts/deploy.sh ${{ github.sha }}"
+          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
+            "cd /root/projects/trading-os && ./scripts/deploy.sh"

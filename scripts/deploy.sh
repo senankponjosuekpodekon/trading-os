@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TAG="${1:-latest}"
 cd "$(dirname "$0")/.."
 
 echo "==> Pulling latest changes"
-git pull origin main
+git pull origin vps
 
 echo "==> Updating environment"
 if [ ! -f .env ]; then
@@ -13,20 +12,16 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-export TAG
+echo "==> Building images"
+docker compose -f docker-compose.prod.yml build
 
-echo "==> Deploying services (tag: $TAG)"
-docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml pull
+echo "==> Deploying services"
 docker compose -f docker-compose.prod.yml up -d
 
 echo "==> Running database migrations"
 docker compose -f docker-compose.prod.yml exec -T api npx prisma migrate deploy --schema=./prisma/schema.prisma
 
-echo "==> Restarting dependent services if migrations changed schema"
-docker compose -f docker-compose.prod.yml restart api web engine
-
 echo "==> Cleanup"
-docker system prune -f
+docker image prune -f
 
 echo "==> Deployment complete"
