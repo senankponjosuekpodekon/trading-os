@@ -38,13 +38,13 @@ jobs:
       - run: npm run lint --workspace=apps/api
       - run: npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma
         env:
-          DATABASE_URL: postgresql://trading_user:trading_pass@localhost:5433/trading_os
+          DATABASE_URL: postgresql://trading_user:trading_pass@localhost:5433/app
       - run: npx tsc --noEmit
         working-directory: apps/api
       - run: npx jest --coverage
         working-directory: apps/api
         env:
-          DATABASE_URL: postgresql://trading_user:trading_pass@localhost:5433/trading_os
+          DATABASE_URL: postgresql://trading_user:trading_pass@localhost:5433/app
           REDIS_URL: redis://localhost:6380
 
   web:
