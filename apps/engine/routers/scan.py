@@ -388,7 +388,9 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
                 "high":   float(c["high"]),
                 "low":    float(c["low"]),
                 "close":  float(c["close"]),
-                "volume": 0.0,
+                # Deriv API doesn't provide volume — use candle range as proxy
+                # (captures intrabar volatility, which is what volume_spike measures)
+                "volume": float(c["high"]) - float(c["low"]),
             }
             for c in candles_raw
         ])
@@ -1188,6 +1190,7 @@ def analyze_candles(
             smc=smc,
             regime=regime,
             timeframe=timeframe,
+            market={"COMMODITY": "COMMODITIES", "BRVM": "STOCKS"}.get(asset_type, asset_type),
             onchain=onchain,
             entry_context=entry_context,
         )
@@ -1219,6 +1222,8 @@ def analyze_candles(
                 reasons.append(f"[FILTERED] {filter_reason}")
 
     # ── Synthetic caution filter: reduce confidence on spike risk ──
+    # Applied after evaluate_strategy but BEFORE returning — recalculate DPS
+    # so it's consistent with the reduced confidence.
     if asset_type == "SYNTHETIC" and synthetic_stats and signal != "NEUTRAL":
         _caution = synthetic_stats.get("caution", False)
         _spike_prob = synthetic_stats.get("spike_probability", 0)
@@ -1229,6 +1234,24 @@ def analyze_candles(
                 signal = "NEUTRAL"
                 confidence = 0
                 reasons.append("Synthetic spike risk too high — signal neutralised")
+            elif strategy and dps is not None:
+                # Recalculate DPS on reduced confidence for consistency
+                from utils.predictive import compute_predictive_metrics
+                _pred = compute_predictive_metrics(
+                    signal, confidence, entry, tp1, sl, rr,
+                    indicators={"close": c_val, "volume_ratio": vol_r, "bb_bw": bb_bw_v, "macd_hist": macd_hist_v},
+                    pa=pa, regime=regime, smc=smc, mtf_aligned=None, trigger=trigger,
+                )
+                dps = _pred["dps"]
+                tps = _pred["tps"]
+                success_probability = _pred["success_probability"]
+                expected_move = _pred["expected_move"]
+                # Re-check min_dps on recalculated value
+                _min_dps = float(_rules_raw.get("min_dps", 60))
+                if dps < _min_dps:
+                    reasons.append(f"DPS {dps}% < seuil {_min_dps}% après caution filter — filtré")
+                    signal = "NEUTRAL"
+                    confidence = 0
 
     if not profile_suitability:
         profile_suitability = derive_profile_suitability(
