@@ -99,12 +99,25 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 23. Multi-agents spécialisés extraits depuis `scan.py`
 24. Execution automatique paper → réel
 25. Continuous learning pipeline
+26. **Bot Agent — Trading automatique multi-marchés** :
+    - Agent qui prend des positions automatiquement (paper puis réel) sur les signaux
+    - Un bot par marché : Crypto, Forex, Indices, Commodities, Synthetic, BRVM
+    - Chaque bot applique les stratégies assignées à son marché (`rules.markets`)
+    - Gestion du risque par bot : max positions, max drawdown, sizing Kelly/fixed
+    - Mode paper → validation → switch réel (validation humaine SUPER_ADMIN)
+    - Journal d'exécution : chaque trade loggé avec raison, stratégie, outcome
+    - Dashboard ops `/admin/bots` : statut, PnL, positions ouvertes, pause/resume — `SUPER_ADMIN` only
+    - Notifications `SYSTEM` au `SUPER_ADMIN` si un bot est en perte excessive ou désactivé
+27. **Stratégie BRVM dédiée** : momentum + volume sur actions africaines (données quotidiennes)
+    - Pas de scalping (pas de données intraday), analyse daily + 4h
+    - Filtre liquidité (volume minimum)
+    - Marché : `['BRVM']` uniquement
 
 ### Phase 5 — Scale SaaS
-26. Plans & abonnements Stripe
-27. Audit trail
-28. 2FA TOTP obligatoire pour trades réels
-29. Data pipeline scalable (Redis Streams / Celery → Kafka si besoin)
+28. Plans & abonnements Stripe
+29. Audit trail
+30. 2FA TOTP obligatoire pour trades réels
+31. Data pipeline scalable (Redis Streams / Celery → Kafka si besoin)
 
 ---
 

@@ -108,24 +108,218 @@ async function main() {
     timeframes: ['1h', '4h'],
     trigger: 'BREAKOUT',
     profiles: ['SWING', 'DAY'],
+    markets: ['CRYPTO', 'FOREX', 'INDICES'],
   };
 
   const strategy = await prisma.strategy.upsert({
     where: { name: 'EMA Trend + RSI' },
-    update: { rules: emaTrendRsiRules, analysisTimeframe: '4h', entryTimeframe: '1h' },
+    update: { rules: emaTrendRsiRules, analysisTimeframe: '4h', entryTimeframe: '1h', isActive: true },
     create: {
       name: 'EMA Trend + RSI',
       description: 'Tendance EMA 20/50/200 avec confirmation RSI. Analyse sur 4h, entrée sur 1h.',
       rules: emaTrendRsiRules,
       analysisTimeframe: '4h',
       entryTimeframe: '1h',
+      isActive: true,
+    },
+  });
+
+  // ── Stratégie 2 : MACD Momentum ──────────────────────────────
+  const macdMomentumRules = {
+    ema_fast: 12,
+    ema_slow: 26,
+    ema_trend: 200,
+    rsi_period: 14,
+    rsi_oversold: 35,
+    rsi_overbought: 65,
+    rsi_bullish_zone: 50,
+    rsi_bearish_zone: 50,
+    min_confidence: 60,
+    min_dps: 55,
+    volume_spike_min: 1.5,
+    use_price_action: true,
+    use_sr_zones: false,
+    use_patterns: false,
+    atr_min_pct: 0.3,
+    timeframes: ['15m', '1h'],
+    trigger: 'MOMENTUM_CONFIRMATION',
+    profiles: ['DAY', 'SCALPER'],
+    markets: ['CRYPTO', 'FOREX'],
+    entry_rules: { ema_fast_above_slow: true },
+    filters: { regime: ['TRENDING_BULL', 'TRENDING_BEAR'] },
+  };
+
+  const macdMomentum = await prisma.strategy.upsert({
+    where: { name: 'MACD Momentum' },
+    update: { rules: macdMomentumRules, analysisTimeframe: '1h', entryTimeframe: '15m', isActive: true },
+    create: {
+      name: 'MACD Momentum',
+      description: 'Entrée sur momentum MACD confirmé par volume. EMA 12/26 pour direction, analyse 1h, entrée 15m.',
+      rules: macdMomentumRules,
+      analysisTimeframe: '1h',
+      entryTimeframe: '15m',
+      isActive: true,
+    },
+  });
+
+  // ── Stratégie 3 : Bollinger Squeeze Breakout ────────────────
+  const bbSqueezeRules = {
+    ema_fast: 20,
+    ema_slow: 50,
+    ema_trend: 200,
+    rsi_period: 14,
+    rsi_oversold: 25,
+    rsi_overbought: 75,
+    rsi_bullish_zone: 50,
+    rsi_bearish_zone: 50,
+    min_confidence: 55,
+    min_dps: 50,
+    volume_spike_min: 1.8,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_patterns: false,
+    atr_min_pct: 0.4,
+    timeframes: ['1h', '4h'],
+    trigger: 'VOLATILITY_EXPANSION',
+    profiles: ['SWING', 'DAY'],
+    markets: ['CRYPTO', 'INDICES', 'COMMODITIES'],
+    filters: { regime: ['VOLATILE', 'TRENDING_BULL', 'TRENDING_BEAR'] },
+  };
+
+  const bbSqueeze = await prisma.strategy.upsert({
+    where: { name: 'Bollinger Squeeze Breakout' },
+    update: { rules: bbSqueezeRules, analysisTimeframe: '4h', entryTimeframe: '1h', isActive: true },
+    create: {
+      name: 'Bollinger Squeeze Breakout',
+      description: 'Breakout de compression Bollinger Bands avec expansion de volatilité. Analyse 4h, entrée 1h.',
+      rules: bbSqueezeRules,
+      analysisTimeframe: '4h',
+      entryTimeframe: '1h',
+      isActive: true,
+    },
+  });
+
+  // ── Stratégie 4 : SMC Retest OB/FVG ─────────────────────────
+  const smcRetestRules = {
+    ema_fast: 20,
+    ema_slow: 50,
+    ema_trend: 200,
+    rsi_period: 14,
+    rsi_oversold: 30,
+    rsi_overbought: 70,
+    rsi_bullish_zone: 45,
+    rsi_bearish_zone: 55,
+    min_confidence: 60,
+    min_dps: 60,
+    volume_spike_min: 1.2,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_patterns: true,
+    atr_min_pct: 0.25,
+    timeframes: ['1h', '4h'],
+    trigger: 'RETEST',
+    profiles: ['SWING', 'INVESTOR'],
+    markets: ['CRYPTO', 'FOREX', 'INDICES'],
+    entry_rules: { fvg_proximity_pct: 1.5, bos: true },
+    filters: { regime: ['TRENDING_BULL', 'TRENDING_BEAR'] },
+    exit_rules: { sl_atr: 1.2, tp1_atr: 2.5, tp2_atr: 4.0 },
+  };
+
+  const smcRetest = await prisma.strategy.upsert({
+    where: { name: 'SMC Retest OB/FVG' },
+    update: { rules: smcRetestRules, analysisTimeframe: '4h', entryTimeframe: '1h', isActive: true },
+    create: {
+      name: 'SMC Retest OB/FVG',
+      description: 'Smart Money Concepts : retest Order Block / FVG après BOS. Analyse 4h, entrée 1h sur retest.',
+      rules: smcRetestRules,
+      analysisTimeframe: '4h',
+      entryTimeframe: '1h',
+      isActive: true,
+    },
+  });
+
+  // ── Stratégie 5 : Scalper RSI Reversal ──────────────────────
+  const scalperRsiRules = {
+    ema_fast: 9,
+    ema_slow: 21,
+    ema_trend: 50,
+    rsi_period: 7,
+    rsi_oversold: 20,
+    rsi_overbought: 80,
+    rsi_bullish_zone: 50,
+    rsi_bearish_zone: 50,
+    min_confidence: 65,
+    min_dps: 65,
+    volume_spike_min: 2.0,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_patterns: false,
+    atr_min_pct: 0.15,
+    timeframes: ['5m', '15m'],
+    trigger: 'MOMENTUM_CONFIRMATION',
+    profiles: ['SCALPER'],
+    markets: ['FOREX', 'SYNTHETIC'],
+    entry_rules: { ema_fast_above_slow: true },
+    filters: { regime: ['RANGING'] },
+    exit_rules: { sl_atr: 1.0, tp1_atr: 1.0, tp2_atr: 1.5 },
+  };
+
+  const scalperRsi = await prisma.strategy.upsert({
+    where: { name: 'Scalper RSI Reversal' },
+    update: { rules: scalperRsiRules, analysisTimeframe: '15m', entryTimeframe: '5m', isActive: true },
+    create: {
+      name: 'Scalper RSI Reversal',
+      description: 'Scalping RSI 7 extrêmes (20/80) avec momentum volume. Analyse 15m, entrée 5m. Régime ranging.',
+      rules: scalperRsiRules,
+      analysisTimeframe: '15m',
+      entryTimeframe: '5m',
+      isActive: true,
+    },
+  });
+
+  // ── Stratégie 6 : Swing Trend Follow ────────────────────────
+  const swingTrendRules = {
+    ema_fast: 50,
+    ema_slow: 100,
+    ema_trend: 200,
+    rsi_period: 14,
+    rsi_oversold: 40,
+    rsi_overbought: 60,
+    rsi_bullish_zone: 50,
+    rsi_bearish_zone: 50,
+    min_confidence: 55,
+    min_dps: 55,
+    volume_spike_min: 1.0,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_patterns: true,
+    atr_min_pct: 0.3,
+    timeframes: ['4h', '1d'],
+    trigger: 'BREAKOUT',
+    profiles: ['INVESTOR', 'SWING'],
+    markets: ['CRYPTO', 'FOREX', 'INDICES', 'COMMODITIES'],
+    entry_rules: { adx_min: 25 },
+    filters: { regime: ['TRENDING_BULL', 'TRENDING_BEAR'] },
+    exit_rules: { sl_atr: 2.0, tp1_atr: 3.0, tp2_atr: 6.0 },
+  };
+
+  const swingTrend = await prisma.strategy.upsert({
+    where: { name: 'Swing Trend Follow' },
+    update: { rules: swingTrendRules, analysisTimeframe: '1d', entryTimeframe: '4h', isActive: true },
+    create: {
+      name: 'Swing Trend Follow',
+      description: 'Suivi de tendance EMA 50/100/200 sur daily, entrée 4h. Filtre ADX > 25. Pour swing/investor.',
+      rules: swingTrendRules,
+      analysisTimeframe: '1d',
+      entryTimeframe: '4h',
+      isActive: true,
     },
   });
 
   console.log('✅ Seed completed');
   console.log(`   Markets: ${markets.length}`);
   console.log(`   Assets:  ${assets.length}`);
-  console.log(`   Strategy: ${strategy.name}`);
+  console.log(`   Strategies: 6 (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend)`);
   console.log(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
 }
 
