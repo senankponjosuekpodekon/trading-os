@@ -182,7 +182,7 @@ async function main() {
     timeframes: ['1h', '4h'],
     trigger: 'VOLATILITY_EXPANSION',
     profiles: ['SWING', 'DAY'],
-    markets: ['CRYPTO', 'INDICES', 'COMMODITIES'],
+    markets: ['CRYPTO', 'INDICES', 'COMMODITIES', 'SYNTHETIC'],
     entry_rules: { bb_bw_min: 0.02 },
     filters: { regime: ['VOLATILE', 'TRENDING_BULL', 'TRENDING_BEAR'] },
   };
@@ -220,7 +220,7 @@ async function main() {
     timeframes: ['1h', '4h'],
     trigger: 'RETEST',
     profiles: ['SWING', 'INVESTOR'],
-    markets: ['CRYPTO', 'FOREX', 'INDICES'],
+    markets: ['CRYPTO', 'FOREX', 'INDICES', 'SYNTHETIC'],
     entry_rules: { fvg_proximity_pct: 1.5, bos: true },
     filters: { regime: ['TRENDING_BULL', 'TRENDING_BEAR'] },
     exit_rules: { sl_atr: 1.2, tp1_atr: 2.5, tp2_atr: 4.0 },
@@ -297,7 +297,7 @@ async function main() {
     timeframes: ['4h', '1d'],
     trigger: 'BREAKOUT',
     profiles: ['INVESTOR', 'SWING'],
-    markets: ['CRYPTO', 'FOREX', 'INDICES', 'COMMODITIES'],
+    markets: ['CRYPTO', 'FOREX', 'INDICES', 'COMMODITIES', 'SYNTHETIC'],
     entry_rules: { adx_min: 25 },
     filters: { regime: ['TRENDING_BULL', 'TRENDING_BEAR'] },
     exit_rules: { sl_atr: 2.0, tp1_atr: 3.0, tp2_atr: 6.0 },
@@ -355,16 +355,29 @@ async function main() {
   });
 
   // ── Stratégie 8 : Synthetic Mean Reversion ─────────────────
+  // Utilise le pipeline standard (EMA/RSI/MACD/BB/PA/patterns/SMC) + stats Synthetic en bonus
   const syntheticMeanRevRules = {
+    ema_fast: 20,
+    ema_slow: 50,
+    ema_trend: 200,
+    rsi_period: 14,
+    rsi_oversold: 25,
+    rsi_overbought: 75,
+    rsi_bullish_zone: 50,
+    rsi_bearish_zone: 50,
     min_confidence: 55,
     min_dps: 50,
-    sl_atr_mult: 1.5,
-    tp1_atr_mult: 1.5,
-    tp2_atr_mult: 2.5,
-    timeframes: ['5m', '15m'],
-    profiles: ['SCALPER', 'DAY'],
+    volume_spike_min: 1.5,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_patterns: true,
+    atr_min_pct: 0.2,
+    timeframes: ['5m', '15m', '1h'],
+    trigger: 'MOMENTUM_CONFIRMATION',
+    profiles: ['SCALPER', 'DAY', 'SWING'],
     markets: ['SYNTHETIC'],
-    filters: { regime: ['NEUTRAL', 'COMPRESSION'] },
+    filters: { regime: ['RANGING', 'TRENDING_BULL', 'TRENDING_BEAR'] },
+    exit_rules: { sl_atr: 1.5, tp1_atr: 1.5, tp2_atr: 2.5 },
   };
 
   const syntheticMeanRev = await prisma.strategy.upsert({
@@ -372,7 +385,7 @@ async function main() {
     update: { rules: syntheticMeanRevRules, analysisTimeframe: '15m', entryTimeframe: '5m', isActive: true },
     create: {
       name: 'Synthetic Mean Reversion',
-      description: 'Mean reversion statistique sur indices Synthetic (V75, Jump). Utilise spike_prob et Monte Carlo. Analyse 15m, entrée 5m.',
+      description: 'Mean reversion sur indices Synthetic (V75, Jump, Boom/Crash). Pipeline standard EMA/RSI/MACD/BB + stats Synthetic (spike_prob, Monte Carlo). Analyse 15m, entrée 5m.',
       rules: syntheticMeanRevRules,
       analysisTimeframe: '15m',
       entryTimeframe: '5m',

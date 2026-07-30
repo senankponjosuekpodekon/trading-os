@@ -715,8 +715,21 @@ def analyze_candles(
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data"}
 
     asset_type = get_asset_type(symbol)
+
+    # Synthetic assets: compute statistical bonus alongside standard indicators
+    synthetic_stats = None
     if asset_type == "SYNTHETIC":
-        return _analyze_synthetic_candles(symbol, timeframe, df, strategy=strategy)
+        deriv_sym = SYNTHETIC_SYMBOLS.get(symbol)
+        _syn_category = "volatility"
+        if deriv_sym:
+            from routers.synthetic_engine import DERIV_SYMBOLS as _DERIV_CATS
+            _syn_category = _DERIV_CATS.get(deriv_sym, "volatility")
+        _syn_close = df["close"].astype(float)
+        if _syn_category == "boom_crash":
+            _syn_dir = "boom" if "BOOM" in symbol.upper() else "crash"
+            synthetic_stats = analyze_boom_crash(_syn_close, direction=_syn_dir)
+        else:
+            synthetic_stats = analyze_synthetic(_syn_close, category=_syn_category)
 
     close    = df["close"]
     high     = df["high"]
@@ -1198,6 +1211,18 @@ def analyze_candles(
                 confidence = 0
                 reasons.append(f"[FILTERED] {filter_reason}")
 
+    # ── Synthetic caution filter: reduce confidence on spike risk ──
+    if asset_type == "SYNTHETIC" and synthetic_stats and signal != "NEUTRAL":
+        _caution = synthetic_stats.get("caution", False)
+        _spike_prob = synthetic_stats.get("spike_probability", 0)
+        if _caution or _spike_prob > 70:
+            confidence = int(confidence * 0.7)
+            reasons.append(f"Synthetic caution: spike_prob={_spike_prob:.1f}% — confidence reduced 30%")
+            if confidence < 40:
+                signal = "NEUTRAL"
+                confidence = 0
+                reasons.append("Synthetic spike risk too high — signal neutralised")
+
     if not profile_suitability:
         profile_suitability = derive_profile_suitability(
             timeframe,
@@ -1347,6 +1372,7 @@ def analyze_candles(
                 "near_eql":   smc["liquidity"].get("near_eql"),
             },
         },
+        "synthetic_stats": synthetic_stats if asset_type == "SYNTHETIC" else {},
         "forex_context": forex_context if asset_type == "FOREX" else {},
         "onchain_context": (
             {**(onchain or {}), "flags": advanced_flags}
