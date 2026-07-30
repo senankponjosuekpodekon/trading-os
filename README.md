@@ -177,9 +177,10 @@ DB Name:     trading_os
 DB User:     trading_user
 DB Password: trading_pass
 
-Compte test:
-  Email:    test@trading.os
-  Password: password123
+Compte super admin:
+  Email:    admin@example.com
+  Password: admin123
+  Role:     SUPER_ADMIN
 ```
 
 Prisma Studio (interface DB visuelle) :
@@ -194,8 +195,16 @@ cd apps/api && npx prisma studio
 
 ### Auth
 ```
-POST /api/auth/register        { email, password, name }
-POST /api/auth/login           { email, password }
+POST /api/auth/register        { email, password, name, role? }
+POST /api/auth/login           { email, password, totpToken? }
+POST /api/auth/refresh         { refreshToken }
+POST /api/auth/logout          { refreshToken }
+```
+
+### System
+```
+GET  /api/health               → healthcheck simple
+GET  /api/system/health         → health détaillé (engine, DB, assets, signals)
 ```
 
 ### Portfolios & Positions
@@ -286,6 +295,97 @@ cd apps/web   && npx tsc --noEmit
 ### Sécurité implémentée
 - **NestJS** : Helmet, ThrottlerModule (10 req/s global, 5 req/min auth), CORS strict via `ALLOWED_ORIGINS`
 - **FastAPI** : slowapi (200 req/min + 1000 req/h), CORS restreint
+- **RLS PostgreSQL** : isolation par utilisateur via `app_runtime` role + session var `app.current_user_id`
+- **Sentry** : SDK branché (`SENTRY_DSN_API` / `SENTRY_DSN_ENGINE`), capture exceptions non gérées
+
+---
+
+## Rôles utilisateurs
+
+| Rôle | Description | Permissions |
+|------|-------------|-------------|
+| **TRADER** | Utilisateur standard | Signaux, portfolio paper, journal, backtest |
+| **INVESTOR** | Investisseur | Idem TRADER + métriques avancées |
+| **ADMIN** | Administrateur | Gestion plans/billing, stratégies globales |
+| **SUPER_ADMIN** | Super administrateur | Toutes permissions + alertes système infrastructure |
+
+Le **SUPER_ADMIN** reçoit automatiquement des notifications `SYSTEM` quand :
+- L'engine Python est injoignable
+- La base de données ne répond pas
+- Aucun asset/stratégie actif en DB (seed manquant)
+- Aucun signal généré dans les 6 dernières heures
+
+---
+
+## Monitoring & Ops
+
+### Health endpoints
+
+| Endpoint | Service | Description |
+|----------|---------|-------------|
+| `GET /api/health` | API | Healthcheck simple (status, version) |
+| `GET /api/system/health` | API | Health détaillé (engine, DB, assets, signals) |
+| `GET /health` | Engine | Healthcheck engine Python |
+
+### SystemHealthService
+
+Service NestJS qui tourne en cron toutes les 15 minutes et vérifie :
+1. **Engine** — ping `GET /health` sur le moteur Python
+2. **Database** — `SELECT 1` via Prisma
+3. **Seed** — compte des assets et stratégies actifs
+4. **Signals** — compte des signaux des 6 dernières heures
+
+En cas d'anomalie, une notification `SYSTEM` est pushée à tous les `SUPER_ADMIN` (cooldown 30 min pour éviter le spam).
+
+### Docker production
+
+Le `entrypoint.sh` de l'API exécute automatiquement au démarrage :
+1. `npx prisma migrate deploy` — applique les migrations
+2. Seed — crée markets, assets, stratégies, super admin (idempotent)
+3. `node dist/main` — démarre le serveur NestJS
+
+L'engine démarre sans `--reload` (mode production).
+
+---
+
+## Déploiement production (VPS)
+
+### Prérequis VPS
+- Docker + Docker Compose
+- PostgreSQL 17 (conteneur dédié ou service host)
+- Redis 7+
+
+### Étapes
+
+```bash
+# 1. Cloner le repo
+git clone <repo> && cd trading-os
+
+# 2. Configurer l'environnement
+cp .env.example .env
+# Éditer .env avec les valeurs de production :
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+#   APP_RUNTIME_USER, APP_RUNTIME_PASSWORD
+#   JWT_SECRET (générer: openssl rand -hex 32)
+#   SENTRY_DSN_API, SENTRY_DSN_ENGINE (optionnel)
+
+# 3. Build et démarrer
+docker compose up -d --build
+
+# 4. Vérifier
+curl http://localhost:3002/api/health        # API
+curl http://localhost:3002/api/system/health  # Health détaillé
+curl http://localhost:8000/health             # Engine
+```
+
+Le seed (markets, assets, stratégies, super admin) s'exécute automatiquement au premier démarrage.
+
+### Compte super admin par défaut
+```
+Email:    admin@example.com
+Password: admin123
+```
+**⚠️ Changer le mot de passe après le premier déploiement.**
 
 ---
 

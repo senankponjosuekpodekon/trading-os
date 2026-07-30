@@ -28,11 +28,14 @@ services:
       - "3002:3001"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      APP_RUNTIME_DATABASE_URL: postgresql://${APP_RUNTIME_USER}:${APP_RUNTIME_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://host.docker.internal:6379
       ENGINE_URL: http://host.docker.internal:8000
       API_PORT: "3001"
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 15m
+      SENTRY_DSN_API: ${SENTRY_DSN_API:-}
+      NODE_ENV: production
     volumes:
       - ./apps/api:/app
       - /app/node_modules
@@ -42,6 +45,12 @@ services:
     depends_on:
       engine:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   web:
     build:

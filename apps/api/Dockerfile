@@ -30,6 +30,13 @@ RUN npm config set fetch-retries 5 \
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/prisma ./prisma
+COPY entrypoint.sh ./entrypoint.sh
 
-CMD ["node", "dist/main"]
+RUN chmod +x entrypoint.sh
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=30s \
+  CMD wget -qO- http://localhost:3001/api/health || exit 1
+
+ENTRYPOINT ["./entrypoint.sh"]

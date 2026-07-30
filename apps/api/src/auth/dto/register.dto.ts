@@ -1,8 +1,10 @@
-import { IsEmail, IsString, MinLength, MaxLength, IsOptional, IsEnum } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, IsOptional, IsIn } from 'class-validator';
 
 export enum UserRole {
   TRADER = 'TRADER',
   INVESTOR = 'INVESTOR',
+  ADMIN = 'ADMIN',
+  SUPER_ADMIN = 'SUPER_ADMIN',
 }
 
 export class RegisterDto {
@@ -21,6 +23,6 @@ export class RegisterDto {
   name: string;
 
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  @IsIn([UserRole.TRADER, UserRole.INVESTOR])
+  role?: UserRole.TRADER | UserRole.INVESTOR;
 }

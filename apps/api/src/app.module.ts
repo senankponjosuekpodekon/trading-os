@@ -33,6 +33,7 @@ import { EarlyAlphaModule } from './early-alpha/early-alpha.module';
 import { PhaseBModule } from './phase-b/phase-b.module';
 import { PhaseCModule } from './phase-c/phase-c.module';
 import { ExpectedMoveModule } from './expected-move/expected-move.module';
+import { SystemHealthModule } from './system-health/system-health.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { ExpectedMoveModule } from './expected-move/expected-move.module';
     PhaseBModule,
     PhaseCModule,
     ExpectedMoveModule,
+    SystemHealthModule,
     SecurityModule,
   ],
   controllers: [AppController],

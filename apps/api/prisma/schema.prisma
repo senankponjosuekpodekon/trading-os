@@ -41,6 +41,7 @@ enum UserRole {
   TRADER
   INVESTOR
   ADMIN
+  SUPER_ADMIN
 }
 
 enum SubscriptionStatus {

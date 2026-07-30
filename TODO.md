@@ -27,12 +27,51 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 1. **Tests critiques** : auth, positions, watcher NestJS ✅ compilent / passent ; couverture > 80% reste à atteindre
 2. **Index DB** ✅ : indexes signals, positions, refresh_tokens, notifications créés et migration appliquée
 3. **Migrations strictes** ✅ : `prisma migrate deploy` fonctionnel, migration `20260715231000_add_notifications_and_indexes`
-4. **Sécurité** (partiel) ✅ : Helmet.js + CORS whitelist + headers engine + chiffrement clés API + env audit
-   - CSRF / XSS / RLS PostgreSQL restent à faire
+4. **Sécurité** (partiel) ✅ : Helmet.js + CORS whitelist + headers engine + chiffrement clés API + env audit + RLS PostgreSQL
+   - CSRF / XSS restent à faire
 5. **Resilience** (partiel) ✅ : circuit breaker + sémaphores par source intégrés à `retry_async`, TTL Redis standardisés
    - PgBouncer reste infra à configurer côté hébergeur
-6. **Observabilité** (partiel) ✅ : structured error responses + codes erreur internes + requestId tracing
-   - Sentry/Glitchtip SDK reste à brancher (nécessite `SENTRY_DSN` + package `@sentry/nestjs` / `@sentry/python`)
+6. **Observabilité** (partiel) ✅ : structured error responses + codes erreur internes + requestId tracing + Sentry SDK
+   - Sentry/Glitchtip DSN à configurer en prod (`SENTRY_DSN_API` + `SENTRY_DSN_ENGINE`)
+7. **Rôles & Permissions** ✅ : `TRADER`, `INVESTOR`, `ADMIN`, `SUPER_ADMIN` dans Prisma + `RolesGuard` hiérarchique
+   - `SUPER_ADMIN` hérite de `ADMIN` > `INVESTOR` > `TRADER`
+   - `SUPER_ADMIN` reçoit les alertes système (health checks, cron failures, DB vide)
+   - Inscription restreinte à `TRADER` / `INVESTOR` (`@IsIn` — pas d'auto-promotion `ADMIN`/`SUPER_ADMIN`)
+   - **Manque frontend** : pas de rendu conditionnel par rôle (menu admin, page ops)
+   - **Manque frontend** : pas de page dashboard ops pour `SUPER_ADMIN` (health, users, logs)
+   - **Manque backend** : `@Roles(UserRole.SUPER_ADMIN)` sur plus de routes admin (users management, system config)
+   - **Manque engine** : aucune auth sur les routes Python (sécurité par réseau uniquement)
+8. **Monitoring système** ✅ : `SystemHealthService` (cron 15 min) vérifie engine, DB, assets/strategies, signaux récents
+   - Endpoint `GET /api/system/health` pour dashboard ops
+   - Alertes push aux `SUPER_ADMIN` via `NotificationsService`
+9. **Docker production** ✅ : API entrypoint lance `prisma migrate deploy` + seed automatiquement
+   - Engine sans `--reload` en prod
+   - Healthchecks sur API + Engine dans `docker-compose.yml`
+   - Variables `APP_RUNTIME_USER` / `APP_RUNTIME_PASSWORD` pour RLS
+
+### Phase 0+ — Infrastructure & Ops (rigueur, transparence)
+10. **Seed automatique au démarrage** ✅ : `entrypoint.sh` exécute migrate + seed dans le conteneur API
+11. **Health endpoint enrichi** ✅ : `GET /api/system/health` retourne statut détaillé (engine, DB, assets, signals)
+12. **Alerting super admin** ✅ : notifications `SYSTEM` pushées aux `SUPER_ADMIN` quand infrastructure défaillante
+13. **Logs structurés** (partiel) ✅ : API utilise NestJS Logger, Engine utilise structlog JSON
+    - Centralisation logs (Loki/Grafana) reste à configurer
+14. **Backup DB** 🔁 : script `pg_dump` cron quotidien vers Hetzner Storage Box
+    - Retention 7 jours, rotation automatique
+15. **Uptime monitoring** 🔁 : UptimeRobot ou équivalent sur `/api/health` + `/health` (engine)
+    - Alert email/SMS si downtime > 2 min
+16. **CI/CD pipeline** : GitHub Actions → build + test + push image Docker → deploy VPS
+    - Tests obligatoires avant merge sur `vps`
+17. **Frontend rôle-based** : rendu conditionnel par rôle dans Sidebar + pages admin
+    - Menu admin visible uniquement pour `ADMIN` / `SUPER_ADMIN`
+    - Page `/admin/users` — gestion des utilisateurs (list, suspend, change role) — `SUPER_ADMIN` only
+    - Page `/admin/ops` — dashboard ops (health checks, logs, crons status) — `SUPER_ADMIN` only
+    - Page `/admin/strategies` — gestion stratégies globales — `ADMIN`+
+18. **Engine auth** (optionnel) : ajouter API key / JWT verification sur les routes Python
+    - Actuellement sécurité par réseau (Docker internal) — suffisant en MVP
+    - Si exposition externe : ajouter `Depends(verify_api_key)` sur les routers
+19. **Tests couverture > 80%** : étendre couverture sur signals, positions, auth, system-health
+    - `SystemHealthService` : 8 tests ✅ | `RolesGuard` : 14 tests ✅
+    - Reste : signals.service (cron), positions.service, auth.service
 
 ### Phase 1 — Données & Engine (fondation ML)
 7. Feature Factory complète ✅ (fait)
