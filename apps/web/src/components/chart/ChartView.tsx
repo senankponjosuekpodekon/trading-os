@@ -317,25 +317,32 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
   const liquidityLevels = useLiquidityLevels(klines);
 
   const indicators: IndicatorSeries = useMemo(() => {
-    if (!klines || klines.length < 50 || !showIndicators) return {};
+    if (!klines || klines.length < 50) return {};
     const times  = klines.map(b => b.time as number);
     const closes = klines.map(b => b.close);
-    const ema20v = calcEMA(closes, 20);
-    const ema50v = calcEMA(closes, 50);
-    const bb     = calcBB(closes, 20);
-    const rsiV   = calcRSI(closes, 14);
-    const macd   = calcMACD(closes, 12, 26, 9);
-    return {
-      ema20:   times.map((t, i) => ({ time: t, value: ema20v[i] })),
-      ema50:   times.map((t, i) => ({ time: t, value: ema50v[i] })),
-      bbUpper: times.map((t, i) => ({ time: t, value: bb.upper[i] })).filter(p => !isNaN(p.value)),
-      bbLower: times.map((t, i) => ({ time: t, value: bb.lower[i] })).filter(p => !isNaN(p.value)),
-      rsi:     times.map((t, i) => ({ time: t, value: rsiV[i] })).filter(p => !isNaN(p.value)),
-      macd:       times.map((t, i) => ({ time: t, value: macd.macdLine[i] })).filter(p => !isNaN(p.value)),
-      macdSignal: times.map((t, i) => ({ time: t, value: macd.signalLine[i] })).filter(p => !isNaN(p.value)),
-      macdHist:   times.map((t, i) => ({ time: t, value: macd.hist[i] })).filter(p => !isNaN(p.value)),
-    };
-  }, [klines, showIndicators]);
+    const result: IndicatorSeries = {};
+
+    if (showIndicators) {
+      const ema20v = calcEMA(closes, 20);
+      const ema50v = calcEMA(closes, 50);
+      const bb     = calcBB(closes, 20);
+      const rsiV   = calcRSI(closes, 14);
+      result.ema20   = times.map((t, i) => ({ time: t, value: ema20v[i] }));
+      result.ema50   = times.map((t, i) => ({ time: t, value: ema50v[i] }));
+      result.bbUpper = times.map((t, i) => ({ time: t, value: bb.upper[i] })).filter(p => !isNaN(p.value));
+      result.bbLower = times.map((t, i) => ({ time: t, value: bb.lower[i] })).filter(p => !isNaN(p.value));
+      result.rsi     = times.map((t, i) => ({ time: t, value: rsiV[i] })).filter(p => !isNaN(p.value));
+    }
+
+    if (showMacd) {
+      const macd = calcMACD(closes, 12, 26, 9);
+      result.macd       = times.map((t, i) => ({ time: t, value: macd.macdLine[i] })).filter(p => !isNaN(p.value));
+      result.macdSignal = times.map((t, i) => ({ time: t, value: macd.signalLine[i] })).filter(p => !isNaN(p.value));
+      result.macdHist   = times.map((t, i) => ({ time: t, value: macd.hist[i] })).filter(p => !isNaN(p.value));
+    }
+
+    return result;
+  }, [klines, showIndicators, showMacd]);
 
   const latestSignal = signals?.find(s => s.asset?.symbol === symbol);
   const signalLevels: PriceLevel[] = useMemo(() => {
