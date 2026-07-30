@@ -213,6 +213,182 @@ def _monte_carlo_range(close: pd.Series, n_sims: int = 1000, horizon: int = 20) 
     }
 
 
+def evaluate_synthetic_strategy(
+    close: pd.Series,
+    stats: dict,
+    category: str = "volatility",
+    strategy_rules: dict | None = None,
+) -> dict:
+    """
+    Generate signal + entry/SL/TP for synthetic indices using statistical analysis.
+    Does NOT use EMA/RSI/MACD — uses spike_probability, mean_reversion_prob,
+    compression, Monte Carlo expected range instead.
+
+    strategy_rules (optional): dict with min_confidence, min_dps, sl_atr_mult,
+    tp1_atr_mult, tp2_atr_mult overrides.
+    """
+    rules = strategy_rules or {}
+    min_confidence = rules.get("min_confidence", 55)
+    min_dps = rules.get("min_dps", 50)
+    sl_mult = rules.get("sl_atr_mult", 1.5)
+    tp1_mult = rules.get("tp1_atr_mult", 1.5)
+    tp2_mult = rules.get("tp2_atr_mult", 2.5)
+
+    if len(close) < 30 or stats.get("state") == "UNKNOWN":
+        return {
+            "signal": "NEUTRAL",
+            "confidence": 0,
+            "score": 0,
+            "reasons": ["insufficient data"],
+            "entry_price": None,
+            "stop_loss": None,
+            "take_profit_1": None,
+            "take_profit_2": None,
+            "risk_reward": None,
+            "dps": 0.0,
+        }
+
+    entry = round(float(close.iloc[-1]), 6)
+    atr_val = float(_rolling_atr(close, 14).iloc[-1])
+    if pd.isna(atr_val) or atr_val <= 0:
+        atr_val = float(close.iloc[-20:].std()) or 0.0001
+
+    spike_prob = stats.get("spike_probability", 0)
+    mr_prob = stats.get("mean_reversion_prob", 0)
+    compression = stats.get("compression_score", 50)
+    state = stats.get("state", "NEUTRAL")
+    regime = stats.get("regime", "NEUTRAL")
+    mc = stats.get("monte_carlo") or {}
+    caution = stats.get("caution", False)
+
+    score = 0
+    reasons = []
+    signal = "NEUTRAL"
+
+    # ── Mean reversion logic (volatility indices) ──
+    if category in ("volatility", "jump"):
+        if mr_prob > 60 and state == "MEAN_REVERTING":
+            # Price overextended → expect reversion
+            z_return = float(close.pct_change().dropna().iloc[-1])
+            if z_return < 0:
+                signal = "BUY"
+                score = int(min(95, mr_prob))
+                reasons.append(f"Mean reversion BUY (mr_prob={mr_prob:.1f}%, z_return={z_return:.4f})")
+            else:
+                signal = "SELL"
+                score = int(min(95, mr_prob))
+                reasons.append(f"Mean reversion SELL (mr_prob={mr_prob:.1f}%, z_return={z_return:.4f})")
+
+        # Spike readiness → momentum signal
+        elif spike_prob > 65 and state in ("EXPANSION_RISK", "SPIKE_READY"):
+            velocity = stats.get("tick_acceleration", 0)
+            if velocity > 0:
+                signal = "BUY"
+                score = int(min(85, spike_prob * 0.8))
+                reasons.append(f"Spike momentum BUY (spike_prob={spike_prob:.1f}%, accel={velocity:.6f})")
+            elif velocity < 0:
+                signal = "SELL"
+                score = int(min(85, spike_prob * 0.8))
+                reasons.append(f"Spike momentum SELL (spike_prob={spike_prob:.1f}%, accel={velocity:.6f})")
+
+    # ── Boom/Crash directional bias ──
+    elif category == "boom_crash":
+        # Boom = rare sharp up moves; Crash = rare sharp down moves
+        # Strategy: stay flat except when spike probability is very high
+        if spike_prob > 70 and state in ("SPIKE_READY", "EXPANSION_RISK"):
+            # For boom symbols, bias BUY; for crash, bias SELL
+            # The caller should set the direction via the symbol name
+            reasons.append(f"Boom/Crash spike alert (spike_prob={spike_prob:.1f}%) — caution mode")
+            # Don't generate a directional signal automatically — too risky
+            # Let the caller decide based on the boom/cash direction
+
+    # ── Step index — trending detection ──
+    elif category == "step":
+        velocity = stats.get("tick_velocity", 0)
+        accel = stats.get("tick_acceleration", 0)
+        if state == "TRENDING" and velocity > 0.001:
+            if accel > 0:
+                signal = "BUY"
+                score = int(min(75, velocity * 50000))
+                reasons.append(f"Step trending BUY (velocity={velocity:.6f}, accel={accel:.6f})")
+            elif accel < 0:
+                signal = "SELL"
+                score = int(min(75, velocity * 50000))
+                reasons.append(f"Step trending SELL (velocity={velocity:.6f}, accel={accel:.6f})")
+
+    # ── Confidence & filters ──
+    confidence = min(abs(score), 95) if signal != "NEUTRAL" else 0
+
+    if confidence < min_confidence and signal != "NEUTRAL":
+        reasons.append(f"Confidence {confidence}% < {min_confidence}% — filtered")
+        signal = "NEUTRAL"
+        confidence = 0
+
+    if caution and signal != "NEUTRAL":
+        reasons.append("Caution flag active — reducing confidence")
+        confidence = int(confidence * 0.7)
+        if confidence < min_confidence:
+            signal = "NEUTRAL"
+            confidence = 0
+
+    # ── Price levels ──
+    stop_loss = take_profit_1 = take_profit_2 = risk_reward = None
+
+    if signal != "NEUTRAL" and entry and atr_val:
+        # Use Monte Carlo p10/p90 as additional TP guidance
+        mc_p10 = mc.get("p10")
+        mc_p90 = mc.get("p90")
+
+        if signal == "BUY":
+            stop_loss = round(entry - atr_val * sl_mult, 6)
+            take_profit_1 = round(entry + atr_val * tp1_mult, 6)
+            take_profit_2 = round(entry + atr_val * tp2_mult, 6)
+            # Refine TP1 with MC p90 if closer (more conservative)
+            if mc_p90 and mc_p90 > entry:
+                mc_tp = round(mc_p90, 6)
+                if abs(mc_tp - entry) < abs(take_profit_1 - entry):
+                    take_profit_1 = mc_tp
+                    reasons.append(f"TP1 refined to MC p90={mc_tp}")
+        elif signal == "SELL":
+            stop_loss = round(entry + atr_val * sl_mult, 6)
+            take_profit_1 = round(entry - atr_val * tp1_mult, 6)
+            take_profit_2 = round(entry - atr_val * tp2_mult, 6)
+            # Refine TP1 with MC p10 if closer
+            if mc_p10 and mc_p10 < entry:
+                mc_tp = round(mc_p10, 6)
+                if abs(mc_tp - entry) < abs(take_profit_1 - entry):
+                    take_profit_1 = mc_tp
+                    reasons.append(f"TP1 refined to MC p10={mc_tp}")
+
+        if stop_loss and take_profit_1 and abs(entry - stop_loss) > 0:
+            risk_reward = round(abs(take_profit_1 - entry) / abs(entry - stop_loss), 2)
+
+    # ── DPS proxy: confidence × risk_reward factor ──
+    dps = 0.0
+    if signal != "NEUTRAL" and risk_reward and risk_reward > 0:
+        dps = round(min(95, confidence * min(risk_reward / 1.5, 1.5)), 2)
+        if dps < min_dps:
+            reasons.append(f"DPS {dps}% < {min_dps}% — filtered")
+            signal = "NEUTRAL"
+            confidence = 0
+
+    return {
+        "signal": signal,
+        "confidence": confidence,
+        "score": score,
+        "reasons": reasons,
+        "entry_price": entry if signal != "NEUTRAL" else None,
+        "stop_loss": stop_loss,
+        "take_profit_1": take_profit_1,
+        "take_profit_2": take_profit_2,
+        "risk_reward": risk_reward,
+        "dps": dps,
+        "trigger": "SYNTHETIC_STATISTICAL",
+        "signal_pending": False,
+        "invalidation": {},
+    }
+
+
 def analyze_synthetic(
     close: pd.Series,
     category: Literal["volatility", "jump", "step", "boom_crash"] = "volatility",

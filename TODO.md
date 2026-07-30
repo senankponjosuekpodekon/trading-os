@@ -111,12 +111,17 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 27. **Stratégie BRVM dédiée** ✅ : `BRVM Value Swing` (daily, EMA 20/50/100, RSI 14, trigger BREAKOUT, markets STOCKS)
     - Volume spike bas (1.1) et ATR min bas (0.1) adaptés à la faible liquidité
     - Filtre regime large (TRENDING + RANGING) — BRVM souvent en range prolongé
+28. **Stratégie Synthetic dédiée** ✅ : `Synthetic Mean Reversion` (15m/5m, statistical engine)
+    - `evaluate_synthetic_strategy()` dédié dans `synthetic_engine.py`
+    - Utilise spike_probability, mean_reversion_prob, Monte Carlo pour signaux + entry/SL/TP
+    - Pas d'EMA/RSI/MACD (marché purement statistique)
+    - TP1 raffiné avec percentiles Monte Carlo (p10/p90)
 
 ### Phase 5 — Scale SaaS
-28. Plans & abonnements Stripe
-29. Audit trail
-30. 2FA TOTP obligatoire pour trades réels
-31. Data pipeline scalable (Redis Streams / Celery → Kafka si besoin)
+29. Plans & abonnements Stripe
+30. Audit trail
+31. 2FA TOTP obligatoire pour trades réels
+32. Data pipeline scalable (Redis Streams / Celery → Kafka si besoin)
 
 ---
 

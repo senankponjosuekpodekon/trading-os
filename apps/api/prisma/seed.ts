@@ -354,10 +354,36 @@ async function main() {
     },
   });
 
+  // ── Stratégie 8 : Synthetic Mean Reversion ─────────────────
+  const syntheticMeanRevRules = {
+    min_confidence: 55,
+    min_dps: 50,
+    sl_atr_mult: 1.5,
+    tp1_atr_mult: 1.5,
+    tp2_atr_mult: 2.5,
+    timeframes: ['5m', '15m'],
+    profiles: ['SCALPER', 'DAY'],
+    markets: ['SYNTHETIC'],
+    filters: { regime: ['NEUTRAL', 'COMPRESSION'] },
+  };
+
+  const syntheticMeanRev = await prisma.strategy.upsert({
+    where: { name: 'Synthetic Mean Reversion' },
+    update: { rules: syntheticMeanRevRules, analysisTimeframe: '15m', entryTimeframe: '5m', isActive: true },
+    create: {
+      name: 'Synthetic Mean Reversion',
+      description: 'Mean reversion statistique sur indices Synthetic (V75, Jump). Utilise spike_prob et Monte Carlo. Analyse 15m, entrée 5m.',
+      rules: syntheticMeanRevRules,
+      analysisTimeframe: '15m',
+      entryTimeframe: '5m',
+      isActive: true,
+    },
+  });
+
   console.log('✅ Seed completed');
   console.log(`   Markets: ${markets.length}`);
   console.log(`   Assets:  ${assets.length}`);
-  console.log(`   Strategies: 7 (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing)`);
+  console.log(`   Strategies: 8 (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing, Synthetic Mean Reversion)`);
   console.log(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
 }
 
