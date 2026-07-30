@@ -6,7 +6,7 @@ import Link from 'next/link';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { OHLCBar, ChartMarker, Drawing, IndicatorSeries, PriceLevel } from '@/components/chart/CandlestickChart';
+import { OHLCBar, ChartMarker, Drawing, IndicatorSeries, PriceLevel, SmcZone } from '@/components/chart/CandlestickChart';
 import { DrawingToolbar, DrawingTool } from '@/components/chart/DrawingToolbar';
 import { Signal } from '@/types';
 import { useTradingStore } from '@/store/trading.store';
@@ -107,6 +107,15 @@ function calcRSI(closes: number[], period = 14): number[] {
     result[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
   }
   return result;
+}
+
+function calcMACD(closes: number[], fast = 12, slow = 26, signal = 9) {
+  const emaFast = calcEMA(closes, fast);
+  const emaSlow = calcEMA(closes, slow);
+  const macdLine: number[] = closes.map((_, i) => emaFast[i] - emaSlow[i]);
+  const signalLine = calcEMA(macdLine, signal);
+  const hist = macdLine.map((v, i) => v - signalLine[i]);
+  return { macdLine, signalLine, hist };
 }
 
 function findPivots(data: OHLCBar[], left = 3, right = 3) {
@@ -217,6 +226,9 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
   const [showIndicators, setShowIndicators] = useState(true);
   const [showLevels,     setShowLevels]     = useState(true);
   const [showAnnotations, setShowAnnotations] = useState(true);
+  const [showMacd,      setShowMacd]      = useState(false);
+  const [showSmc,       setShowSmc]       = useState(false);
+  const [showMtf,       setShowMtf]       = useState(false);
   const [activeGroup, setActiveGroup] = useState(
     SYMBOL_GROUPS.find(g => g.symbols.includes(symbol))?.label ?? SYMBOL_GROUPS[0].label
   );
@@ -256,6 +268,31 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
     refetchInterval: 60_000,
   });
 
+  // Multi-TF preview: determine higher timeframe
+  const TF_ORDER = ['5m', '15m', '1h', '4h', '1d'];
+  const htfIndex = Math.min(TF_ORDER.indexOf(timeframe) + 1, TF_ORDER.length - 1);
+  const htf = TF_ORDER[htfIndex] !== timeframe ? TF_ORDER[htfIndex] : TF_ORDER[Math.min(htfIndex + 1, TF_ORDER.length - 1)];
+
+  const { data: htfKlines } = useQuery<OHLCBar[]>({
+    queryKey: ['klines', symbol, htf],
+    queryFn:  () => fetchKlines(symbol, htf),
+    staleTime: 120_000,
+    refetchInterval: 120_000,
+    enabled: showMtf,
+  });
+
+  const htfIndicators: IndicatorSeries = useMemo(() => {
+    if (!htfKlines || htfKlines.length < 50) return {};
+    const times  = htfKlines.map(b => b.time as number);
+    const closes = htfKlines.map(b => b.close);
+    const ema20v = calcEMA(closes, 20);
+    const ema50v = calcEMA(closes, 50);
+    return {
+      ema20: times.map((t, i) => ({ time: t, value: ema20v[i] })),
+      ema50: times.map((t, i) => ({ time: t, value: ema50v[i] })),
+    };
+  }, [htfKlines]);
+
   const signals = useTradingStore(s => s.signals) as Signal[];
 
   const signalMarkers: ChartMarker[] = useMemo(() => {
@@ -287,12 +324,16 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
     const ema50v = calcEMA(closes, 50);
     const bb     = calcBB(closes, 20);
     const rsiV   = calcRSI(closes, 14);
+    const macd   = calcMACD(closes, 12, 26, 9);
     return {
       ema20:   times.map((t, i) => ({ time: t, value: ema20v[i] })),
       ema50:   times.map((t, i) => ({ time: t, value: ema50v[i] })),
       bbUpper: times.map((t, i) => ({ time: t, value: bb.upper[i] })).filter(p => !isNaN(p.value)),
       bbLower: times.map((t, i) => ({ time: t, value: bb.lower[i] })).filter(p => !isNaN(p.value)),
       rsi:     times.map((t, i) => ({ time: t, value: rsiV[i] })).filter(p => !isNaN(p.value)),
+      macd:       times.map((t, i) => ({ time: t, value: macd.macdLine[i] })).filter(p => !isNaN(p.value)),
+      macdSignal: times.map((t, i) => ({ time: t, value: macd.signalLine[i] })).filter(p => !isNaN(p.value)),
+      macdHist:   times.map((t, i) => ({ time: t, value: macd.hist[i] })).filter(p => !isNaN(p.value)),
     };
   }, [klines, showIndicators]);
 
@@ -306,6 +347,29 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
     if (latestSignal.takeProfit2) out.push({ price: parseFloat(String(latestSignal.takeProfit2)), color: '#6ee7b7', label: 'TP2',   style: 'dashed' });
     return out;
   }, [latestSignal]);
+
+  const smcZones: SmcZone[] = useMemo(() => {
+    if (!showSmc || !latestSignal?.metadata?.smc) return [];
+    const smc = latestSignal.metadata.smc;
+    const zones: SmcZone[] = [];
+    // FVG zones
+    const fvg = smc.fvg ?? {};
+    (fvg.near_bullish_fvg ? [fvg.near_bullish_fvg] : []).forEach(z =>
+      zones.push({ type: 'fvg', direction: 'bullish', top: z.top, bottom: z.bottom, mid: z.mid, label: 'Bull FVG' })
+    );
+    (fvg.near_bearish_fvg ? [fvg.near_bearish_fvg] : []).forEach(z =>
+      zones.push({ type: 'fvg', direction: 'bearish', top: z.top, bottom: z.bottom, mid: z.mid, label: 'Bear FVG' })
+    );
+    // OB zones
+    const ob = smc.ob ?? {};
+    (ob.near_bullish_ob ? [ob.near_bullish_ob] : []).forEach(z =>
+      zones.push({ type: 'ob', direction: 'bullish', top: z.top, bottom: z.bottom, mid: z.mid, label: 'Bull OB' })
+    );
+    (ob.near_bearish_ob ? [ob.near_bearish_ob] : []).forEach(z =>
+      zones.push({ type: 'ob', direction: 'bearish', top: z.top, bottom: z.bottom, mid: z.mid, label: 'Bear OB' })
+    );
+    return zones;
+  }, [latestSignal, showSmc]);
 
   const scenarioMarkers: ChartMarker[] = useMemo(() => {
     if (!latestSignal || !klines || klines.length === 0) return [];
@@ -431,6 +495,26 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
             Structure · Liq
           </button>
 
+          <button onClick={() => setShowMacd(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${showMacd ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'}`}>
+            {showMacd ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            MACD
+          </button>
+
+          {latestSignal?.metadata?.smc && (
+            <button onClick={() => setShowSmc(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${showSmc ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'}`}>
+              {showSmc ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              FVG · OB
+            </button>
+          )}
+
+          <button onClick={() => setShowMtf(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${showMtf ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'}`}>
+            {showMtf ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            MTF · {htf}
+          </button>
+
           <DrawingToolbar active={activeTool} onChange={setActiveTool} onClearAll={() => setDrawings([])} drawingCount={drawings.length} />
 
           <button onClick={() => refetch()}
@@ -446,6 +530,14 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
             <span className="flex items-center gap-1.5 text-xs"><span className="w-4 h-0.5 inline-block bg-indigo-400" />EMA50</span>
             <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-4 h-0.5 inline-block bg-gray-500 border-dashed" />BB(20)</span>
             <span className="flex items-center gap-1.5 text-xs text-violet-400"><span className="w-4 h-0.5 inline-block bg-violet-400" />RSI(14)</span>
+            {showMacd && <>
+              <span className="flex items-center gap-1.5 text-xs text-blue-400"><span className="w-4 h-0.5 inline-block bg-blue-400" />MACD</span>
+              <span className="flex items-center gap-1.5 text-xs text-amber-400"><span className="w-4 h-0.5 inline-block bg-amber-400" />Signal</span>
+            </>}
+            {showSmc && smcZones.length > 0 && <>
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400"><span className="w-4 h-0.5 inline-block bg-emerald-400 border-dashed" />FVG</span>
+              <span className="flex items-center gap-1.5 text-xs text-red-400"><span className="w-4 h-0.5 inline-block bg-red-400 border-dashed" />OB</span>
+            </>}
             {allLevels.length > 0 && <>
               <span className="flex items-center gap-1.5 text-xs text-gray-400"><span className="w-4 h-0.5 inline-block bg-white/60" />Entry</span>
               <span className="flex items-center gap-1.5 text-xs text-red-400"><span className="w-4 h-0.5 inline-block bg-red-400" />SL</span>
@@ -478,9 +570,33 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
               indicators={indicators}
               levels={allLevels}
               showRsi={showIndicators}
+              showMacd={showMacd}
+              smcZones={smcZones}
             />
           )}
         </div>
+
+        {/* Multi-TF preview */}
+        {showMtf && htfKlines && htfKlines.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800">
+              <span className="text-xs font-medium text-cyan-400">Multi-TF · {htf}</span>
+              <span className="text-xs text-gray-600">Confluence {symbol.replace('/USDT','').replace('/USD','')}</span>
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="flex items-center gap-1 text-[10px] text-gray-500"><span className="w-3 h-0.5 inline-block bg-amber-400" />EMA20</span>
+                <span className="flex items-center gap-1 text-[10px] text-gray-500"><span className="w-3 h-0.5 inline-block bg-indigo-400" />EMA50</span>
+              </div>
+            </div>
+            <CandlestickChart
+              data={htfKlines}
+              height={200}
+              showVolume={false}
+              indicators={htfIndicators}
+              showRsi={false}
+              showMacd={false}
+            />
+          </div>
+        )}
 
         {drawings.length > 0 && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -489,7 +605,7 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
               {drawings.map(d => (
                 <div key={d.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs"
                   style={{ borderColor: `${d.color}40`, background: `${d.color}10`, color: d.color }}>
-                  <span className="capitalize">{d.type === 'hline' ? 'H-Line' : d.type === 'trendline' ? 'Trendline' : 'Zone'}</span>
+                  <span className="capitalize">{d.type === 'hline' ? 'H-Line' : d.type === 'trendline' ? 'Trendline' : d.type === 'fib' ? 'Fibonacci' : 'Zone'}</span>
                   {d.price && <span className="opacity-60">{d.price.toFixed(2)}</span>}
                   <button onClick={() => setDrawings(prev => prev.filter(x => x.id !== d.id))} className="ml-1 opacity-60 hover:opacity-100">
                     <Minus className="w-3 h-3" />

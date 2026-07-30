@@ -48,6 +48,9 @@ export interface IndicatorSeries {
   bbUpper?: { time: number; value: number }[];
   bbLower?: { time: number; value: number }[];
   rsi?:    { time: number; value: number }[];
+  macd?:       { time: number; value: number }[];
+  macdSignal?: { time: number; value: number }[];
+  macdHist?:   { time: number; value: number }[];
 }
 
 export interface PriceLevel {
@@ -55,6 +58,15 @@ export interface PriceLevel {
   color: string;
   label: string;
   style?: 'solid' | 'dashed';
+}
+
+export interface SmcZone {
+  type: 'fvg' | 'ob';
+  direction: 'bullish' | 'bearish';
+  top: number;
+  bottom: number;
+  mid: number;
+  label?: string;
 }
 
 interface Props {
@@ -68,6 +80,8 @@ interface Props {
   indicators?:  IndicatorSeries;
   levels?:      PriceLevel[];
   showRsi?:     boolean;
+  showMacd?:    boolean;
+  smcZones?:    SmcZone[];
 }
 
 const DRAWING_COLORS: Record<DrawingTool, string> = {
@@ -75,6 +89,7 @@ const DRAWING_COLORS: Record<DrawingTool, string> = {
   hline:     '#facc15',
   trendline: '#60a5fa',
   rect:      '#a78bfa',
+  fib:       '#fbbf24',
 };
 
 export function CandlestickChart({
@@ -88,11 +103,15 @@ export function CandlestickChart({
   indicators    = {},
   levels        = [],
   showRsi       = true,
+  showMacd      = false,
+  smcZones      = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
+  const macdContainerRef = useRef<HTMLDivElement>(null);
   const chartRef     = useRef<IChartApi | null>(null);
   const rsiChartRef  = useRef<IChartApi | null>(null);
+  const macdChartRef = useRef<IChartApi | null>(null);
   const candleRef    = useRef<ISeriesApi<'Candlestick'> | null>(null);
   // Map drawing id → series references for cleanup
   const drawingSeriesRef = useRef<Map<string, ISeriesApi<any>[]>>(new Map());
@@ -156,6 +175,34 @@ export function CandlestickChart({
         });
         sBot.setData([{ time: tMin as any, value: pMin }, { time: tMax as any, value: pMin }]);
         series.push(sTop, sBot);
+      }
+
+      if (d.type === 'fib' && d.p1 && d.p2) {
+        const tMin = Math.min(d.p1.time, d.p2.time);
+        const tMax = Math.max(d.p1.time, d.p2.time);
+        const pHigh = Math.max(d.p1.price, d.p2.price);
+        const pLow  = Math.min(d.p1.price, d.p2.price);
+        const diff  = pHigh - pLow;
+        const fibLevels = [
+          { pct: 0,     price: pHigh,          color: '#fbbf24' },
+          { pct: 0.236, price: pHigh - diff * 0.236, color: '#f87171' },
+          { pct: 0.382, price: pHigh - diff * 0.382, color: '#fb923c' },
+          { pct: 0.5,   price: pHigh - diff * 0.5,   color: '#facc15' },
+          { pct: 0.618, price: pHigh - diff * 0.618, color: '#34d399' },
+          { pct: 0.786, price: pHigh - diff * 0.786, color: '#22d3ee' },
+          { pct: 1,     price: pLow,            color: '#a78bfa' },
+        ];
+        fibLevels.forEach(lvl => {
+          const s = chart.addSeries(LineSeries, {
+            color: lvl.color, lineWidth: 1, lineStyle: LineStyle.Dashed,
+            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          });
+          s.setData([
+            { time: tMin as any, value: lvl.price },
+            { time: tMax as any, value: lvl.price },
+          ]);
+          series.push(s);
+        });
       }
 
       if (series.length > 0) drawingSeriesRef.current.set(d.id, series);
@@ -260,6 +307,33 @@ export function CandlestickChart({
     chart.timeScale().fitContent();
     renderDrawings(chart, drawings);
 
+    // ── SMC zones (FVG / OB) ────────────────────────────────────
+    smcZones.forEach(zone => {
+      const isBull = zone.direction === 'bullish';
+      const color = isBull ? '#34d39920' : '#f8717120';
+      const borderColor = isBull ? '#34d39960' : '#f8717160';
+      const tStart = data[0]?.time as number;
+      const tEnd   = data[data.length - 1]?.time as number;
+      // Top border
+      const sTop = chart.addSeries(LineSeries, {
+        color: borderColor, lineWidth: 1, lineStyle: LineStyle.Dashed,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      sTop.setData([{ time: tStart as any, value: zone.top }, { time: tEnd as any, value: zone.top }]);
+      // Bottom border
+      const sBot = chart.addSeries(LineSeries, {
+        color: borderColor, lineWidth: 1, lineStyle: LineStyle.Dashed,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      sBot.setData([{ time: tStart as any, value: zone.bottom }, { time: tEnd as any, value: zone.bottom }]);
+      // Mid line
+      const sMid = chart.addSeries(LineSeries, {
+        color: color, lineWidth: 1, lineStyle: LineStyle.Dotted,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      sMid.setData([{ time: tStart as any, value: zone.mid }, { time: tEnd as any, value: zone.mid }]);
+    });
+
     // ── RSI chart ────────────────────────────────────────────────
     if (showRsi && indicators.rsi && indicators.rsi.length > 0 && rsiContainerRef.current) {
       const rsiChart = createChart(rsiContainerRef.current, {
@@ -293,10 +367,62 @@ export function CandlestickChart({
       rsiChart.timeScale().fitContent();
     }
 
+    // ── MACD chart ───────────────────────────────────────────────
+    if (showMacd && indicators.macd && indicators.macd.length > 0 && macdContainerRef.current) {
+      const macdChart = createChart(macdContainerRef.current, {
+        layout: { background: { type: ColorType.Solid, color: '#111827' }, textColor: '#9ca3af' },
+        grid:   { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+        crosshair: { mode: CrosshairMode.Normal },
+        rightPriceScale: { borderColor: '#374151', scaleMargins: { top: 0.1, bottom: 0.1 } },
+        timeScale: { borderColor: '#374151', timeVisible: true, secondsVisible: false },
+        width:  macdContainerRef.current.clientWidth,
+        height: 100,
+      });
+      macdChartRef.current = macdChart;
+
+      // Histogram
+      if (indicators.macdHist && indicators.macdHist.length > 0) {
+        const histSeries = macdChart.addSeries(HistogramSeries, {
+          color: '#6b7280', priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        });
+        histSeries.setData(indicators.macdHist.map(p => ({
+          time: p.time as any, value: p.value,
+          color: p.value >= 0 ? '#34d39960' : '#f8717160',
+        })) as any);
+      }
+      // MACD line
+      const macdSeries = macdChart.addSeries(LineSeries, {
+        color: '#60a5fa', lineWidth: 1,
+        priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: true,
+      });
+      macdSeries.setData(indicators.macd as any);
+      // Signal line
+      if (indicators.macdSignal && indicators.macdSignal.length > 0) {
+        const sigSeries = macdChart.addSeries(LineSeries, {
+          color: '#f59e0b', lineWidth: 1,
+          priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: true,
+        });
+        sigSeries.setData(indicators.macdSignal as any);
+      }
+      // Zero line
+      macdSeries.createPriceLine({ price: 0, color: '#6b728060', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' });
+
+      // Sync timescales
+      chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) macdChart.timeScale().setVisibleLogicalRange(range);
+      });
+      macdChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range) chart.timeScale().setVisibleLogicalRange(range);
+      });
+      macdChart.timeScale().fitContent();
+    }
+
     const ro = new ResizeObserver(() => {
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
       if (rsiContainerRef.current && rsiChartRef.current)
         rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth });
+      if (macdContainerRef.current && macdChartRef.current)
+        macdChartRef.current.applyOptions({ width: macdContainerRef.current.clientWidth });
     });
     ro.observe(containerRef.current);
 
@@ -305,9 +431,10 @@ export function CandlestickChart({
       chart.remove();
       chartRef.current = null;
       if (rsiChartRef.current) { rsiChartRef.current.remove(); rsiChartRef.current = null; }
+      if (macdChartRef.current) { macdChartRef.current.remove(); macdChartRef.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, markers, height, showVolume, indicators, levels, showRsi]);
+  }, [data, markers, height, showVolume, indicators, levels, showRsi, showMacd, smcZones]);
 
   // Re-render drawings when they change
   useEffect(() => {
@@ -357,6 +484,7 @@ export function CandlestickChart({
     'cursor-crosshair';
 
   const hasRsi = showRsi && (indicators.rsi?.length ?? 0) > 0;
+  const hasMacd = showMacd && (indicators.macd?.length ?? 0) > 0;
 
   return (
     <>
@@ -379,6 +507,17 @@ export function CandlestickChart({
             <span className="text-[10px] font-medium text-violet-400">RSI(14)</span>
           </div>
           <div ref={rsiContainerRef} style={{ width: '100%', height: 100 }} />
+        </div>
+      )}
+      {hasMacd && (
+        <div className="border-t border-gray-800">
+          <div className="flex items-center gap-2 px-3 pt-1 pb-0">
+            <span className="text-[10px] font-medium text-blue-400">MACD(12,26,9)</span>
+            <span className="flex items-center gap-1 text-[10px] text-gray-500"><span className="w-3 h-0.5 inline-block bg-blue-400" />MACD</span>
+            <span className="flex items-center gap-1 text-[10px] text-gray-500"><span className="w-3 h-0.5 inline-block bg-amber-400" />Signal</span>
+            <span className="flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2 h-2 inline-block bg-emerald-400/40" />Hist</span>
+          </div>
+          <div ref={macdContainerRef} style={{ width: '100%', height: 100 }} />
         </div>
       )}
     </>

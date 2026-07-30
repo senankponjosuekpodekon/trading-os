@@ -1,7 +1,7 @@
 'use client';
-import { Minus, TrendingUp, Square, Trash2, MousePointer } from 'lucide-react';
+import { Minus, TrendingUp, Square, Trash2, MousePointer, Ruler } from 'lucide-react';
 
-export type DrawingTool = 'pointer' | 'hline' | 'trendline' | 'rect';
+export type DrawingTool = 'pointer' | 'hline' | 'trendline' | 'rect' | 'fib';
 
 interface Props {
   active: DrawingTool;
@@ -15,6 +15,7 @@ const TOOLS: { id: DrawingTool; icon: React.ReactNode; label: string }[] = [
   { id: 'hline',     icon: <Minus className="w-4 h-4" />,        label: 'Ligne horizontale (S/R)' },
   { id: 'trendline', icon: <TrendingUp className="w-4 h-4" />,   label: 'Trendline' },
   { id: 'rect',      icon: <Square className="w-4 h-4" />,       label: 'Zone (rectangle)' },
+  { id: 'fib',       icon: <Ruler className="w-4 h-4" />,        label: 'Fibonacci retracement' },
 ];
 
 export function DrawingToolbar({ active, onChange, onClearAll, drawingCount }: Props) {
