@@ -1,11 +1,13 @@
 'use client';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle } from 'lucide-react';
+import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 import { OnboardingModal, TraderProfile } from '@/components/onboarding/OnboardingModal';
+import { useAuthStore } from '@/store/auth.store';
+import { getBrowserTimezone } from '@/lib/timezone';
 
 interface Strategy {
   id: string;
@@ -59,6 +61,21 @@ export default function SettingsPage() {
     return localStorage.getItem(LS_PROFILE) ?? 'moderate';
   });
   const qc = useQueryClient();
+  const user = useAuthStore(s => s.user);
+  const [timezone, setTimezone] = useState<string>(user?.timezone ?? getBrowserTimezone());
+
+  const saveTimezone = useMutation({
+    mutationFn: (tz: string) => api.patch('/users/me', { timezone: tz }),
+    onSuccess: () => {
+      // Update local store
+      const stored = localStorage.getItem('trading_os_user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        u.timezone = timezone;
+        localStorage.setItem('trading_os_user', JSON.stringify(u));
+      }
+    },
+  });
 
   const saveProfile = (p: string) => {
     setProfile(p);
@@ -141,6 +158,28 @@ export default function SettingsPage() {
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-lg text-sm transition-colors">
               <Plus className="w-4 h-4" />{showForm ? 'Annuler' : 'Nouvelle stratégie'}
             </button>
+          </div>
+        </div>
+
+        {/* Timezone */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Clock className="w-4 h-4 text-gray-500" />
+            <h3 className="text-white font-semibold">Fuseau horaire</h3>
+          </div>
+          <p className="text-gray-500 text-sm mb-3">Les heures des signaux affichées sur la plateforme seront converties dans votre fuseau.</p>
+          <div className="flex items-center gap-3">
+            <select
+              value={timezone}
+              onChange={e => { setTimezone(e.target.value); saveTimezone.mutate(e.target.value); }}
+              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+            >
+              {Intl.supportedValuesOf('timeZone').map((tz: string) => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </select>
+            {saveTimezone.isPending && <RefreshCw className="w-3.5 h-3.5 text-gray-500 animate-spin" />}
+            {saveTimezone.isSuccess && <span className="text-xs text-emerald-400">Sauvegardé</span>}
           </div>
         </div>
 

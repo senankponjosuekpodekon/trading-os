@@ -1317,6 +1317,8 @@ def analyze_candles(
         "symbol":       symbol,
         "strategy_id":  strategy_id,
         "strategy_name": strategy_name,
+        "analysis_timeframe": (strategy or {}).get("analysisTimeframe") or (strategy or {}).get("analysis_timeframe") or timeframe,
+        "entry_timeframe":    (strategy or {}).get("entryTimeframe")    or (strategy or {}).get("entry_timeframe")    or timeframe,
         "score":        score,
         "profile_suitability": profile_suitability,
         "trigger":      trigger,

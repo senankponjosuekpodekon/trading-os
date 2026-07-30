@@ -64,6 +64,7 @@ model User {
   name         String
   role         UserRole       @default(TRADER)
   isActive     Boolean        @default(true)
+  timezone     String         @default("UTC")
   totpSecret   String?        @map("totp_secret")
   totpEnabled  Boolean        @default(false) @map("totp_enabled")
   createdAt    DateTime       @default(now())

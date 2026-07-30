@@ -442,6 +442,8 @@ export class SignalsService {
             mtf_context:       r.mtf_context ?? null,
             dps:               r.dps ?? null,
             tps:               r.tps ?? null,
+            analysisTimeframe: r.analysis_timeframe ?? r.analysisTimeframe ?? null,
+            entryTimeframe:    r.entry_timeframe ?? r.entryTimeframe ?? null,
             persistence_score: r.persistence_score ?? null,
             signal_sticky:     r.signal_sticky ?? null,
             success_probability: r.success_probability ?? null,

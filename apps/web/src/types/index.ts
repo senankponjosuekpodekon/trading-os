@@ -4,6 +4,7 @@ export interface User {
   name: string;
   role: 'TRADER' | 'INVESTOR' | 'ADMIN' | 'SUPER_ADMIN';
   isActive: boolean;
+  timezone?: string;
   createdAt: string;
 }
 

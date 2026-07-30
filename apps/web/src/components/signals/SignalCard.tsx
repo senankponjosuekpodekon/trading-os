@@ -15,6 +15,9 @@ import { OpportunityScore } from '@/components/ui/OpportunityScore';
 import { ConfidenceGauge } from '@/components/ui/ConfidenceGauge';
 import { RRRatioBadge } from '@/components/ui/RRRatioBadge';
 import { TimeAgo } from '@/components/ui/TimeAgo';
+import { formatDateTime, getTradingSession } from '@/lib/timezone';
+import { useAuthStore } from '@/store/auth.store';
+import { Clock, Zap, Crosshair } from 'lucide-react';
 
 const SYMBOL_TO_PRICE_KEY: Record<string, string> = {
   'BTC/USDT': 'BTCUSDT', 'ETH/USDT': 'ETHUSDT', 'SOL/USDT': 'SOLUSDT',
@@ -44,9 +47,17 @@ export interface SignalCardProps {
 export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: SignalCardProps) {
   const mode = useModeStore(s => s.mode);
   const isBeginner = mode === 'beginner';
+  const user = useAuthStore(s => s.user);
   const [showWhy, setShowWhy] = useState(false);
   const [showWhyNot, setShowWhyNot] = useState(false);
   const [showPatterns, setShowPatterns] = useState(false);
+
+  const userTz = user?.timezone;
+  const exactTime = formatDateTime(signal.createdAt, userTz);
+  const session = getTradingSession(signal.createdAt);
+  const dps = (signal.metadata as any)?.dps;
+  const analysisTf = (signal.metadata as any)?.analysisTimeframe ?? (signal as any).analysisTimeframe;
+  const entryTf = (signal.metadata as any)?.entryTimeframe ?? (signal as any).entryTimeframe;
 
   const detectedPatterns = (signal.metadata as any)?.detectedPatterns ?? [];
 
@@ -134,7 +145,35 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
               <span className="text-xs px-2 py-0.5 rounded border border-gray-500/30 bg-gray-700/50 text-gray-400">📌 Maintenu</span>
             )}
           </div>
-          <TimeAgo date={signal.createdAt} className="text-gray-500 text-xs" />
+          <div className="flex items-center gap-2 text-gray-500 text-xs">
+            <TimeAgo date={signal.createdAt} />
+            <span className="text-gray-600">·</span>
+            <span className="flex items-center gap-1" title={new Date(signal.createdAt).toISOString()}>
+              <Clock className="w-3 h-3" />{exactTime}
+            </span>
+            {signal.strategy?.name && (
+              <>
+                <span className="text-gray-600">·</span>
+                <span className="text-indigo-400/80">{signal.strategy.name}</span>
+              </>
+            )}
+          </div>
+          {/* Sub-line: session + TFs + DPS */}
+          <div className="flex items-center gap-2 text-[11px] text-gray-600 mt-0.5">
+            {session && (
+              <span className="flex items-center gap-0.5">
+                <Crosshair className="w-2.5 h-2.5" />{session}
+              </span>
+            )}
+            {analysisTf && entryTf && analysisTf !== entryTf && (
+              <span>Anal: {analysisTf} · Entrée: {entryTf}</span>
+            )}
+            {dps != null && (
+              <span className="flex items-center gap-0.5 text-amber-500/70">
+                <Zap className="w-2.5 h-2.5" />DPS {Math.round(dps)}%
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <SignalBadge signal={signal.signal} />
