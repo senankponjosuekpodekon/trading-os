@@ -393,10 +393,19 @@ async function main() {
     },
   });
 
+  // Post-seed assertion: verify all strategies have markets
+  const allStrategies = await prisma.strategy.findMany({ select: { name: true, rules: true } });
+  for (const s of allStrategies) {
+    const markets = (s.rules as Record<string, unknown>)?.markets as string[] | undefined;
+    if (!markets || markets.length === 0) {
+      throw new Error(`Strategy "${s.name}" has no markets field — seed may be stale, re-run with updated code`);
+    }
+  }
+
   console.log('✅ Seed completed');
   console.log(`   Markets: ${markets.length}`);
   console.log(`   Assets:  ${assets.length}`);
-  console.log(`   Strategies: 8 (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing, Synthetic Mean Reversion)`);
+  console.log(`   Strategies: ${allStrategies.length} (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing, Synthetic Mean Reversion)`);
   console.log(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
 }
 

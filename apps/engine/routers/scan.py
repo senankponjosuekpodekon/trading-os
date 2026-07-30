@@ -737,10 +737,17 @@ def analyze_candles(
     open_col = df["open"]
     last     = len(df) - 1
 
-    e20  = ema(close, 20)
-    e50  = ema(close, 50)
-    e200 = ema(close, 200) if len(df) >= 200 else None
-    r14  = rsi(close, 14)
+    # Dynamic indicator periods from strategy rules (defaults: 20/50/200/14)
+    _rules_raw = strategy.get("rules", {}) if strategy else {}
+    _ema_fast = int(_rules_raw.get("ema_fast", 20))
+    _ema_slow = int(_rules_raw.get("ema_slow", 50))
+    _ema_trend = int(_rules_raw.get("ema_trend", 200))
+    _rsi_period = int(_rules_raw.get("rsi_period", 14))
+
+    e20  = ema(close, _ema_fast)
+    e50  = ema(close, _ema_slow)
+    e200 = ema(close, _ema_trend) if len(df) >= _ema_trend else None
+    r14  = rsi(close, _rsi_period)
     a14  = atr(high, low, close, 14)
     vs   = df["volume"].rolling(20).mean()
     macd_line, macd_sig, macd_hist = macd(close)
