@@ -183,6 +183,7 @@ async function main() {
     trigger: 'VOLATILITY_EXPANSION',
     profiles: ['SWING', 'DAY'],
     markets: ['CRYPTO', 'INDICES', 'COMMODITIES'],
+    entry_rules: { bb_bw_min: 0.02 },
     filters: { regime: ['VOLATILE', 'TRENDING_BULL', 'TRENDING_BEAR'] },
   };
 
@@ -253,13 +254,12 @@ async function main() {
     volume_spike_min: 2.0,
     use_price_action: true,
     use_sr_zones: true,
-    use_patterns: false,
+    use_patterns: true,
     atr_min_pct: 0.15,
     timeframes: ['5m', '15m'],
     trigger: 'MOMENTUM_CONFIRMATION',
     profiles: ['SCALPER'],
-    markets: ['FOREX', 'SYNTHETIC'],
-    entry_rules: { ema_fast_above_slow: true },
+    markets: ['FOREX'],
     filters: { regime: ['RANGING'] },
     exit_rules: { sl_atr: 1.0, tp1_atr: 1.0, tp2_atr: 1.5 },
   };
@@ -316,10 +316,48 @@ async function main() {
     },
   });
 
+  // ── Stratégie 7 : BRVM Value Swing ──────────────────────────
+  const brvmValueSwingRules = {
+    ema_fast: 20,
+    ema_slow: 50,
+    ema_trend: 100,
+    rsi_period: 14,
+    rsi_oversold: 30,
+    rsi_overbought: 70,
+    rsi_bullish_zone: 45,
+    rsi_bearish_zone: 55,
+    min_confidence: 55,
+    min_dps: 50,
+    volume_spike_min: 1.1,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_patterns: true,
+    atr_min_pct: 0.1,
+    timeframes: ['1d'],
+    trigger: 'BREAKOUT',
+    profiles: ['INVESTOR', 'SWING'],
+    markets: ['STOCKS'],
+    filters: { regime: ['TRENDING_BULL', 'TRENDING_BEAR', 'RANGING'] },
+    exit_rules: { sl_atr: 2.0, tp1_atr: 2.5, tp2_atr: 4.0 },
+  };
+
+  const brvmValueSwing = await prisma.strategy.upsert({
+    where: { name: 'BRVM Value Swing' },
+    update: { rules: brvmValueSwingRules, analysisTimeframe: '1d', entryTimeframe: '1d', isActive: true },
+    create: {
+      name: 'BRVM Value Swing',
+      description: 'Swing EMA/RSI adapté aux actions BRVM (données quotidiennes, faible liquidité). Analyse et entrée en 1d.',
+      rules: brvmValueSwingRules,
+      analysisTimeframe: '1d',
+      entryTimeframe: '1d',
+      isActive: true,
+    },
+  });
+
   console.log('✅ Seed completed');
   console.log(`   Markets: ${markets.length}`);
   console.log(`   Assets:  ${assets.length}`);
-  console.log(`   Strategies: 6 (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend)`);
+  console.log(`   Strategies: 7 (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing)`);
   console.log(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
 }
 

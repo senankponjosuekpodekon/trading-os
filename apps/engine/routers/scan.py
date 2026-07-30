@@ -1124,6 +1124,8 @@ def analyze_candles(
 
     if strategy:
         rules = parse_rules(strategy.get("rules", {}))
+        rules.analysis_timeframe = strategy.get("analysisTimeframe") or strategy.get("analysis_timeframe")
+        rules.entry_timeframe = strategy.get("entryTimeframe") or strategy.get("entry_timeframe")
         ev = evaluate_strategy(
             rules,
             indicators={

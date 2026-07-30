@@ -108,10 +108,9 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
     - Journal d'exécution : chaque trade loggé avec raison, stratégie, outcome
     - Dashboard ops `/admin/bots` : statut, PnL, positions ouvertes, pause/resume — `SUPER_ADMIN` only
     - Notifications `SYSTEM` au `SUPER_ADMIN` si un bot est en perte excessive ou désactivé
-27. **Stratégie BRVM dédiée** : momentum + volume sur actions africaines (données quotidiennes)
-    - Pas de scalping (pas de données intraday), analyse daily + 4h
-    - Filtre liquidité (volume minimum)
-    - Marché : `['BRVM']` uniquement
+27. **Stratégie BRVM dédiée** ✅ : `BRVM Value Swing` (daily, EMA 20/50/100, RSI 14, trigger BREAKOUT, markets STOCKS)
+    - Volume spike bas (1.1) et ATR min bas (0.1) adaptés à la faible liquidité
+    - Filtre regime large (TRENDING + RANGING) — BRVM souvent en range prolongé
 
 ### Phase 5 — Scale SaaS
 28. Plans & abonnements Stripe

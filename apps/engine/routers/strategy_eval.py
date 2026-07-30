@@ -156,8 +156,9 @@ def _apply_trigger(
 
     if trigger == "VOLATILITY_EXPANSION":
         bb_bw = indicators.get("bb_bw")
-        if bb_bw is not None and bb_bw < 0.02:
-            return {**result, "signal": "NEUTRAL", "reason": "No volatility expansion (BB squeeze)"}
+        bb_bw_min = entry_rules.get("bb_bw_min", 0.02)
+        if bb_bw is not None and bb_bw < bb_bw_min:
+            return {**result, "signal": "NEUTRAL", "reason": f"No volatility expansion (BB bw={bb_bw:.4f} < {bb_bw_min})"}
         return result
 
     if trigger in ("RETEST", "LIMIT"):
