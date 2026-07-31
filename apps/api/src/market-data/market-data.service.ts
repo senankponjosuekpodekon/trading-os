@@ -155,10 +155,14 @@ export class MarketDataService {
           previous: item.previous ? String(item.previous) : '—',
           category: this.categorizeEvent(String(item.title)),
         }));
-      return [...this.getFallbackMacroEvents(), ...external].slice(0, 25);
+      // Filter out past events (keep only today and future)
+      const today = new Date().toISOString().slice(0, 10);
+      const upcoming = external.filter((e) => e.date >= today);
+      return upcoming.slice(0, 25);
     } catch (e: any) {
       this.logger.warn(`Economic calendar fetch failed: ${e?.message}`);
-      return this.getFallbackMacroEvents();
+      // Last resort: return empty array — hardcoded events go stale and mislead decisionTrace
+      return [];
     }
   }
 

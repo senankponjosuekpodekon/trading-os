@@ -46,3 +46,36 @@
 - Fix #10 (liquidity-aware post-merge): le bloc s'exécute **après** `evaluate_strategy` et **avant** le caution filter Synthetic. Pas de duplication avec le bloc pre-strategy (qui s'exécute seulement en mode hardcoded sans stratégie).
 - Le `entry` utilisé pour filtrer les zones EQL/EQH est bien le `entry` post-merge (ligne 1236: `z["price"] <= entry`), pas une variable stale.
 - Les signaux `signal_pending` avec trigger RETEST/LIMIT sont maintenant persistés avec `status: 'PENDING'` au lieu d'être éliminés.
+
+---
+
+## Addendum — Audit externe (31 juillet 2026)
+
+### Bugs fixés dans cette session
+
+| # | Bug | Fichier | Statut | Priorité | Description |
+|---|---|---|---|---|---|
+| 18 | Macro events hardcodés en permanence | `market-data.service.ts:132-167` | ✅ | Haute | `getFallbackMacroEvents()` était toujours préfixé au résultat, même quand l'API externe réussissait. Dates fixes (29-30 juil, 1er/12 août) devenaient périmées mais restaient injectées → `decisionTrace` et `should_suspend_forex` faussés. Fix: fallback uniquement dans le `catch`, retourne `[]` sinon. |
+| 19 | MTF/DXY/tokenomics/social écrasés par evaluate_strategy | `scan.py:1211-1321` | ✅ | **Critique** | `evaluate_strategy` écrase signal/confidence/score, bypassant silencieusement: macro_risk (suspension Forex avant news), tokenomics danger_flag, DXY momentum, social bonus, MTF confluence. Fix: re-application de tous les garde-fous APRÈS `evaluate_strategy`. |
+| 20 | Endpoint /candles/ inexistant | `main.py` + `signals.service.ts:45` | ✅ | Haute | `predictMlRegime` appelait `${engineUrl}/candles/${symbol}` — endpoint qui n'existait pas → catch silencieux → HMM regime classifier jamais utilisé en production. Fix: ajout endpoint `/candles/{symbol}` dans `main.py` avec fallback multi-provider. |
+| 21 | Biais intrabar optimiste (backtest) | `backtest.py:182-183` | ✅ | Haute | Si TP et SL touchés sur la même bougie, le code supposait TP en premier → win rate gonflé artificiellement. Fix: résolution pessimiste (SL prioritaire en cas d'ambiguïté). |
+| 22 | Timeout backtest fixe (24 bougies) | `backtest.py:182` | ✅ | Moyenne | 24 bougies indépendant du timeframe → pénalise Swing/Investor. Fix: timeout adaptatif par timeframe (15m=96, 1h=72, 4h=42, 1d=21, 1w=12). |
+| 23 | Sharpe ratio mal annualisé | `backtest.py:79-85` | ✅ | Moyenne | `sqrt(252)` suppose fréquence journalière, pas par trade. Non comparable entre stratégies à fréquences différentes. Fix: Sharpe par trade sans annualisation. |
+| 24 | STAC typo slug | `brvm_reports.py:75` | ✅ | Moyenne | `"slibra"` au lieu de `"solibra"` → fetch 404 → STAC n'a jamais reçu de bonus fondamental. |
+| 25 | fetch_all_issuers sans timeout | `brvm_reports.py:141-151` | ✅ | Moyenne | Pas de `asyncio.wait_for` contrairement à `fetch_all_company_reports`. Si brvm.org est lent, tout le scoring fondamental BRVM bloque. Fix: timeout 15s. |
+| 26 | feature-store market filter case-sensitive | `feature-store.service.ts:125` | ✅ | Basse | `where.signal.asset = { market: { name: market } }` sans `mode: 'insensitive'`. Même bug que `_statsByMarket` corrigé précédemment. |
+| 27 | Synthetic assets non routés vers _analyze_synthetic_candles | `scan.py:723-726` | ✅ | Haute | BOOM1000/USD et autres indices Deriv passaient par EMA/RSI/MACD au lieu du moteur statistique. Fix: early return vers `_analyze_synthetic_candles`. |
+
+### Points ouverts (non traités — à prioriser)
+
+| # | Sujet | Fichier(s) | Statut | Priorité | Description |
+|---|---|---|---|---|---|
+| 28 | 3 systèmes de calcul R:R non unifiés | `strategy_eval.py`, `risk.py`, `probability_engine.py` | 🔴 | Haute | Trois calculs indépendants de R:R avec formules différentes. Aucun ne sert de référence canonique. Unification nécessaire pour cohérence des signaux et du backtest. |
+| 29 | 3 mécanismes de trailing stop non orchestrés | `trailing_stop.py`, `scan.py` (SL liquidity-aware), `probability.py` | 🔴 | Haute | Trois systèmes de trailing stop indépendants. Aucune orchestration définissant quel mécanisme s'applique quand, ni priorité en cas de conflit. |
+| 30 | sr_zones.py vs smc.py — définitions divergentes de zone | `sr_zones.py`, `smc.py` | 🔴 | Moyenne | Deux modules calculent des zones de support/résistance avec des méthodes différentes. Les deux alimentent `analyze_candles` mais ne sont pas réconciliés. |
+| 31 | Backtest — Binance-only | `backtest.py:13,143` | 🔴 | Moyenne | `fetch_binance_klines` uniquement. Forex, Synthetic, Commodities, BRVM ne sont pas backtestables. Refetch multi-provider nécessaire. |
+| 32 | Backtest — contexte manquant à l'appel | `backtest.py:225` | 🔴 | Moyenne | `analyze_candles` appelé sans `htf_regime`/`mtf_regime`/`onchain`/`forex_context`/`tokenomics_context`/`social_context`. Version appauvrie non comparable au pipeline live. |
+| 33 | quota.service.ts — TOCTOU race condition | `quota.service.ts` | 🟡 | Moyenne | `assertSignalQuota` (lecture) puis `incrementSignalUsage` (écriture) sans atomicité. Double scan concurrent peut dépasser la limite. Fix: contrainte atomique DB (`UPDATE ... WHERE used < limit RETURNING ...`). |
+| 34 | quota.service.ts — fail-open sans abonnement | `quota.service.ts` | 🟡 | Moyenne | `getPlanLimits` retourne `null` si pas d'abonnement → toutes les fonctions `assert*` retournent sans restriction. Accès illimité pour utilisateurs sans abonnement. Décision design: fail-open volontaire ou free tier avec limites? |
+| 35 | brvm_reports.py — format date PDF à vérifier | `brvm_reports.py:83-90` | 🟡 | Moyenne | `_extract_pdf_date` suppose `YYYYMMDD-` ou `YYYYMMDD_` dans l'URL du PDF. Si le format réel diffère sur brvm.org, `published_at` reste `None` pour tous → `fundamental_score` retourne 0 silencieusement. À vérifier empiriquement. |
+| 36 | brvm.py — EMA/RSI approximés depuis quote unique | `brvm.py:140-261` | 🟡 | Moyenne | `fetch_brvm_quotes` retourne un instantané (prix, change_pct, volume) sans série temporelle. Construction d'EMA20/50/200/RSI/ATR à partir d'une seule observation — possiblement hallucinée. À vérifier. |

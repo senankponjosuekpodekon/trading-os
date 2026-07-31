@@ -72,7 +72,7 @@ _SYMBOL_SLUG_OVERRIDES = {
     "BICC": "bici-ci",
     "CBIBF": "coris-bank-international",
     "ABJC": "abidjan",
-    "STAC": "slibra",
+    "STAC": "solibra",
 }
 
 
@@ -140,7 +140,13 @@ async def fetch_reports_index(page: int = 0) -> List[BrvmIssuer]:
 
 async def fetch_all_issuers(max_pages: int = 5) -> List[BrvmIssuer]:
     """Récupère toutes les pages d'émetteurs (avec déduplication)."""
-    pages = await asyncio.gather(*[fetch_reports_index(p) for p in range(max_pages)])
+    try:
+        pages = await asyncio.wait_for(
+            asyncio.gather(*[fetch_reports_index(p) for p in range(max_pages)]),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        return []
     seen = set()
     issuers = []
     for p in pages:

@@ -122,7 +122,7 @@ export class FeatureStoreService {
     if (outcome) where.outcome = outcome;
     if (market || timeframe) {
       where.signal = {};
-      if (market) where.signal.asset = { market: { name: market } };
+      if (market) where.signal.asset = { market: { name: { equals: market, mode: 'insensitive' } } };
       if (timeframe) where.signal.timeframe = timeframe;
     }
     const take = Math.min(Math.max(opts.limit ?? 100, 1), 1000);

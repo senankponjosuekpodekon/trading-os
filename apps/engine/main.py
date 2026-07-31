@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query as _Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse as _JSONResponse
 from contextlib import asynccontextmanager
 import structlog
 import os
@@ -134,6 +135,48 @@ app.include_router(ml_signals.router, tags=["ML"])
 app.include_router(expected_move.router)
 app.include_router(ml_regime.router, prefix="", tags=["ML"])
 app.include_router(dex_discovery.router, prefix="/dex", tags=["DEX Discovery"])
+
+
+# ── Candles endpoint (used by API predictMlRegime) ───────────────────
+
+
+@app.get("/candles/{symbol:path}", tags=["Market Data"])
+async def get_candles(
+    symbol: str,
+    timeframe: str = _Query("1h"),
+    limit: int = _Query(200, ge=50, le=1000),
+):
+    """Return raw OHLCV candles for a symbol (multi-provider fallback)."""
+    from routers.scan import (
+        fetch_binance_klines,
+        fetch_deriv_klines,
+        fetch_twelvedata_klines,
+        fetch_yfinance_klines,
+        TF_MAP,
+    )
+
+    tf = TF_MAP.get(timeframe, timeframe)
+    df = await fetch_binance_klines(symbol, tf, limit)
+    if df is None:
+        df = await fetch_deriv_klines(symbol, tf, limit)
+    if df is None:
+        df = await fetch_twelvedata_klines(symbol, tf, limit)
+    if df is None:
+        df = await fetch_yfinance_klines(symbol, tf, limit)
+    if df is None or df.empty:
+        return _JSONResponse(status_code=404, content={"error": f"No data for {symbol}/{timeframe}"})
+
+    candles = []
+    for _, row in df.tail(limit).iterrows():
+        candles.append({
+            "time": int(row.get("time", 0)),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+    return {"symbol": symbol, "timeframe": timeframe, "candles": candles}
 
 if __name__ == "__main__":
     import uvicorn

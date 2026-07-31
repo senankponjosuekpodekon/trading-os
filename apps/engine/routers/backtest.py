@@ -77,12 +77,13 @@ class BacktestResult(BaseModel):
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def compute_sharpe(returns: list[float], risk_free: float = 0.0) -> float:
+    """Per-trade Sharpe ratio (no annualization — trades have variable frequency)."""
     if len(returns) < 2:
         return 0.0
     arr  = np.array(returns)
     mean = np.mean(arr) - risk_free
     std  = np.std(arr)
-    return round(float(mean / std * np.sqrt(252)) if std > 0 else 0.0, 3)
+    return round(float(mean / std) if std > 0 else 0.0, 3)
 
 
 def compute_pattern_stats(trades: list[dict]) -> dict[str, dict[str, float | int]]:
@@ -179,8 +180,18 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
                 hit_sl = bar_high >= stop_loss
                 hit_tp = bar_low  <= take_profit
 
-            if hit_tp or hit_sl or (i - entry_bar >= 24):
-                exit_price = take_profit if hit_tp else (stop_loss if hit_sl else bar_close)
+            # Adaptive timeout: longer hold for higher timeframes
+            _tf_bars = {'15m': 96, '1h': 72, '4h': 42, '1d': 21, '1w': 12}
+            _max_bars = _tf_bars.get(req.timeframe, 24)
+            if hit_tp or hit_sl or (i - entry_bar >= _max_bars):
+                # Conservative intrabar resolution: if both TP and SL hit on same bar,
+                # assume SL hit first (pessimistic — avoids inflating win rate)
+                if hit_sl:
+                    exit_price = stop_loss
+                elif hit_tp:
+                    exit_price = take_profit
+                else:
+                    exit_price = bar_close
                 sl_dist    = abs(entry_price - stop_loss)
                 risk_amt   = capital * req.risk_pct / 100
                 qty        = risk_amt / sl_dist if sl_dist > 0 else 0

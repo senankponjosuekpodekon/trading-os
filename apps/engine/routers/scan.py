@@ -1262,6 +1262,64 @@ def analyze_candles(
                     confidence = 0
                     reasons.append(f"[FILTERED] {filter_reason}")
 
+        # ── Re-apply risk guards that evaluate_strategy doesn't know about ──
+        # evaluate_strategy overwrites signal/confidence/score, so guards applied
+        # earlier in the pipeline are silently bypassed. Re-apply them here.
+
+        # Forex macro risk: suspend signals before high-impact news
+        if signal != "NEUTRAL" and asset_type == "FOREX" and forex_context and forex_context.get("macro_risk"):
+            signal = "NEUTRAL"
+            confidence = 0
+            reasons.append("Macro risk: événement HIGH dans <2h — scan forex suspendu")
+
+        # Tokenomics danger: big unlock imminent → signal disabled
+        if signal != "NEUTRAL" and asset_type == "CRYPTO" and tokenomics_flags.get("danger_flag"):
+            signal = "NEUTRAL"
+            confidence = 0
+            reasons.append("Tokenomics: unlock >20% supply <30j — signal désactivé")
+
+        # DXY momentum adjustment for Forex
+        if signal != "NEUTRAL" and asset_type == "FOREX" and forex_context:
+            dxy_adj = forex_context.get("score_adjustment", 0)
+            if dxy_adj:
+                score += dxy_adj
+                reasons.extend(forex_context.get("reasons", []))
+
+        # Social sentiment bonus for Crypto
+        if signal != "NEUTRAL" and asset_type == "CRYPTO" and social_context:
+            _sb, _sr = social_bonus(social_context, signal)
+            if _sb:
+                score += _sb
+                reasons.extend(_sr)
+
+        # MTF confluence score adjustment
+        if signal != "NEUTRAL" and htf_regime and mtf_regime:
+            _strat_dir = "BUY" if score >= 0 else "SELL"
+            if mtf_regime:
+                _mtf_r = mtf_regime.get("regime", "UNKNOWN")
+                if _mtf_r == "TRENDING_BULL" and signal == "BUY":
+                    score += 15; reasons.append(f"MTF({_mtf_tf}): alignement TRENDING_BULL")
+                elif _mtf_r == "TRENDING_BULL" and signal == "SELL":
+                    score -= 25; reasons.append(f"MTF({_mtf_tf}): contre-tendance TRENDING_BULL")
+                elif _mtf_r == "TRENDING_BEAR" and signal == "SELL":
+                    score += 15; reasons.append(f"MTF({_mtf_tf}): alignement TRENDING_BEAR")
+                elif _mtf_r == "TRENDING_BEAR" and signal == "BUY":
+                    score -= 25; reasons.append(f"MTF({_mtf_tf}): contre-tendance TRENDING_BEAR")
+                elif _mtf_r == "VOLATILE":
+                    score -= 15; reasons.append(f"MTF({_mtf_tf}): VOLATILE — réduction score")
+            if htf_regime:
+                _htf_r = htf_regime.get("regime", "UNKNOWN")
+                if _htf_r == "TRENDING_BULL" and signal == "BUY":
+                    score += 10; reasons.append(f"HTF({_htf_tf}): alignement TRENDING_BULL")
+                elif _htf_r == "TRENDING_BULL" and signal == "SELL":
+                    score -= 15; reasons.append(f"HTF({_htf_tf}): contre-tendance TRENDING_BULL")
+                elif _htf_r == "TRENDING_BEAR" and signal == "SELL":
+                    score += 10; reasons.append(f"HTF({_htf_tf}): alignement TRENDING_BEAR")
+                elif _htf_r == "TRENDING_BEAR" and signal == "BUY":
+                    score -= 15; reasons.append(f"HTF({_htf_tf}): contre-tendance TRENDING_BEAR")
+                elif _htf_r == "VOLATILE":
+                    score -= 10; reasons.append(f"HTF({_htf_tf}): VOLATILE — réduction score")
+
         # ── Re-apply liquidity-aware SL/TP after strategy merge ──
         # evaluate_strategy returns ATR-based SL/TP which overwrites the
         # liquidity-aware adjustments computed above. Re-apply them here

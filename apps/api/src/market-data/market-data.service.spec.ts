@@ -69,9 +69,11 @@ describe('MarketDataService', () => {
 
   describe('getEconomicCalendar', () => {
     it('should return filtered high/medium impact events with categories', async () => {
+      // Use a future date so the past-event filter doesn't remove it
+      const futureDate = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
       mockHttp.get.mockReturnValue(of({ data: [
-        { date: '2026-07-15', time: '14:30', country: 'USD', impact: 'High', title: 'CPI', forecast: '0.3%', previous: '0.4%' },
-        { date: '2026-07-15', time: '08:00', country: 'EUR', impact: 'Low', title: 'Retail sales', forecast: '', previous: '' },
+        { date: futureDate, time: '14:30', country: 'USD', impact: 'High', title: 'CPI', forecast: '0.3%', previous: '0.4%' },
+        { date: futureDate, time: '08:00', country: 'EUR', impact: 'Low', title: 'Retail sales', forecast: '', previous: '' },
       ]}));
 
       const result = await service.getEconomicCalendar();
@@ -79,17 +81,16 @@ describe('MarketDataService', () => {
       const external = result.filter(e => e.title === 'CPI');
       expect(external).toHaveLength(1);
       expect(external[0].category).toBe('CPI');
-      expect(result.some(e => e.category === 'FOMC')).toBe(true);
+      // No hardcoded fallback events prepended
+      expect(result.some(e => e.category === 'FOMC')).toBe(false);
     });
 
-    it('should return fallback macro events on error', async () => {
+    it('should return empty array on error (no stale hardcoded events)', async () => {
       mockHttp.get.mockReturnValue(throwError(() => new Error('network')));
 
       const result = await service.getEconomicCalendar();
 
-      expect(result.length).toBeGreaterThan(0);
-      expect(result.some(e => e.category === 'FOMC')).toBe(true);
-      expect(result.some(e => e.category === 'NFP')).toBe(true);
+      expect(result).toEqual([]);
     });
   });
 

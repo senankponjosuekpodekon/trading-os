@@ -86,7 +86,7 @@ describe('FeatureStoreService', () => {
       where: {
         outcome: 'WIN_TP1',
         signal: {
-          asset: { market: { name: 'CRYPTO' } },
+          asset: { market: { name: { equals: 'CRYPTO', mode: 'insensitive' } } },
           timeframe: '1h',
         },
       },
