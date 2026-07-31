@@ -10,6 +10,9 @@ from patterns.double_top import detect_double_top, detect_double_bottom
 from patterns.head_shoulders import detect_head_and_shoulders, detect_inverse_head_and_shoulders
 from patterns.harmonic import detect_harmonic
 from patterns.pattern import MarketPattern
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def detect_all(df: pd.DataFrame, harmonic_tolerance: float = 0.02) -> list[dict[str, Any]]:
@@ -38,8 +41,8 @@ def detect_all(df: pd.DataFrame, harmonic_tolerance: float = 0.02) -> list[dict[
                 found.extend(result)
             else:
                 found.append(result)
-        except Exception:
-            # Pattern detection must never crash the scan pipeline.
+        except Exception as exc:
+            logger.warning("pattern_detector_failed", detector=fn.__name__, error=str(exc))
             continue
 
     # Sort by recency of point D / last point and then confidence
@@ -51,6 +54,8 @@ def detect_all(df: pd.DataFrame, harmonic_tolerance: float = 0.02) -> list[dict[
             return int(points["right_peak"].get("idx", 0))
         if "right_shoulder" in points:
             return int(points["right_shoulder"].get("idx", 0))
+        if "right_trough" in points:
+            return int(points["right_trough"].get("idx", 0))
         return 0
 
     found.sort(key=lambda p: (_recency(p), p.confidence), reverse=True)

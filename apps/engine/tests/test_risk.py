@@ -50,9 +50,10 @@ class TestCalcTargets:
         assert tp2 == 85.0
 
     def test_buy_targets_with_atr(self):
+        # atr is accepted but ignored — TPs are always R/R-based (sl_dist * rr)
         tp1, tp2 = calc_targets(100, 95, "BUY", atr=3.0)
-        assert tp1 == 106.0
-        assert tp2 == 110.5
+        assert tp1 == 110.0
+        assert tp2 == 115.0
 
 
 class TestRegimeRiskAdjustment:

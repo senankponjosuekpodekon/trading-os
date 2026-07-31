@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from indicators.swing import find_pivot_highs, find_pivot_lows, get_last_swing_points
+from utils.direction import normalize_direction, directions_aligned
 
 
 # ─── Swing Points ─────────────────────────────────────────────────────────────
@@ -192,15 +193,13 @@ def price_action_bonus(pa: dict, signal_direction: str) -> tuple[int, list[str]]
     reasons = []
 
     trend = pa.get("trend", "NEUTRAL")
+    trend_norm = normalize_direction(trend)
 
     # Alignement trend + signal
-    if signal_direction == "BUY" and trend == "BULLISH":
+    if directions_aligned(trend, signal_direction):
         bonus += 15
-        reasons.append(f"PA: trend bullish ({pa.get('structure','')})")
-    elif signal_direction == "SELL" and trend == "BEARISH":
-        bonus += 15
-        reasons.append(f"PA: trend bearish ({pa.get('structure','')})")
-    elif trend == "NEUTRAL":
+        reasons.append(f"PA: trend {trend_norm.lower()} ({pa.get('structure','')})")
+    elif trend_norm == "NEUTRAL":
         pass
     else:
         bonus -= 10
@@ -208,23 +207,14 @@ def price_action_bonus(pa: dict, signal_direction: str) -> tuple[int, list[str]]
 
     # BOS dans le sens du signal
     _bos_dir = pa.get("bos_dir")
-    _bos_aligned = (
-        _bos_dir and (
-            (signal_direction == "BUY" and _bos_dir in ("BULLISH", "up")) or
-            (signal_direction == "SELL" and _bos_dir in ("BEARISH", "down"))
-        )
-    )
-    if pa.get("bos") and _bos_aligned:
+    if pa.get("bos") and directions_aligned(_bos_dir, signal_direction):
         bonus += 12
         reasons.append(f"PA: BOS {_bos_dir}")
 
     # CHoCH = renforcement si dans le sens du signal
     if pa.get("choch"):
-        if signal_direction == "BUY" and trend != "BULLISH":
+        if not directions_aligned(trend, signal_direction):
             bonus += 8
-            reasons.append("PA: CHoCH bullish potentiel")
-        elif signal_direction == "SELL" and trend != "BEARISH":
-            bonus += 8
-            reasons.append("PA: CHoCH bearish potentiel")
+            reasons.append(f"PA: CHoCH {trend_norm.lower()} potentiel")
 
     return bonus, reasons

@@ -8,6 +8,7 @@ import pandas as pd
 
 from indicators.swing import find_pivot_highs, find_pivot_lows
 from patterns.pattern import MarketPattern
+from patterns.double_top import _pattern_buffer
 
 
 def _in_range(a: float, b: float, tolerance: float) -> bool:
@@ -49,7 +50,7 @@ def detect_head_and_shoulders(
     neckline = float(between["low"].min())
 
     measured = h - neckline
-    buffer = float(df["high"].iloc[-1] - df["low"].iloc[-1]) * 0.3
+    buffer = _pattern_buffer(df)
 
     return MarketPattern(
         name="head_and_shoulders",
@@ -101,7 +102,7 @@ def detect_inverse_head_and_shoulders(
     neckline = float(between["high"].max())
 
     measured = neckline - h
-    buffer = float(df["high"].iloc[-1] - df["low"].iloc[-1]) * 0.3
+    buffer = _pattern_buffer(df)
 
     return MarketPattern(
         name="inverse_head_and_shoulders",

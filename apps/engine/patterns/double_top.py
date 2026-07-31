@@ -9,8 +9,23 @@ from indicators.swing import find_pivot_highs, find_pivot_lows
 from patterns.pattern import MarketPattern
 
 
-def _range_at(df: pd.DataFrame, idx: int) -> float:
-    return float(df["high"].iloc[idx] - df["low"].iloc[idx])
+def _atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(period, min_periods=1).mean()
+
+
+def _pattern_buffer(df: pd.DataFrame) -> float:
+    """ATR(14)-based buffer for stop-loss/PRZ, consistent with the rest of the codebase."""
+    atr_s = _atr(df["high"], df["low"], df["close"])
+    atr_val = float(atr_s.iloc[-1]) if not pd.isna(atr_s.iloc[-1]) else 0.0
+    if atr_val <= 0:
+        atr_val = float(df["high"].iloc[-1] - df["low"].iloc[-1])
+    return atr_val * 0.3
 
 
 def detect_double_top(
@@ -51,7 +66,7 @@ def detect_double_top(
         return None
 
     measured = avg - neckline
-    buffer = _range_at(df, -1) * 0.3
+    buffer = _pattern_buffer(df)
 
     return MarketPattern(
         name="double_top",
@@ -102,7 +117,7 @@ def detect_double_bottom(
         return None
 
     measured = neckline - avg
-    buffer = _range_at(df, -1) * 0.3
+    buffer = _pattern_buffer(df)
 
     return MarketPattern(
         name="double_bottom",

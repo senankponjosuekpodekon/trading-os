@@ -1,0 +1,4 @@
+# Test dependencies — install on top of requirements.txt
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+asyncpg>=0.30.0

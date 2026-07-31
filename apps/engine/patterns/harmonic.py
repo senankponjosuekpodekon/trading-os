@@ -8,6 +8,9 @@ import pandas as pd
 
 from indicators.swing import find_pivot_highs, find_pivot_lows
 from patterns.pattern import MarketPattern
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 FIB = {
@@ -18,7 +21,9 @@ FIB = {
     "0.886": 0.886,
     "1.272": 1.272,
     "1.618": 1.618,
+    "2.24": 2.24,
     "2.618": 2.618,
+    "3.618": 3.618,
 }
 
 
@@ -66,7 +71,9 @@ def _alternating_pivots(df: pd.DataFrame, left: int = 3, right: int = 3, min_atr
             last_opp = p
             continue
         idx = p["idx"]
-        current_atr = max(float(atr_s.iloc[idx]) if not pd.isna(atr_s.iloc[idx]) else 0.0, close.std() * 0.5)
+        current_atr = max(float(atr_s.iloc[idx]) if not pd.isna(atr_s.iloc[idx]) else 0.0,
+                          float(close.rolling(14, min_periods=3).std().iloc[idx]) * 0.5
+                          if not pd.isna(close.rolling(14, min_periods=3).std().iloc[idx]) else 0.0)
         amplitude = abs(p["price"] - last_opp["price"])
         if amplitude >= min_atr_multiple * current_atr:
             significant.append(p)
@@ -287,7 +294,7 @@ def _check_crab(x: dict, a: dict, b: dict, c: dict, d: dict, tolerance: float) -
         return None
     if not any(_ratio_error(bc_ab, t) <= tolerance for t in (FIB["0.382"], FIB["0.886"])):
         return None
-    if not any(_ratio_error(cd_bc, t) <= tolerance for t in (FIB["2.618"], FIB["3.14"])):
+    if not any(_ratio_error(cd_bc, t) <= tolerance for t in (FIB["2.618"], FIB["3.618"])):
         return None
     if _ratio_error(ad_xa, FIB["1.618"]) > tolerance:
         return None
@@ -296,7 +303,7 @@ def _check_crab(x: dict, a: dict, b: dict, c: dict, d: dict, tolerance: float) -
     errors = [
         min(_ratio_error(ab_xa, t) for t in (FIB["0.382"], FIB["0.5"], FIB["0.618"])),
         min(_ratio_error(bc_ab, t) for t in (FIB["0.382"], FIB["0.886"])),
-        min(_ratio_error(cd_bc, t) for t in (FIB["2.618"], FIB["3.14"])),
+        min(_ratio_error(cd_bc, t) for t in (FIB["2.618"], FIB["3.618"])),
         _ratio_error(ad_xa, FIB["1.618"]),
     ]
     conf = _score(errors, tolerance)
@@ -347,7 +354,11 @@ def detect_harmonic(df: pd.DataFrame, tolerance: float = 0.02) -> list[MarketPat
             continue
         for check in (_check_abcd, _check_gartley, _check_bat,
                       _check_butterfly, _check_crab, _check_shark, _check_5_0):
-            res = check(x, a, b, c, d, tolerance)
+            try:
+                res = check(x, a, b, c, d, tolerance)
+            except Exception as exc:
+                logger.warning("harmonic_check_failed", pattern=check.__name__, error=str(exc))
+                continue
             if res:
                 found.append(
                     MarketPattern(

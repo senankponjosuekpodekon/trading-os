@@ -5,6 +5,7 @@ Les règles JSON définissent les paramètres du scan (EMA, RSI, seuils, filtres
 from dataclasses import dataclass, field
 from typing import Optional
 from utils.predictive import compute_predictive_metrics
+from utils.direction import directions_aligned
 
 
 @dataclass
@@ -142,10 +143,8 @@ def _apply_trigger(
     if entry_rules.get("bos"):
         bos = pa.get("bos")
         bos_dir = pa.get("bos_dir")
-        if signal == "BUY" and not (bos and bos_dir in ("up", "BULLISH")):
-            return {**result, "signal": "NEUTRAL", "reason": "BOS up not detected"}
-        if signal == "SELL" and not (bos and bos_dir in ("down", "BEARISH")):
-            return {**result, "signal": "NEUTRAL", "reason": "BOS down not detected"}
+        if not (bos and directions_aligned(bos_dir, signal)):
+            return {**result, "signal": "NEUTRAL", "reason": f"BOS not aligned with {signal}"}
 
     # --- trigger modes ---
     if trigger == "BREAKOUT":

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.direction import normalize_direction
+
 
 def _zone_overlap(a: dict[str, float], b: dict[str, float]) -> float:
     """Overlap ratio of two price zones {min, max}."""
@@ -74,12 +76,12 @@ def score_pattern_confluence(
         tags.append("HTF counter-trend")
 
     # 2. Price action trend / BOS / CHoCH
-    pa_trend = (pa.get("trend") or "NEUTRAL").upper()
-    if pa_trend == direction:
+    pa_trend = normalize_direction(pa.get("trend"))
+    if pa_trend == direction and pa_trend != "NEUTRAL":
         score += 0.10
         tags.append("PA trend aligned")
-    bos_dir = (pa.get("bos_dir") or "").upper()
-    if pa.get("bos") and bos_dir == direction:
+    bos_dir = normalize_direction(pa.get("bos_dir"))
+    if pa.get("bos") and bos_dir == direction and bos_dir != "NEUTRAL":
         score += 0.08
         tags.append("BOS aligned")
     if pa.get("choch"):

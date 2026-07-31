@@ -3,6 +3,8 @@ Phase 2 — Candlestick Patterns : Pin Bar, Engulfing, Doji, Inside Bar
 """
 import pandas as pd
 
+from utils.direction import directions_aligned, directions_opposed
+
 
 def detect_pin_bar(open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series, idx: int) -> str | None:
     """
@@ -110,18 +112,18 @@ def patterns_bonus(patterns: dict, signal_direction: str) -> tuple[int, list[str
     reasons = []
 
     pin = patterns.get("pin_bar")
-    if pin == signal_direction:
+    if directions_aligned(pin, signal_direction):
         bonus += 15
         reasons.append(f"Pattern: Pin Bar {pin}")
-    elif pin and pin != signal_direction:
+    elif directions_opposed(pin, signal_direction):
         bonus -= 8
         reasons.append(f"Pattern: Pin Bar contre-tendance ({pin})")
 
     eng = patterns.get("engulfing")
-    if eng == signal_direction:
+    if directions_aligned(eng, signal_direction):
         bonus += 15
         reasons.append(f"Pattern: Engulfing {eng}")
-    elif eng and eng != signal_direction:
+    elif directions_opposed(eng, signal_direction):
         bonus -= 8
         reasons.append(f"Pattern: Engulfing contre-tendance ({eng})")
 
