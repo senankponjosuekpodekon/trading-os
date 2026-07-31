@@ -461,6 +461,7 @@ describe('PositionsService', () => {
         takeProfit2: '120',
       });
       mockPrisma.portfolio.findFirst.mockResolvedValue({ id: 'p1', currentCapital: 10000, initialCapital: 10000 });
+      mockPrisma.position.findFirst.mockResolvedValue(null);
 
       await expect(service.openFromSignal('u1', 'sig2')).rejects.toThrow(BadRequestException);
     });

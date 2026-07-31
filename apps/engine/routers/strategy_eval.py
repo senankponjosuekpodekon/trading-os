@@ -200,9 +200,17 @@ def _apply_trigger(
 def parse_rules(rules_json: dict) -> StrategyRules:
     """Convertit le dict JSON de règles en objet StrategyRules."""
     r = StrategyRules()
+    valid_fields = set(r.__dataclass_fields__.keys())
     for key, val in rules_json.items():
-        if hasattr(r, key):
+        if key in valid_fields:
             setattr(r, key, val)
+        else:
+            import structlog
+            structlog.get_logger().warning(
+                "parse_rules: unknown key in strategy rules",
+                key=key,
+                valid_fields=sorted(valid_fields),
+            )
     return r
 
 

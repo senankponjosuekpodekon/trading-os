@@ -52,13 +52,30 @@ export class PositionsService {
   }
 
   private async fetchLivePrice(symbol: string): Promise<number | null> {
+    // 1. Fast path: Binance ticker for known pairs
     const binSym = SYM_MAP[symbol];
-    if (!binSym) return null;
+    if (binSym) {
+      try {
+        const { data } = await firstValueFrom(
+          this.http.get<{ price: string }>(BINANCE_TICKER, { params: { symbol: binSym } }),
+        );
+        return parseFloat(data.price);
+      } catch {
+        // fall through to engine
+      }
+    }
+    // 2. Fallback: engine /candles endpoint (multi-provider: deriv, twelvedata, yfinance)
     try {
       const { data } = await firstValueFrom(
-        this.http.get<{ price: string }>(BINANCE_TICKER, { params: { symbol: binSym } }),
+        this.http.get<{ candles: Array<{ close: number }> }>(
+          `${this.engineUrl}/candles/${encodeURIComponent(symbol)}`,
+          { params: { timeframe: '1m', limit: 1 } },
+        ),
       );
-      return parseFloat(data.price);
+      if (data.candles && data.candles.length > 0) {
+        return parseFloat(String(data.candles[data.candles.length - 1].close));
+      }
+      return null;
     } catch {
       return null;
     }
@@ -374,6 +391,16 @@ export class PositionsService {
       ? await this.getOrCreatePaperPortfolio(userId)
       : await this.prisma.portfolio.findFirst({ where: { userId, type: 'LIVE' } });
     if (!portfolio) throw new NotFoundException('No portfolio found');
+
+    // Anti-doublon: même garde-fou que create()
+    const duplicate = await this.prisma.position.findFirst({
+      where: {
+        portfolioId: portfolio.id,
+        assetId: signal.assetId,
+        status: { in: ['OPEN', 'PARTIAL'] },
+      },
+    });
+    if (duplicate) throw new ConflictException('DUPLICATE_POSITION');
 
     const capital    = parseFloat(portfolio.currentCapital.toString());
     const riskPct    = 0.01;  // 1% risque par défaut

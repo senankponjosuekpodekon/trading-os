@@ -187,7 +187,7 @@ def _liquidity_pressure(
             score += 0.1
 
     if sr:
-        zones = sr.get("zones", [])
+        zones = sr.get("supports", []) + sr.get("resistances", [])
         # if price near a clustered zone
         if zones and len([z for z in zones if z.get("strength", 0) > 3]) > 0:
             score += 0.1
