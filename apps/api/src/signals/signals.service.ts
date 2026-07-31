@@ -37,20 +37,18 @@ export class SignalsService {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
 
-  private async predictMlRegime(expectedMoveEngine?: any): Promise<string | null> {
-    if (!expectedMoveEngine || !Array.isArray(expectedMoveEngine?.ranges) || expectedMoveEngine.ranges.length === 0) {
-      return null;
-    }
-    const close = expectedMoveEngine.close ?? expectedMoveEngine.price ?? null;
-    if (typeof close !== 'number') return null;
-    const prices: number[] = [close];
-    for (const range of expectedMoveEngine.ranges.slice(0, 5)) {
-      if (typeof range.move_pct !== 'number') continue;
-      prices.push(close * (1 + range.move_pct / 100));
-      prices.push(close * (1 - range.move_pct / 100));
-    }
-    if (prices.length < 5) return null;
+  private async predictMlRegime(symbol?: string, timeframe?: string): Promise<string | null> {
+    // Fetch real historical closes from the engine instead of fabricating prices
+    const sym = symbol ?? 'BTC/USDT';
+    const tf = timeframe ?? '1d';
     try {
+      const url = `${this.engineUrl}/candles/${encodeURIComponent(sym)}?timeframe=${tf}&limit=200`;
+      const { data } = await firstValueFrom(this.http.get(url));
+      const candles = Array.isArray(data) ? data : (data?.candles ?? []);
+      const prices: number[] = candles
+        .map((c: any) => parseFloat(c.close ?? c.c ?? c.price))
+        .filter((p: number) => !isNaN(p) && p > 0);
+      if (prices.length < 5) return null;
       const response = await this.regimeClassifier.predict(prices);
       return Array.isArray(response?.regimes) && response.regimes.length > 0
         ? response.regimes[response.regimes.length - 1]
@@ -128,13 +126,13 @@ export class SignalsService {
   @Cron('0 6 * * *', { timeZone: 'UTC' })
   async scheduledMorningScan() {
     this.logger.log('CRON: lancement du scan matinal (06:00 UTC)');
-    await this._scanActiveAssets('1h');
+    await this._scanActiveAssetsByTimeframe();
   }
 
   @Cron('0 */4 * * *', { timeZone: 'UTC' })
   async scheduledDayScan() {
     this.logger.log('CRON: lancement du scan toutes les 4h');
-    await this._scanActiveAssets('1h');
+    await this._scanActiveAssetsByTimeframe();
   }
 
   @Cron('15 */6 * * *', { timeZone: 'UTC' })
@@ -146,7 +144,14 @@ export class SignalsService {
     }
   }
 
-  private async _scanActiveAssets(timeframe: string) {
+  /**
+   * Scan all active assets grouped by strategy analysisTimeframe.
+   * Each strategy defines its own analysisTimeframe (e.g. '4h', '1d', '15m').
+   * Instead of forcing '1h' for all, we group strategies by their analysisTimeframe
+   * and call triggerScan once per timeframe group so candles are fetched at the
+   * correct resolution for each strategy.
+   */
+  private async _scanActiveAssetsByTimeframe() {
     const [assets, strategies] = await Promise.all([
       this.prisma.asset.findMany({
         where: { isActive: true },
@@ -162,7 +167,26 @@ export class SignalsService {
       this.logger.warn('Aucun actif actif à scanner');
       return;
     }
-    return this.triggerScan(symbols, timeframe, { strategies });
+    if (!strategies.length) {
+      // No strategies — fallback to default timeframe
+      return this.triggerScan(symbols, '1h', { strategies: [] });
+    }
+
+    // Group strategies by analysisTimeframe
+    const byTf = new Map<string, any[]>();
+    for (const s of strategies) {
+      const tf = s.analysisTimeframe || (s.rules as any)?.analysis_timeframe || '1h';
+      if (!byTf.has(tf)) byTf.set(tf, []);
+      byTf.get(tf)!.push(s);
+    }
+
+    // Launch one scan per timeframe group
+    const scans: Promise<any>[] = [];
+    for (const [tf, tfStrategies] of byTf) {
+      this.logger.log(`CRON: scan ${tfStrategies.length} stratégies sur TF=${tf}, ${symbols.length} symboles`);
+      scans.push(this.triggerScan(symbols, tf, { strategies: tfStrategies }));
+    }
+    await Promise.allSettled(scans);
   }
 
   async findAll(opts: { page: number; limit: number; sort: string; profile?: string; market?: string }) {
@@ -377,7 +401,10 @@ export class SignalsService {
     for (const r of results) {
       // Ne pas persister les signaux encore en attente de confirmation hystérésis
       if (!r.signal || r.signal === 'NEUTRAL' || r.confidence < 50) continue;
-      if (r.signal_pending === true) continue;
+      // signal_pending from hysteresis (not yet confirmed by 2 scans) → skip
+      // signal_pending from RETEST/LIMIT trigger → persist as PENDING status
+      const isHysteresisPending = r.signal_pending === true && r.trigger !== 'RETEST' && r.trigger !== 'LIMIT';
+      if (isHysteresisPending) continue;
 
       const asset = await this.prisma.asset.findUnique({
         where: { symbol: r.symbol },
@@ -390,7 +417,12 @@ export class SignalsService {
         strategy = await this.prisma.strategy.findUnique({ where: { id: r.strategy_id } });
       }
       if (!strategy) {
-        strategy = defaultStrategy;
+        // BRVM signals have no strategy_id — don't mislabel them as 'EMA Trend + RSI'
+        // Only use defaultStrategy for crypto/forex signals that should have one
+        const isBrvm = !r.symbol.includes('/') || (r.symbol.length <= 5 && !r.symbol.includes('/'));
+        if (!isBrvm) {
+          strategy = defaultStrategy;
+        }
       }
       if (!strategy) continue;
 
@@ -409,7 +441,7 @@ export class SignalsService {
       const expectedMoveSnapshot = expectedMoveSummary ?? r.expected_move ?? null;
 
       const mlConfidence = await this.predictMlConfidence(r);
-      const mlRegime = await this.predictMlRegime(expectedMoveDetails);
+      const mlRegime = await this.predictMlRegime(r.symbol, r.timeframe);
 
       const signal = await this.prisma.signal.create({
         data: {

@@ -21,6 +21,13 @@ async def submit_feedback(user_id: str, feedback: SignalFeedback):
     entry = feedback.dict()
     entry["user_id"] = user_id
     _feedback_store.setdefault(feedback.signal_id, []).append(entry)
+
+    # Update leaderboard
+    lb = _leaderboard_store.setdefault(user_id, {"user_id": user_id, "feedbacks": 0, "avg_grade": 0.0})
+    lb["feedbacks"] += 1
+    all_grades = [e["grade"] for entries in _feedback_store.values() for e in entries if e.get("user_id") == user_id]
+    lb["avg_grade"] = round(sum(all_grades) / len(all_grades), 2) if all_grades else 0.0
+
     return {"status": "ok", "feedback_id": len(_feedback_store[feedback.signal_id])}
 
 

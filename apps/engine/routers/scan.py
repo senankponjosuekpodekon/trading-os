@@ -54,8 +54,8 @@ ACTIVE_SYMBOLS = [
     "ADA/USDT", "XRP/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT",
     "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD",
     "XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD",
-    "VIX75/USD", "VIX25/USD", "VIX10/USD",
-    "BOOM1000/USD", "CRASH1000/USD",
+    "V75", "V25", "V10",
+    "BOOM1000", "CRASH1000",
 ]
 
 # Actifs Binance prioritaires → scan rapide (Binance = gratuit, sans limite)
@@ -165,25 +165,25 @@ _CACHE_TTL_DERIV = 60   # Deriv : cache 1 min
 
 # Mapping symboles internes → identifiants API Deriv
 SYMBOL_TO_DERIV = {
-    # Volatility Indices
-    "VIX10/USD":   "R_10",
-    "VIX25/USD":   "R_25",
-    "VIX50/USD":   "R_50",
-    "VIX75/USD":   "R_75",
-    "VIX100/USD":  "R_100",
+    # Volatility Indices — aliases courts (format seed) + aliases longs (legacy)
+    "V10":   "R_10",   "VIX10/USD":   "R_10",
+    "V25":   "R_25",   "VIX25/USD":   "R_25",
+    "V50":   "R_50",   "VIX50/USD":   "R_50",
+    "V75":   "R_75",   "VIX75/USD":   "R_75",
+    "V100":  "R_100",  "VIX100/USD":  "R_100",
     # Boom & Crash
-    "BOOM300/USD":   "BOOM300N",
-    "BOOM500/USD":   "BOOM500",
-    "BOOM1000/USD":  "BOOM1000",
-    "CRASH300/USD":  "CRASH300N",
-    "CRASH500/USD":  "CRASH500",
-    "CRASH1000/USD": "CRASH1000",
+    "BOOM300":   "BOOM300N", "BOOM300/USD":   "BOOM300N",
+    "BOOM500":   "BOOM500",  "BOOM500/USD":   "BOOM500",
+    "BOOM1000":  "BOOM1000", "BOOM1000/USD":  "BOOM1000",
+    "CRASH300":  "CRASH300N","CRASH300/USD":  "CRASH300N",
+    "CRASH500":  "CRASH500", "CRASH500/USD":  "CRASH500",
+    "CRASH1000": "CRASH1000","CRASH1000/USD": "CRASH1000",
     # Jump Indices
-    "JUMP10/USD":  "JD10",
-    "JUMP25/USD":  "JD25",
-    "JUMP50/USD":  "JD50",
-    "JUMP75/USD":  "JD75",
-    "JUMP100/USD": "JD100",
+    "JUMP10":  "JD10", "JUMP10/USD":  "JD10",
+    "JUMP25":  "JD25", "JUMP25/USD":  "JD25",
+    "JUMP50":  "JD50", "JUMP50/USD":  "JD50",
+    "JUMP75":  "JD75", "JUMP75/USD":  "JD75",
+    "JUMP100": "JD100","JUMP100/USD": "JD100",
 }
 
 # Conversion timeframe → granularité Deriv en secondes
@@ -781,6 +781,16 @@ def analyze_candles(
     score = 0
     reasons = []
 
+    # Sub-scores for ML feature store (score_trend, score_pa, etc.)
+    _sub_trend = 0
+    _sub_pa = 0
+    _sub_sr = 0
+    _sub_patterns = 0
+    _sub_regime = 0
+    _sub_smc = 0
+    _sub_mtf = 0
+    _sub_sentiment = 0
+
     # ── Couche 1 : Momentum/Trend (EMA + RSI + MACD groupés, plafond ±50) ──
     # Les trois mesurent la même dimension (momentum directionnel).
     # On les regroupe pour éviter qu'une tendance simple sature le score avant
@@ -843,11 +853,14 @@ def analyze_candles(
     # Conversion trend_raw → score plafonné à ±50
     trend_contribution = max(-50, min(50, int(trend_raw * 12)))
     score += trend_contribution
+    _sub_trend += trend_contribution
     reasons += trend_reasons
 
     # Volume : amplificateur (indépendant du cluster trend)
     if vol_r and vol_r > 1.3:
-        score += 10 if score > 0 else -10
+        _vol_bonus = 10 if score > 0 else -10
+        score += _vol_bonus
+        _sub_trend += _vol_bonus
         reasons.append(f"Volume spike x{vol_r:.1f}")
 
     # ATR : info contextuelle uniquement (pas de score)
@@ -929,6 +942,7 @@ def analyze_candles(
     if temp_signal != "NEUTRAL":
         pa_bonus, pa_reasons = price_action_bonus(pa, temp_signal)
         score += pa_bonus
+        _sub_pa += pa_bonus
         reasons += pa_reasons
 
     # ── Phase 2 : S&R Clustering ──
@@ -936,6 +950,7 @@ def analyze_candles(
     if temp_signal != "NEUTRAL":
         b, r = sr_bonus(sr, temp_signal)
         score += b
+        _sub_sr += b
         reasons += r
 
     # ── Phase 2 : Candlestick Patterns ──
@@ -946,6 +961,7 @@ def analyze_candles(
     if temp_signal != "NEUTRAL":
         b, r = patterns_bonus(pats, temp_signal)
         score += b
+        _sub_patterns += b
         reasons += r
 
     # ── Jour 10 : Régime de marché ──
@@ -954,6 +970,7 @@ def analyze_candles(
     if temp_signal2 != "NEUTRAL":
         b, r = regime_bonus(regime, temp_signal2)
         score += b
+        _sub_regime += b
         reasons += r
 
     # ── Phase 3 : SMC (FVG + Order Blocks + Liquidité) ──
@@ -962,6 +979,7 @@ def analyze_candles(
     if temp_signal3 != "NEUTRAL":
         b, r = smc_bonus(smc["fvg"], smc["ob"], smc["liquidity"], temp_signal3)
         score += b
+        _sub_smc += b
         reasons += r
 
     # ── On-chain (crypto uniquement) : Fear&Greed contrarian + Funding squeeze ──
@@ -971,6 +989,7 @@ def analyze_candles(
             onchain.get("context") or {}, temp_signal3, onchain.get("fear_greed")
         )
         score += b
+        _sub_sentiment += b
         reasons += r
 
         adv_ctx = onchain.get("advanced") or {}
@@ -1029,18 +1048,23 @@ def analyze_candles(
         mtf_r = mtf_regime.get("regime", "UNKNOWN")
         if mtf_r == "TRENDING_BULL" and provisional_dir == "BUY":
             score += 15
+            _sub_mtf += 15
             reasons.append(f"MTF({mtf_label}): alignement TRENDING_BULL")
         elif mtf_r == "TRENDING_BULL" and provisional_dir == "SELL":
             score -= 25
+            _sub_mtf -= 25
             reasons.append(f"MTF({mtf_label}): contre-tendance TRENDING_BULL — pénalité")
         elif mtf_r == "TRENDING_BEAR" and provisional_dir == "SELL":
             score += 15
+            _sub_mtf += 15
             reasons.append(f"MTF({mtf_label}): alignement TRENDING_BEAR")
         elif mtf_r == "TRENDING_BEAR" and provisional_dir == "BUY":
             score -= 25
+            _sub_mtf -= 25
             reasons.append(f"MTF({mtf_label}): contre-tendance TRENDING_BEAR — pénalité")
         elif mtf_r == "VOLATILE":
             score -= 15
+            _sub_mtf -= 15
             reasons.append(f"MTF({mtf_label}): VOLATILE — réduction score")
 
     if htf_regime:
@@ -1048,18 +1072,23 @@ def analyze_candles(
         provisional_dir = "BUY" if score >= 0 else "SELL"  # recalc après MTF
         if htf_r == "TRENDING_BULL" and provisional_dir == "BUY":
             score += 10
+            _sub_mtf += 10
             reasons.append(f"HTF({htf_label}): alignement TRENDING_BULL")
         elif htf_r == "TRENDING_BULL" and provisional_dir == "SELL":
             score -= 15
+            _sub_mtf -= 15
             reasons.append(f"HTF({htf_label}): contre-tendance TRENDING_BULL — pénalité")
         elif htf_r == "TRENDING_BEAR" and provisional_dir == "SELL":
             score += 10
+            _sub_mtf += 10
             reasons.append(f"HTF({htf_label}): alignement TRENDING_BEAR")
         elif htf_r == "TRENDING_BEAR" and provisional_dir == "BUY":
             score -= 15
+            _sub_mtf -= 15
             reasons.append(f"HTF({htf_label}): contre-tendance TRENDING_BEAR — pénalité")
         elif htf_r == "VOLATILE":
             score -= 10
+            _sub_mtf -= 10
             reasons.append(f"HTF({htf_label}): VOLATILE — réduction score")
 
     # ── Forex macro context : DXY momentum adjustment ──
@@ -1215,11 +1244,75 @@ def analyze_candles(
         invalidation = ev["invalidation"]
 
         if signal != "NEUTRAL":
-            allowed, filter_reason = regime_filter(regime, signal)
-            if not allowed:
-                signal = "NEUTRAL"
-                confidence = 0
-                reasons.append(f"[FILTERED] {filter_reason}")
+            _strat_regimes = (strategy.get("rules", {}).get("filters", {}) or {}).get("regime")
+            _cur_regime = regime.get("regime")
+            if _cur_regime == "VOLATILE" and _strat_regimes and "VOLATILE" in _strat_regimes:
+                pass  # strategy explicitly allows VOLATILE — skip only that rule
+            else:
+                allowed, filter_reason = regime_filter(regime, signal)
+                if not allowed:
+                    signal = "NEUTRAL"
+                    confidence = 0
+                    reasons.append(f"[FILTERED] {filter_reason}")
+
+        # ── Re-apply liquidity-aware SL/TP after strategy merge ──
+        # evaluate_strategy returns ATR-based SL/TP which overwrites the
+        # liquidity-aware adjustments computed above. Re-apply them here
+        # so the final SL/TP respects market structure (EQL/EQH zones).
+        if signal != "NEUTRAL" and sl is not None and atr_v:
+            sl_buffer = atr_v * 0.3
+            _liq = smc.get("liquidity", {})
+            if signal == "BUY":
+                _eql = [z for z in _liq.get("equal_lows", []) if z["price"] <= entry]
+                if _eql:
+                    _nearest = max(_eql, key=lambda z: z["price"])
+                    _cluster_min = _nearest["min"]
+                    if sl >= _cluster_min - sl_buffer:
+                        sl = round(_cluster_min - sl_buffer, 6)
+                        reasons.append(f"SL moved below equal-low cluster {_cluster_min:.2f}")
+            elif signal == "SELL":
+                _eqh = [z for z in _liq.get("equal_highs", []) if z["price"] >= entry]
+                if _eqh:
+                    _nearest = min(_eqh, key=lambda z: z["price"])
+                    _cluster_max = _nearest["max"]
+                    if sl <= _cluster_max + sl_buffer:
+                        sl = round(_cluster_max + sl_buffer, 6)
+                        reasons.append(f"SL moved above equal-high cluster {_cluster_max:.2f}")
+
+        if signal != "NEUTRAL" and tp1 is not None and atr_v:
+            _liq = smc.get("liquidity", {})
+            if signal == "BUY":
+                _eqh = [z for z in _liq.get("equal_highs", []) if z["price"] > entry]
+                if _eqh:
+                    _nearest = min(_eqh, key=lambda z: z["price"])
+                    tp1 = round(_nearest["price"], 6)
+                    reasons.append(f"TP1 set to next equal-high {tp1:.2f}")
+            elif signal == "SELL":
+                _eql = [z for z in _liq.get("equal_lows", []) if z["price"] < entry]
+                if _eql:
+                    _nearest = max(_eql, key=lambda z: z["price"])
+                    tp1 = round(_nearest["price"], 6)
+                    reasons.append(f"TP1 set to next equal-low {tp1:.2f}")
+
+        # ── Recalculate rr + predictive metrics after liquidity-aware refinement ──
+        # sl and tp1 may have changed from ATR-based to liquidity zone-based,
+        # so rr, dps, tps, success_probability, expected_move must be recomputed
+        # to stay consistent with the final returned values.
+        if signal != "NEUTRAL" and sl is not None and tp1 is not None and entry is not None:
+            _sl_dist = abs(entry - sl)
+            if _sl_dist > 0:
+                rr = round(abs(tp1 - entry) / _sl_dist, 2)
+            if strategy and dps is not None:
+                from utils.predictive import compute_predictive_metrics
+                _pred = compute_predictive_metrics(
+                    signal, confidence, entry, tp1, sl, rr,
+                    indicators={"close": c_val, "volume_ratio": vol_r, "bb_bw": bb_bw_v, "macd_hist": macd_hist_v},
+                    pa=pa, regime=regime, smc=smc, mtf_aligned=None, trigger=trigger,
+                )
+                dps = _pred["dps"]
+                tps = _pred["tps"]
+                success_probability = _pred["success_probability"]
+                expected_move = _pred["expected_move"]
 
     # ── Synthetic caution filter: reduce confidence on spike risk ──
     # Applied after evaluate_strategy but BEFORE returning — recalculate DPS
@@ -1313,6 +1406,13 @@ def analyze_candles(
             signal = "NEUTRAL"
             confidence = 0
 
+    # ── Clean price levels when signal is NEUTRAL ──
+    if signal == "NEUTRAL":
+        sl = None
+        tp1 = None
+        tp2 = None
+        rr = None
+
     return {
         "symbol":       symbol,
         "strategy_id":  strategy_id,
@@ -1345,6 +1445,14 @@ def analyze_candles(
             "macd": macd_v, "macd_signal": macd_sig_v, "macd_hist": macd_hist_v,
             "bb_upper": bb_upper_v, "bb_mid": bb_mid_v, "bb_lower": bb_lower_v, "bb_bw": bb_bw_v,
             "score_total": score,
+            "score_trend": _sub_trend,
+            "score_pa": _sub_pa,
+            "score_sr": _sub_sr,
+            "score_patterns": _sub_patterns,
+            "score_regime": _sub_regime,
+            "score_smc": _sub_smc,
+            "score_mtf": _sub_mtf,
+            "score_sentiment": _sub_sentiment,
         },
         "session": {
             "session": session_info.get("session"),
@@ -1754,10 +1862,10 @@ async def scan_multi(req: ScanRequest):
     # clôture sur le(s) entry_timeframe(s) distincts déclarés par les stratégies actives.
     entry_contexts: dict[tuple[str, str], dict] = {}   # (symbol, entry_timeframe) -> {"close": float}
     entry_tfs_needed = {
-        strat["rules"].get("entry_timeframe")
+        strat.get("entryTimeframe") or strat.get("entry_timeframe")
         for strat in (req.strategies or [])
-        if strat.get("rules", {}).get("entry_timeframe")
-        and strat["rules"].get("entry_timeframe") != req.timeframe
+        if (strat.get("entryTimeframe") or strat.get("entry_timeframe"))
+        and (strat.get("entryTimeframe") or strat.get("entry_timeframe")) != req.timeframe
     }
     if entry_tfs_needed and missing_symbols:
         async def _fetch_entry_close(sym: str, etf: str):
@@ -1798,7 +1906,7 @@ async def scan_multi(req: ScanRequest):
             social_ctx = social_contexts.get(sym)
             if req.strategies:
                 for strat in req.strategies:
-                    etf = strat.get("rules", {}).get("entry_timeframe")
+                    etf = strat.get("entryTimeframe") or strat.get("entry_timeframe")
                     entry_ctx = entry_contexts.get((sym, etf)) if etf else None
                     analyze_tasks.append(
                         loop.run_in_executor(

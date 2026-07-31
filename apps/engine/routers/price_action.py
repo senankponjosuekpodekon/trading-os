@@ -110,7 +110,7 @@ def detect_market_structure(
         "bos":       bos,
         "bos_dir":   bos_dir,
         "bos_score": round(bos_quality_score(
-            bos, bos_dir, swing_highs, swing_lows, close, volume
+            bos, bos_dir, swing_highs, swing_lows, close, volume, high, low
         ), 1),
         "choch":     choch,
         "last_swing_high": last_sh,
@@ -127,6 +127,8 @@ def bos_quality_score(
     swing_lows: list[tuple],
     close: pd.Series,
     volume: pd.Series | None = None,
+    high: pd.Series | None = None,
+    low: pd.Series | None = None,
 ) -> float:
     """
     Score 0-100 de la qualité du BOS.
@@ -140,11 +142,19 @@ def bos_quality_score(
 
     last_idx = len(close) - 1
     last_close = float(close.iloc[-1])
-    # compute true range manually for this small series
-    prev_close = close.shift(1)
-    high = pd.Series(close).combine(prev_close, max)
-    low = pd.Series(close).combine(prev_close, min)
-    tr = high - low
+    # Use real high/low series when available; fall back to close-based proxy
+    if high is not None and low is not None:
+        prev_close = close.shift(1)
+        tr = pd.concat([
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ], axis=1).max(axis=1)
+    else:
+        prev_close = close.shift(1)
+        _high = pd.Series(close).combine(prev_close, max)
+        _low = pd.Series(close).combine(prev_close, min)
+        tr = _high - _low
     atr = float(tr.rolling(14).mean().iloc[-1]) if len(close) >= 14 else float(tr.mean())
     if not atr or atr == 0:
         return 50.0
@@ -197,9 +207,16 @@ def price_action_bonus(pa: dict, signal_direction: str) -> tuple[int, list[str]]
         reasons.append(f"PA: contre-tendance ({trend})")
 
     # BOS dans le sens du signal
-    if pa.get("bos") and pa.get("bos_dir") == signal_direction:
+    _bos_dir = pa.get("bos_dir")
+    _bos_aligned = (
+        _bos_dir and (
+            (signal_direction == "BUY" and _bos_dir in ("BULLISH", "up")) or
+            (signal_direction == "SELL" and _bos_dir in ("BEARISH", "down"))
+        )
+    )
+    if pa.get("bos") and _bos_aligned:
         bonus += 12
-        reasons.append(f"PA: BOS {pa['bos_dir']}")
+        reasons.append(f"PA: BOS {_bos_dir}")
 
     # CHoCH = renforcement si dans le sens du signal
     if pa.get("choch"):

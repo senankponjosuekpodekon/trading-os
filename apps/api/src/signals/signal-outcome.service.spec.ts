@@ -220,7 +220,7 @@ describe('SignalOutcomeService', () => {
       expect(mockPrisma.signalLog.update).not.toHaveBeenCalled();
     });
 
-    it('should expire old non-Binance (BRVM) signals after 5 days', async () => {
+    it('should expire old non-Binance (BRVM) signals after 5 days when engine returns no data', async () => {
       mockPrisma.signalLog.findMany.mockResolvedValue([
         {
           id: 'log-5',
@@ -232,10 +232,15 @@ describe('SignalOutcomeService', () => {
         },
       ]);
       mockPrisma.signalLog.update.mockResolvedValue({});
+      // Engine returns empty candles — resolution fails, signal expires
+      mockHttp.get.mockReturnValue(of({ data: [] }));
 
       await service.resolveOutcomes();
 
-      expect(mockHttp.get).not.toHaveBeenCalled();
+      // Engine was called for non-Binance symbol
+      expect(mockHttp.get).toHaveBeenCalledWith(
+        expect.stringContaining('/candles/SNTS'),
+      );
       expect(mockPrisma.signalLog.update).toHaveBeenCalledWith({
         where: { id: 'log-5' },
         data: expect.objectContaining({ outcome: 'EXPIRED' }),

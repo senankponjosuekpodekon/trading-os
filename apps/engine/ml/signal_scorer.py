@@ -43,6 +43,14 @@ def _coerce_number(value: Any) -> Optional[float]:
     return None
 
 
+# Categorical features that should be one-hot encoded rather than dropped
+_CATEGORICAL_KEYS = {
+    "pa_trend", "pa_bos_dir", "regime", "breakout_direction",
+    "sweep_direction", "session", "asset_type", "mtf_confluence",
+    "structure", "bos_dir", "choch_dir",
+}
+
+
 def _flatten_features(data: Any, prefix: str = "") -> Dict[str, float]:
     flat: Dict[str, float] = {}
     if isinstance(data, dict):
@@ -50,6 +58,10 @@ def _flatten_features(data: Any, prefix: str = "") -> Dict[str, float]:
             if not key:
                 continue
             sub_prefix = f"{prefix}.{key}" if prefix else str(key)
+            # One-hot encode known categorical string features
+            if isinstance(value, str) and key in _CATEGORICAL_KEYS:
+                flat[f"{sub_prefix}={value}"] = 1.0
+                continue
             flat.update(_flatten_features(value, sub_prefix))
     elif isinstance(data, list):
         numeric_items = [_coerce_number(v) for v in data]

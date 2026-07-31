@@ -98,7 +98,13 @@ def _find_nearest_ob_fvg(signal: str, close: float, smc: Optional[dict]) -> Opti
     candidates = [c for c in candidates if c is not None and c != 0]
     if not candidates:
         return None
-    return min(candidates, key=lambda x: abs(x - close))
+
+    def _extract_price(c):
+        if isinstance(c, dict):
+            return c.get("mid") or c.get("top") or c.get("bottom")
+        return c
+
+    return min(candidates, key=lambda x: abs(_extract_price(x) - close))
 
 
 def _apply_trigger(
@@ -136,9 +142,9 @@ def _apply_trigger(
     if entry_rules.get("bos"):
         bos = pa.get("bos")
         bos_dir = pa.get("bos_dir")
-        if signal == "BUY" and not (bos and bos_dir == "up"):
+        if signal == "BUY" and not (bos and bos_dir in ("up", "BULLISH")):
             return {**result, "signal": "NEUTRAL", "reason": "BOS up not detected"}
-        if signal == "SELL" and not (bos and bos_dir == "down"):
+        if signal == "SELL" and not (bos and bos_dir in ("down", "BEARISH")):
             return {**result, "signal": "NEUTRAL", "reason": "BOS down not detected"}
 
     # --- trigger modes ---
@@ -165,6 +171,11 @@ def _apply_trigger(
         level = _find_nearest_ob_fvg(signal, close, smc)
         if level is None:
             return {**result, "signal": "NEUTRAL", "reason": f"No OB/FVG level for {trigger}"}
+        # Extract float price from dict (smc.py returns dicts with bottom/top/mid)
+        if isinstance(level, dict):
+            level = level.get("mid") or level.get("top") or level.get("bottom")
+        if level is None:
+            return {**result, "signal": "NEUTRAL", "reason": f"OB/FVG level has no price for {trigger}"}
         proximity_pct = entry_rules.get("fvg_proximity_pct", 1.0)
         distance = abs(close - level) / close * 100 if close else 0
         if trigger == "RETEST":
@@ -435,6 +446,7 @@ def evaluate_strategy(
     )
 
     # --- Predictive metrics (Sprint 4) ---
+    _entry_rules = getattr(rules, "entry_rules", None) or {}
     predictive = compute_predictive_metrics(
         signal,
         confidence,
@@ -447,7 +459,9 @@ def evaluate_strategy(
         regime=regime,
         smc=smc,
         trigger=trigger,
-        proximity_pct=(getattr(rules, "entry_rules", None) or {}).get("fvg_proximity_pct", 1.0),
+        proximity_pct=_entry_rules.get("fvg_proximity_pct", 1.0),
+        volume_spike_min=getattr(rules, "volume_spike_min", 1.3),
+        bb_bw_min=_entry_rules.get("bb_bw_min", 0.02),
     )
 
     # --- DPS filter (Sprint 4) — signal directionnel peu fiable → non persisté ---

@@ -145,17 +145,17 @@ SYMBOL_TO_DERIV = {
     "V50": "R_50",
     "V75": "R_75",
     "V100": "R_100",
-    "BOOM300/USD": "BOOM300",
+    "BOOM300/USD": "BOOM300N",
     "BOOM500/USD": "BOOM500",
     "BOOM1000/USD": "BOOM1000",
-    "CRASH300/USD": "CRASH300",
+    "CRASH300/USD": "CRASH300N",
     "CRASH500/USD": "CRASH500",
     "CRASH1000/USD": "CRASH1000",
     # Short format (matches seeded asset symbols)
-    "BOOM300": "BOOM300",
+    "BOOM300": "BOOM300N",
     "BOOM500": "BOOM500",
     "BOOM1000": "BOOM1000",
-    "CRASH300": "CRASH300",
+    "CRASH300": "CRASH300N",
     "CRASH500": "CRASH500",
     "CRASH1000": "CRASH1000",
     "JUMP10/USD": "JD10",
@@ -268,9 +268,7 @@ def evaluate_synthetic_strategy(
 
     spike_prob = stats.get("spike_probability", 0)
     mr_prob = stats.get("mean_reversion_prob", 0)
-    compression = stats.get("compression_score", 50)
     state = stats.get("state", "NEUTRAL")
-    regime = stats.get("regime", "NEUTRAL")
     mc = stats.get("monte_carlo") or {}
     caution = stats.get("caution", False)
 

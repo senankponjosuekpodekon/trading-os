@@ -126,8 +126,12 @@ export class SignalOutcomeService {
       'MATIC/USDT': 'MATICUSDT',
     };
     const binanceSym = SYMBOL_MAP[log.symbol];
+
+    // For non-Binance symbols, try resolving via the engine (which has all providers)
     if (!binanceSym) {
-      // BRVM ou symbole non Binance — marquer EXPIRED après 5 jours
+      const resolved = await this._resolveViaEngine(log).catch(() => null);
+      if (resolved) return;
+      // Engine resolution failed — expire after 5 days
       const age = (Date.now() - new Date(log.createdAt).getTime()) / 86_400_000;
       if (age > 5) {
         await this.prisma.signalLog.update({
@@ -214,6 +218,97 @@ export class SignalOutcomeService {
     }
   }
 
+  /**
+   * Resolve outcome for non-Binance symbols by fetching recent candles from the engine.
+   * The engine has access to all providers (TwelveData, yfinance, Deriv, Binance)
+   * so it can fetch OHLCV for Forex, Synthetic, BRVM, Commodities, etc.
+   */
+  private async _resolveViaEngine(log: any): Promise<boolean> {
+    const tf = log.timeframe ?? '1h';
+    const bars = TF_TO_BARS_LOOKBACK[tf] ?? 24;
+    try {
+      const url = `${this.engineUrl}/candles/${encodeURIComponent(log.symbol)}?timeframe=${tf}&limit=${bars}`;
+      const { data } = await firstValueFrom(this.http.get(url));
+
+      const candles = Array.isArray(data) ? data : (data?.candles ?? []);
+      if (!candles || candles.length === 0) return false;
+
+      const sl = log.stopLoss ? parseFloat(log.stopLoss) : null;
+      const tp1 = log.takeProfit1 ? parseFloat(log.takeProfit1) : null;
+      const tp2 = log.takeProfit2 ? parseFloat(log.takeProfit2) : null;
+      const isBuy = log.signalType === 'BUY';
+      const created = new Date(log.createdAt).getTime();
+
+      let outcome: string | null = null;
+      let outcomePrice: number | null = null;
+      let barsToOutcome: number | null = null;
+      let outcomeAt: Date | null = null;
+
+      for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const barTs = typeof c.timestamp === 'number' ? c.timestamp * 1000 : new Date(c.timestamp ?? c.time ?? c.date).getTime();
+        if (barTs < created) continue;
+
+        const high = parseFloat(c.high ?? c.h);
+        const low = parseFloat(c.low ?? c.l);
+
+        if (isBuy) {
+          if (tp2 && high >= tp2) { outcome = 'WIN_TP2'; outcomePrice = tp2; }
+          else if (tp1 && high >= tp1) { outcome = 'WIN_TP1'; outcomePrice = tp1; }
+          else if (sl && low <= sl) { outcome = 'LOSS_SL'; outcomePrice = sl; }
+        } else {
+          if (tp2 && low <= tp2) { outcome = 'WIN_TP2'; outcomePrice = tp2; }
+          else if (tp1 && low <= tp1) { outcome = 'WIN_TP1'; outcomePrice = tp1; }
+          else if (sl && high >= sl) { outcome = 'LOSS_SL'; outcomePrice = sl; }
+        }
+
+        if (outcome) {
+          barsToOutcome = i;
+          outcomeAt = new Date(barTs);
+          break;
+        }
+      }
+
+      if (!outcome) {
+        const age = (Date.now() - created) / 1000;
+        const tfSecs: Record<string, number> = {
+          '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400,
+        };
+        if (age > (tfSecs[tf] ?? 3600) * bars) {
+          outcome = 'EXPIRED';
+          outcomeAt = new Date();
+        }
+      }
+
+      if (outcome) {
+        const realizedPnlPct = this._computeRealizedPnlPct(log, outcome, outcomePrice);
+        const postTradeScore = realizedPnlPct !== null && log.expectedPnlPct && log.expectedPnlPct !== 0
+          ? Math.max(-10, Math.min(10, realizedPnlPct / log.expectedPnlPct))
+          : null;
+
+        await this.prisma.signalLog.update({
+          where: { id: log.id },
+          data: {
+            outcome: outcome as any,
+            outcomePrice: outcomePrice ?? undefined,
+            outcomeAt: outcomeAt ?? undefined,
+            barsToOutcome: barsToOutcome ?? undefined,
+            realizedPnlPct: realizedPnlPct ?? undefined,
+            postTradeScore: postTradeScore ?? undefined,
+          },
+        });
+
+        if (log.signalId) {
+          await this.featureStore.attachOutcome(log.signalId, outcome, realizedPnlPct ?? null);
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   private _computeRealizedPnlPct(log: any, outcome: string, outcomePrice: number | null): number | null {
     if (!outcomePrice) return null;
     const entry = parseFloat(log.entryPrice);
@@ -225,7 +320,7 @@ export class SignalOutcomeService {
 
   async getStats(market?: string) {
     const where: any = { outcome: { not: 'PENDING' } };
-    if (market) where.market = market;
+    if (market) where.market = { equals: market, mode: 'insensitive' };
 
     const logs = await this.prisma.signalLog.findMany({ where, take: 2000 });
 
@@ -248,7 +343,7 @@ export class SignalOutcomeService {
   }
 
   private async _statsByMarket() {
-    const markets = ['CRYPTO', 'FOREX', 'METALS', 'BRVM'];
+    const markets = ['Crypto', 'Forex', 'Indices', 'Commodities', 'Synthetic', 'BRVM'];
     const result: Record<string, any> = {};
     for (const m of markets) {
       result[m] = await this.getStats(m);

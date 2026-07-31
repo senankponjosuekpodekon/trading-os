@@ -45,6 +45,8 @@ def compute_tps(
     pa: dict,
     smc: Optional[dict] = None,
     proximity_pct: float = 1.0,
+    volume_spike_min: float = 1.3,
+    bb_bw_min: float = 0.02,
 ) -> float:
     """
     Trigger Probability Score — probabilité que le déclencheur d'entrée soit atteint.
@@ -60,7 +62,7 @@ def compute_tps(
     if trigger == "MOMENTUM_CONFIRMATION":
         vol_r = indicators.get("volume_ratio")
         macd_hist = indicators.get("macd_hist")
-        if vol_r and vol_r >= 1.3 and macd_hist is not None:
+        if vol_r and vol_r >= volume_spike_min and macd_hist is not None:
             if signal == "BUY" and macd_hist > 0:
                 return 100.0
             if signal == "SELL" and macd_hist < 0:
@@ -69,7 +71,7 @@ def compute_tps(
 
     if trigger == "VOLATILITY_EXPANSION":
         bb_bw = indicators.get("bb_bw")
-        return 0.0 if bb_bw is not None and bb_bw < 0.02 else 100.0
+        return 0.0 if bb_bw is not None and bb_bw < bb_bw_min else 100.0
 
     if trigger in ("RETEST", "LIMIT"):
         if close is None or entry_price is None or close == 0:
@@ -137,6 +139,8 @@ def compute_predictive_metrics(
     mtf_aligned: Optional[bool] = None,
     trigger: Optional[str] = None,
     proximity_pct: float = 1.0,
+    volume_spike_min: float = 1.3,
+    bb_bw_min: float = 0.02,
 ) -> dict:
     """
     Calcule DPS, TPS, expected move et success probability pour un signal.
@@ -147,6 +151,7 @@ def compute_predictive_metrics(
         regime=regime,
         mtf_aligned=mtf_aligned,
         volume_ratio=indicators.get("volume_ratio"),
+        volume_spike_min=volume_spike_min,
     )
     tps = compute_tps(
         signal,
@@ -157,6 +162,8 @@ def compute_predictive_metrics(
         pa,
         smc=smc,
         proximity_pct=proximity_pct,
+        volume_spike_min=volume_spike_min,
+        bb_bw_min=bb_bw_min,
     )
     success_probability = compute_success_probability(dps, tps, risk_reward)
     expected_move = compute_expected_move(signal, entry_price, take_profit_1)

@@ -6,7 +6,6 @@ import os
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
-
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -41,6 +40,7 @@ from routers import (
     expected_move,
     ml_regime,
     ml_signals,
+    dex_discovery,
 )
 from utils.errors import EngineException, format_error_response
 from config import settings  # noqa: F401 — valide les secrets au démarrage
@@ -133,6 +133,7 @@ app.include_router(ml_feedback.router, prefix="/ml-feedback", tags=["ML Feedback
 app.include_router(ml_signals.router, tags=["ML"])
 app.include_router(expected_move.router)
 app.include_router(ml_regime.router, prefix="", tags=["ML"])
+app.include_router(dex_discovery.router, prefix="/dex", tags=["DEX Discovery"])
 
 if __name__ == "__main__":
     import uvicorn
