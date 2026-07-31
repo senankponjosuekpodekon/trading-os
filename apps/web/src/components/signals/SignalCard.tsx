@@ -28,12 +28,19 @@ const SYMBOL_TO_PRICE_KEY: Record<string, string> = {
   'EUR/USD': 'EUR/USD', 'GBP/USD': 'GBP/USD', 'USD/JPY': 'USD/JPY',
   'AUD/USD': 'AUD/USD', 'USD/CHF': 'USD/CHF', 'USD/CAD': 'USD/CAD', 'NZD/USD': 'NZD/USD',
   'XAU/USD': 'XAU/USD', 'XAG/USD': 'XAG/USD', 'WTI/USD': 'WTI/USD', 'BRENT/USD': 'BRENT/USD',
+  // Legacy Deriv format
   'VIX10/USD': 'VIX10/USD', 'VIX25/USD': 'VIX25/USD', 'VIX50/USD': 'VIX50/USD',
   'VIX75/USD': 'VIX75/USD', 'VIX100/USD': 'VIX100/USD',
   'BOOM300/USD': 'BOOM300/USD', 'BOOM500/USD': 'BOOM500/USD', 'BOOM1000/USD': 'BOOM1000/USD',
   'CRASH300/USD': 'CRASH300/USD', 'CRASH500/USD': 'CRASH500/USD', 'CRASH1000/USD': 'CRASH1000/USD',
   'JUMP10/USD': 'JUMP10/USD', 'JUMP25/USD': 'JUMP25/USD', 'JUMP50/USD': 'JUMP50/USD',
   'JUMP75/USD': 'JUMP75/USD', 'JUMP100/USD': 'JUMP100/USD',
+  // Short format (matches seeded asset symbols)
+  'V10': 'V10', 'V25': 'V25', 'V50': 'V50', 'V75': 'V75', 'V100': 'V100',
+  'BOOM300': 'BOOM300', 'BOOM500': 'BOOM500', 'BOOM1000': 'BOOM1000',
+  'CRASH300': 'CRASH300', 'CRASH500': 'CRASH500', 'CRASH1000': 'CRASH1000',
+  'JUMP10': 'JUMP10', 'JUMP25': 'JUMP25', 'JUMP50': 'JUMP50',
+  'JUMP75': 'JUMP75', 'JUMP100': 'JUMP100',
 };
 
 export interface SignalCardProps {
@@ -53,8 +60,9 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const [showPatterns, setShowPatterns] = useState(false);
 
   const userTz = user?.timezone;
-  const exactTime = formatDateTime(signal.createdAt, userTz);
-  const session = getTradingSession(signal.createdAt);
+  const safeCreatedAt = signal.createdAt ?? new Date().toISOString();
+  const exactTime = formatDateTime(safeCreatedAt, userTz);
+  const session = getTradingSession(safeCreatedAt);
   const dps = (signal.metadata as any)?.dps;
   const analysisTf = (signal.metadata as any)?.analysisTimeframe ?? (signal as any).analysisTimeframe;
   const entryTf = (signal.metadata as any)?.entryTimeframe ?? (signal as any).entryTimeframe;
@@ -146,9 +154,9 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
             )}
           </div>
           <div className="flex items-center gap-2 text-gray-500 text-xs">
-            <TimeAgo date={signal.createdAt} />
+            <TimeAgo date={safeCreatedAt} />
             <span className="text-gray-600">·</span>
-            <span className="flex items-center gap-1" title={new Date(signal.createdAt).toISOString()}>
+            <span className="flex items-center gap-1" title={new Date(safeCreatedAt).toISOString()}>
               <Clock className="w-3 h-3" />{exactTime}
             </span>
             {signal.strategy?.name && (
@@ -653,6 +661,7 @@ function inferAssetType(symbol?: string): string {
   if (!symbol) return 'UNKNOWN';
   if (symbol.endsWith('/USDT')) return 'CRYPTO';
   if (symbol.startsWith('VIX') || symbol.startsWith('BOOM') || symbol.startsWith('CRASH') || symbol.startsWith('JUMP')) return 'SYNTHETIC';
+  if (/^V\d+$/.test(symbol)) return 'SYNTHETIC';
   if (['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CHF', 'USD/CAD', 'NZD/USD'].includes(symbol)) return 'FOREX';
   if (['XAU/USD', 'XAG/USD', 'WTI/USD', 'BRENT/USD'].includes(symbol)) return 'COMMODITY';
   return 'BRVM';
