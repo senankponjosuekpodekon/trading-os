@@ -658,6 +658,8 @@ def _analyze_synthetic_candles(symbol: str, timeframe: str, df: pd.DataFrame, st
     take_profit_2 = ev["take_profit_2"]
     risk_reward = ev["risk_reward"]
     explanation = " | ".join(ev["reasons"]) if ev["reasons"] else f"Synthetic {category}: {stats.get('state')} | regime={stats.get('regime')}"
+    if not explanation.startswith("Synthetic"):
+        explanation = f"Synthetic {category}: {explanation}"
 
     strategy_id = strategy.get("id") if strategy else None
     strategy_name = strategy.get("name") if strategy else None
@@ -717,6 +719,11 @@ def analyze_candles(
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data"}
 
     asset_type = get_asset_type(symbol)
+
+    # Synthetic assets (Deriv indices) use a dedicated statistical engine
+    # — no EMA/RSI/MACD trend-following, only spike/mean-reversion stats
+    if asset_type == "SYNTHETIC":
+        return _analyze_synthetic_candles(symbol, timeframe, df, strategy=strategy)
 
     # Synthetic assets: compute statistical bonus alongside standard indicators
     synthetic_stats = None
