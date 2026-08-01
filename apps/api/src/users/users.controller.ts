@@ -46,7 +46,7 @@ export class UsersController {
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
-        select: { id: true, email: true, name: true, role: true, isActive: true, timezone: true, createdAt: true, twoFactorEnabled: true },
+        select: { id: true, email: true, name: true, role: true, isActive: true, timezone: true, createdAt: true, totpEnabled: true },
         orderBy: { createdAt: 'desc' },
         skip: (Math.max(pageNum, 1) - 1) * Math.min(limitNum, 100),
         take: Math.min(limitNum, 100),
