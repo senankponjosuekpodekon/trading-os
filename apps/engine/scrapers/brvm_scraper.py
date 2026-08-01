@@ -155,3 +155,31 @@ def _mock_brvm_quotes() -> List[dict]:
 
 def is_brvm_symbol(symbol: str) -> bool:
     return symbol in BRVM_SYMBOLS
+
+
+def fetch_brvm_history(symbol: str, period: str = "2y") -> "list[dict]":
+    """
+    Fetch historical OHLCV for a BRVM symbol using brvm-package.
+    Returns list of dicts: [{date, open, high, low, close, volume}, ...]
+    Returns empty list on failure.
+    """
+    try:
+        import brvm as brvm_pkg
+        ticker = brvm_pkg.Ticker(symbol)
+        df = ticker.history(period)
+        if df is None or len(df) == 0:
+            return []
+        df.columns = [c.lower() for c in df.columns]
+        records = []
+        for idx, row in df.iterrows():
+            records.append({
+                "date": idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx),
+                "open": float(row.get("open", 0)),
+                "high": float(row.get("high", 0)),
+                "low": float(row.get("low", 0)),
+                "close": float(row.get("close", 0)),
+                "volume": int(row.get("volume", 0) or 0),
+            })
+        return records
+    except Exception:
+        return []

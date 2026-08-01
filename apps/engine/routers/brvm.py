@@ -13,6 +13,7 @@ from scrapers.brvm_scraper import (
     fetch_brvm_quotes,
     _mock_brvm_quotes,
     is_brvm_symbol,
+    fetch_brvm_history,
 )
 from scrapers.brvm_fundamentals import fetch_fundamental_scores, fetch_fundamental_metrics
 
@@ -180,29 +181,102 @@ async def analyze_brvm_symbols(symbols: Optional[List[str]] = None) -> List[dict
         price = q["price"]
         chg = q["change_pct"]
 
-        # Construct approximate indicators from BRVM quote data
-        # EMA: approximate using price (no historical data for real EMA)
-        # RSI: estimate from change_pct (simple mapping)
-        # ATR: estimate from price * |change_pct|
-        rsi_est = 50 + max(-20, min(20, chg * 4))
-        atr_est = price * max(abs(chg), 0.5) / 100
+        # Fetch historical OHLCV for real indicator computation
+        history = fetch_brvm_history(q["symbol"], "2y")
+        if history and len(history) >= 50:
+            import pandas as pd
+            hdf = pd.DataFrame(history)
+            close = hdf["close"].astype(float)
+            high = hdf["high"].astype(float)
+            low = hdf["low"].astype(float)
+            vol = hdf["volume"].astype(float)
 
-        indicators = {
-            "close": price,
-            "ema20": price,
-            "ema50": price,
-            "ema200": price,
-            "rsi": rsi_est,
-            "atr": atr_est,
-            "volume_ratio": 1.0 + (1.0 if q["volume"] > 10000 else 0.0),
-            "macd_hist": chg,
-            "bb_bw": 0.03,
-        }
-        pa = {"trend": "BULLISH" if chg > 0 else ("BEARISH" if chg < 0 else "NEUTRAL"), "bos": False, "bos_dir": None, "choch": False, "structure": "unknown"}
+            ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+            ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+            ema200 = float(close.ewm(span=200, adjust=False).mean().iloc[-1]) if len(close) >= 200 else ema50
+
+            # RSI (Wilder's)
+            delta = close.diff()
+            gain = delta.clip(lower=0).rolling(14).mean()
+            loss = (-delta.clip(upper=0)).rolling(14).mean()
+            rs = gain / loss.replace(0, 1e-10)
+            rsi_val = float((100 - (100 / (1 + rs))).iloc[-1])
+
+            # ATR (14)
+            tr = pd.concat([
+                high - low,
+                (high - close.shift(1)).abs(),
+                (low - close.shift(1)).abs(),
+            ], axis=1).max(axis=1)
+            atr_val = float(tr.rolling(14).mean().iloc[-1])
+
+            # MACD histogram
+            ema12 = close.ewm(span=12, adjust=False).mean()
+            ema26 = close.ewm(span=26, adjust=False).mean()
+            macd_line = ema12 - ema26
+            macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+            macd_hist_val = float((macd_line - macd_signal).iloc[-1])
+
+            # Bollinger Bandwidth
+            bb_std = close.rolling(20).std()
+            bb_bw_val = float((2 * bb_std / close.rolling(20).mean()).iloc[-1]) if len(close) >= 20 else 0.03
+
+            # Volume ratio (today vs 20-day avg)
+            vol_avg = vol.rolling(20).mean().iloc[-1] if len(vol) >= 20 else vol.mean()
+            vol_ratio = float(vol.iloc[-1] / vol_avg) if vol_avg > 0 else 1.0
+
+            indicators = {
+                "close": price,
+                "ema20": round(ema20, 2),
+                "ema50": round(ema50, 2),
+                "ema200": round(ema200, 2),
+                "rsi": round(rsi_val, 2),
+                "atr": round(atr_val, 2),
+                "volume_ratio": round(vol_ratio, 2),
+                "macd_hist": round(macd_hist_val, 4),
+                "bb_bw": round(bb_bw_val, 4),
+            }
+            # Real price action from data
+            short_ema = ema20
+            long_ema = ema50
+            if short_ema > long_ema and price > ema200:
+                pa_trend = "BULLISH"
+            elif short_ema < long_ema and price < ema200:
+                pa_trend = "BEARISH"
+            else:
+                pa_trend = "NEUTRAL"
+            pa = {"trend": pa_trend, "bos": False, "bos_dir": None, "choch": False, "structure": "unknown"}
+            # Real regime from ADX-like proxy
+            if atr_val > 0:
+                atr_pct = atr_val / price * 100
+                if atr_pct > 2.0 and abs(ema20 - ema50) / price * 100 > 1.0:
+                    regime_name = "TRENDING_BULL" if ema20 > ema50 else "TRENDING_BEAR"
+                else:
+                    regime_name = "RANGING"
+            else:
+                regime_name = "RANGING"
+            regime = {"regime": regime_name, "adx": 25 if "TRENDING" in regime_name else 15, "trend_strength": "MODERATE" if "TRENDING" in regime_name else "WEAK"}
+        else:
+            # Fallback: no history available, use approximate indicators
+            rsi_est = 50 + max(-20, min(20, chg * 4))
+            atr_est = price * max(abs(chg), 0.5) / 100
+            indicators = {
+                "close": price,
+                "ema20": price,
+                "ema50": price,
+                "ema200": price,
+                "rsi": rsi_est,
+                "atr": atr_est,
+                "volume_ratio": 1.0 + (1.0 if q["volume"] > 10000 else 0.0),
+                "macd_hist": chg,
+                "bb_bw": 0.03,
+            }
+            pa = {"trend": "BULLISH" if chg > 0 else ("BEARISH" if chg < 0 else "NEUTRAL"), "bos": False, "bos_dir": None, "choch": False, "structure": "unknown"}
+            regime = {"regime": "TRENDING_BULL" if chg > 1 else ("TRENDING_BEAR" if chg < -1 else "RANGING"), "adx": 20, "trend_strength": "WEAK"}
+
         sr = {}
         patterns = {}
         smc = {}
-        regime = {"regime": "TRENDING_BULL" if chg > 1 else ("TRENDING_BEAR" if chg < -1 else "RANGING"), "adx": 20, "trend_strength": "WEAK"}
 
         ev = evaluate_strategy(
             brvm_rules, indicators, pa, sr, patterns, smc=smc, regime=regime,
