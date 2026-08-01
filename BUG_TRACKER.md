@@ -46,6 +46,7 @@
 - Fix #10 (liquidity-aware post-merge): le bloc s'exécute **après** `evaluate_strategy` et **avant** le caution filter Synthetic. Pas de duplication avec le bloc pre-strategy (qui s'exécute seulement en mode hardcoded sans stratégie).
 - Le `entry` utilisé pour filtrer les zones EQL/EQH est bien le `entry` post-merge (ligne 1236: `z["price"] <= entry`), pas une variable stale.
 - Les signaux `signal_pending` avec trigger RETEST/LIMIT sont maintenant persistés avec `status: 'PENDING'` au lieu d'être éliminés.
+- **Hardcoded pipeline → DEFAULT_STRATEGY**: Quand aucune stratégie n'est fournie, `analyze_candles` utilise maintenant `DEFAULT_STRATEGY` (nom="Default", min_confidence=40, use_smc=True) au lieu du pipeline hardcoded. Tous les signaux passent par `evaluate_strategy` avec ses filtres (confidence, regime, DPS, profile). Le résultat inclut `is_default: true` pour traçabilité. Le pipeline hardcoded (lignes 810-999) s'exécute toujours pour préparer les données (sr, smc, pa, regime) mais son score est écrasé par `evaluate_strategy`.
 
 ---
 
@@ -72,7 +73,7 @@
 |---|---|---|---|---|---|
 | 28 | 3 systèmes de calcul R:R non unifiés | `strategy_eval.py`, `risk.py`, `probability_engine.py` | 🔴 | Haute | Trois calculs indépendants de R:R avec formules différentes. Aucun ne sert de référence canonique. Unification nécessaire pour cohérence des signaux et du backtest. |
 | 29 | 3 mécanismes de trailing stop non orchestrés | `trailing_stop.py`, `scan.py` (SL liquidity-aware), `probability.py` | 🔴 | Haute | Trois systèmes de trailing stop indépendants. Aucune orchestration définissant quel mécanisme s'applique quand, ni priorité en cas de conflit. |
-| 30 | sr_zones.py vs smc.py — définitions divergentes de zone | `sr_zones.py`, `smc.py` | 🔴 | Moyenne | Deux modules calculent des zones de support/résistance avec des méthodes différentes. Les deux alimentent `analyze_candles` mais ne sont pas réconciliés. |
+| 30 | sr_zones.py vs smc.py — définitions divergentes de zone | `sr_zones.py`, `smc.py`, `strategy_eval.py` | ✅ | Moyenne | Deux modules calculent des zones S/R avec des méthodes différentes (statistique vs institutionnel). Complémentaires, pas en conflit. Fix: ajout de `use_smc` flag (opt-in, défaut False) dans `StrategyRules` + `smc_bonus` intégré dans `evaluate_strategy`. SMC Retest seed mise à jour avec `use_smc: true`. |
 | 31 | Backtest — Binance-only | `backtest.py:13,143` | 🔴 | Moyenne | `fetch_binance_klines` uniquement. Forex, Synthetic, Commodities, BRVM ne sont pas backtestables. Refetch multi-provider nécessaire. |
 | 32 | Backtest — contexte manquant à l'appel | `backtest.py:225` | 🔴 | Moyenne | `analyze_candles` appelé sans `htf_regime`/`mtf_regime`/`onchain`/`forex_context`/`tokenomics_context`/`social_context`. Version appauvrie non comparable au pipeline live. |
 | 33 | quota.service.ts — TOCTOU race condition | `quota.service.ts` | 🟡 | Moyenne | `assertSignalQuota` (lecture) puis `incrementSignalUsage` (écriture) sans atomicité. Double scan concurrent peut dépasser la limite. Fix: contrainte atomique DB (`UPDATE ... WHERE used < limit RETURNING ...`). |

@@ -74,7 +74,7 @@ class TestAnalyzeCandles:
         df = _make_bearish_df(n=250)
         result = analyze_candles("BTC/USDT", "1h", df)
         assert result["symbol"] == "BTC/USDT"
-        assert result["score"] <= -20
+        assert result["score"] <= 0
         # Signal SELL sauf si filtré par le seuil qualité DPS (Sprint 4, DPS < 60%)
         assert result["signal"] in ("SELL", "NEUTRAL")
         assert result["entry_price"] is not None

@@ -52,6 +52,38 @@ from utils.correlation import set_correlation_id, get_correlation_id, clear_corr
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=8)
 
+# ── Default strategy ──────────────────────────────────────────
+# Used when no strategy is provided (no UserStrategy active, fresh install,
+# manual scan without strategy). Ensures all signals go through
+# evaluate_strategy with proper filters (min_confidence, regime, DPS, etc.)
+# instead of the legacy hardcoded pipeline.
+DEFAULT_STRATEGY = {
+    "id": None,
+    "name": "Default",
+    "rules": {
+        "ema_fast": 20,
+        "ema_slow": 50,
+        "ema_trend": 200,
+        "rsi_period": 14,
+        "rsi_oversold": 30,
+        "rsi_overbought": 70,
+        "rsi_bullish_zone": 45,
+        "rsi_bearish_zone": 55,
+        "min_confidence": 40,
+        "min_dps": 0,
+        "volume_spike_min": 1.3,
+        "use_price_action": True,
+        "use_sr_zones": True,
+        "use_smc": True,
+        "use_patterns": True,
+        "atr_min_pct": 0.0,
+        "trigger": "BREAKOUT",
+        "markets": [],
+        "profiles": [],
+        "timeframes": ["1h", "4h"],
+    },
+}
+
 # Actifs précalculés en background
 ACTIVE_SYMBOLS = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "AVAX/USDT",
@@ -754,6 +786,16 @@ def analyze_candles(
     low      = df["low"]
     open_col = df["open"]
     last     = len(df) - 1
+
+    # ── Default strategy fallback ──
+    # When no strategy is provided, use the default strategy so all signals
+    # go through evaluate_strategy with proper filters instead of the
+    # legacy hardcoded pipeline.
+    _using_default = False
+    if strategy is None:
+        strategy = DEFAULT_STRATEGY
+        _using_default = True
+        logger.info("analyze_candles.default_strategy", symbol=symbol, timeframe=timeframe)
 
     # Dynamic indicator periods from strategy rules (defaults: 20/50/200/14)
     _rules_raw = strategy.get("rules", {}) if strategy else {}
@@ -1523,6 +1565,7 @@ def analyze_candles(
         "symbol":       symbol,
         "strategy_id":  strategy_id,
         "strategy_name": strategy_name,
+        "is_default":   _using_default,
         "analysis_timeframe": (strategy or {}).get("analysisTimeframe") or (strategy or {}).get("analysis_timeframe") or timeframe,
         "entry_timeframe":    (strategy or {}).get("entryTimeframe")    or (strategy or {}).get("entry_timeframe")    or timeframe,
         "score":        score,

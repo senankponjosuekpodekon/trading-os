@@ -25,7 +25,7 @@ const NUMERIC_BOUNDS: Record<string, [number, number]> = {
   atr_min_pct: [0, 50],
 };
 
-const BOOLEAN_FIELDS = ['use_price_action', 'use_sr_zones', 'use_patterns'];
+const BOOLEAN_FIELDS = ['use_price_action', 'use_sr_zones', 'use_smc', 'use_patterns'];
 
 const KNOWN_FIELDS = new Set([
   ...Object.keys(NUMERIC_BOUNDS),

@@ -24,6 +24,7 @@ class StrategyRules:
     volume_spike_min: float = 1.3    # ratio vs moyenne 20
     use_price_action: bool  = True
     use_sr_zones:     bool  = True
+    use_smc:          bool  = False
     use_patterns:     bool  = True
     atr_min_pct:      float = 0.2    # ATR% minimum pour qu'un trade soit valide
     timeframes:       list  = field(default_factory=lambda: ["1h", "4h"])
@@ -329,6 +330,15 @@ def evaluate_strategy(
         temp_dir = "BUY" if score >= 20 else ("SELL" if score <= -20 else "NEUTRAL")
         if temp_dir != "NEUTRAL":
             b, r = sr_bonus(sr, temp_dir)
+            score += b
+            reasons += r
+
+    # ── SMC (Smart Money Concepts) ─────────────────────────────
+    if rules.use_smc and smc:
+        from routers.smc import smc_bonus
+        temp_dir = "BUY" if score >= 20 else ("SELL" if score <= -20 else "NEUTRAL")
+        if temp_dir != "NEUTRAL":
+            b, r = smc_bonus(smc.get("fvg", {}), smc.get("ob", {}), smc.get("liquidity", {}), temp_dir)
             score += b
             reasons += r
 

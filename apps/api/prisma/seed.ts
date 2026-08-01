@@ -215,6 +215,7 @@ async function main() {
     volume_spike_min: 1.2,
     use_price_action: true,
     use_sr_zones: true,
+    use_smc: true,
     use_patterns: true,
     atr_min_pct: 0.25,
     timeframes: ['1h', '4h'],
