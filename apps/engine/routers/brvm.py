@@ -234,7 +234,8 @@ async def analyze_brvm_symbols(symbols: Optional[List[str]] = None) -> List[dict
             sl = round(price * (0.97 if signal == "BUY" else 1.03), 2)
             tp1 = round(price * (1.05 if signal == "BUY" else 0.95), 2)
             tp2 = round(price * (1.10 if signal == "BUY" else 0.90), 2)
-            rr = round(abs(tp1 - price) / abs(price - sl), 2) if price != sl else None
+            from utils.risk_reward import compute_rr
+            rr = compute_rr(price, sl, tp1) if price != sl else None
 
         results.append({
             "symbol":        q["symbol"],

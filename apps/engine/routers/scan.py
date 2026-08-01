@@ -1416,9 +1416,9 @@ def analyze_candles(
         # so rr, dps, tps, success_probability, expected_move must be recomputed
         # to stay consistent with the final returned values.
         if signal != "NEUTRAL" and sl is not None and tp1 is not None and entry is not None:
-            _sl_dist = abs(entry - sl)
-            if _sl_dist > 0:
-                rr = round(abs(tp1 - entry) / _sl_dist, 2)
+            from utils.risk_reward import compute_rr
+            if abs(entry - sl) > 0:
+                rr = compute_rr(entry, sl, tp1)
             if strategy and dps is not None:
                 from utils.predictive import compute_predictive_metrics
                 _pred = compute_predictive_metrics(

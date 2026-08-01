@@ -374,7 +374,8 @@ def evaluate_synthetic_strategy(
                     reasons.append(f"TP1 refined to MC p10={mc_tp}")
 
         if stop_loss and take_profit_1 and abs(entry - stop_loss) > 0:
-            risk_reward = round(abs(take_profit_1 - entry) / abs(entry - stop_loss), 2)
+            from utils.risk_reward import compute_rr
+            risk_reward = compute_rr(entry, stop_loss, take_profit_1)
 
     # ── DPS proxy: confidence × risk_reward factor ──
     dps = 0.0

@@ -14,7 +14,6 @@ from routers.risk import (
     RiskCalcRequest,
     sl_liquidity_aware,
     tp_linked_to_liquidity,
-    compute_staged_stop,
 )
 
 
@@ -200,29 +199,3 @@ class TestProfileRiskAdjustment:
         assert rr1 == 2.5
         assert rr2 == pytest.approx(3.75)
         assert "agressif" in note.lower()
-
-
-class TestComputeStagedStop:
-    def test_initial_stage_before_tp1(self):
-        stop, stage, reason = compute_staged_stop("BUY", 100.0, 95.0)
-        assert stop == 95.0
-        assert stage == "initial"
-
-    def test_break_even_after_tp1(self):
-        stop, stage, reason = compute_staged_stop("BUY", 100.0, 95.0, reached_tps=[1])
-        assert stop == 100.0
-        assert stage == "break_even"
-
-    def test_structure_after_tp2(self):
-        stop, stage, reason = compute_staged_stop(
-            "BUY", 100.0, 95.0, structure_stop=102.0, reached_tps=[1, 2]
-        )
-        assert stop == 102.0
-        assert stage == "structure"
-
-    def test_trailing_after_tp3(self):
-        stop, stage, reason = compute_staged_stop(
-            "BUY", 100.0, 95.0, trailing_stop=104.0, reached_tps=[1, 2, 3]
-        )
-        assert stop == 104.0
-        assert stage == "trailing"

@@ -6,7 +6,7 @@ Jour 11 — Risk Engine
 - Vérification calendrier news (stub - extensible)
 """
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional, List
 
 router = APIRouter()
@@ -35,22 +35,6 @@ class RiskCalcResponse(BaseModel):
     risk_reward:     float
     regime_adj:      str     # Explication ajustement régime
     warnings:        list[str]
-
-
-class StagedStopRequest(BaseModel):
-    direction: str                # BUY | SELL
-    entry_price: float
-    initial_stop: float
-    break_even_trigger: Optional[float] = None  # default = entry_price
-    structure_stop: Optional[float] = None      # e.g. last swing high/low
-    trailing_stop: Optional[float] = None       # e.g. ATR-based trailing level
-    reached_tps: List[int] = Field(default_factory=list)  # [1] after TP1, [1,2] after TP2, ...
-
-
-class StagedStopResponse(BaseModel):
-    active_stop: float
-    stage: str
-    reason: str
 
 
 # ─── Logique ──────────────────────────────────────────────────────────────────
@@ -277,12 +261,8 @@ def calculate_risk(req: RiskCalcRequest):
         req.entry_price, req.stop_loss, req.direction, rr1, rr2, req.atr
     )
 
-    sl_dist = abs(req.entry_price - req.stop_loss)
-    if req.direction == "BUY":
-        tp1_dist = tp1 - req.entry_price
-    else:
-        tp1_dist = req.entry_price - tp1
-    rr_actual = round(tp1_dist / sl_dist, 2) if sl_dist > 0 else 0
+    from utils.risk_reward import compute_rr
+    rr_actual = compute_rr(req.entry_price, req.stop_loss, tp1)
 
     return RiskCalcResponse(
         position_size   = pos_size,
@@ -295,89 +275,6 @@ def calculate_risk(req: RiskCalcRequest):
         regime_adj      = adj_note,
         warnings        = warnings,
     )
-
-
-# ─── Staged Stop Engine ───────────────────────────────────────────────────────
-
-def compute_staged_stop(
-    direction: str,
-    entry_price: float,
-    initial_stop: float,
-    break_even_trigger: Optional[float] = None,
-    structure_stop: Optional[float] = None,
-    trailing_stop: Optional[float] = None,
-    reached_tps: Optional[list[int]] = None,
-) -> tuple[float, str, str]:
-    """
-    Détermine le stop actif selon l'évolution du trade.
-
-    Ordre des étapes :
-      - Avant TP1        -> SL initial
-      - TP1 atteint      -> break-even (ou trigger explicite)
-      - TP2 atteint      -> stop structurel (dernier HL/LH)
-      - TP3+ atteint     -> trailing stop (si fourni et favorable)
-    """
-    reached = set(reached_tps or [])
-    direction = (direction or "BUY").upper()
-    is_buy = direction == "BUY"
-
-    active = initial_stop
-    stage = "initial"
-    reason = "SL initial avant TP1"
-
-    # Helpers: ensure a new level is "better" than the current active stop
-    def _better(level: float) -> bool:
-        if is_buy:
-            return level > active
-        return level < active
-
-    if 1 in reached:
-        be = break_even_trigger if break_even_trigger is not None else entry_price
-        if is_buy:
-            active = max(active, be, entry_price)
-        else:
-            active = min(active, be, entry_price)
-        stage = "break_even"
-        reason = "TP1 atteint -> break-even"
-
-    if 2 in reached:
-        if structure_stop is not None:
-            if is_buy:
-                active = max(active, structure_stop)
-            else:
-                active = min(active, structure_stop)
-            stage = "structure"
-            reason = "TP2 atteint -> stop structurel"
-
-    if 3 in reached:
-        if trailing_stop is not None and _better(trailing_stop):
-            active = trailing_stop
-            stage = "trailing"
-            reason = "TP3+ atteint -> trailing dynamique"
-
-    # Safety: active stop must never be worse than the initial stop in the loss direction
-    if is_buy and active < initial_stop:
-        active = initial_stop
-        reason += " (protection SL initial)"
-    elif not is_buy and active > initial_stop:
-        active = initial_stop
-        reason += " (protection SL initial)"
-
-    return round(active, 6), stage, reason
-
-
-@router.post("/risk/staged-stop", response_model=StagedStopResponse)
-def staged_stop(req: StagedStopRequest):
-    active, stage, reason = compute_staged_stop(
-        direction=req.direction,
-        entry_price=req.entry_price,
-        initial_stop=req.initial_stop,
-        break_even_trigger=req.break_even_trigger,
-        structure_stop=req.structure_stop,
-        trailing_stop=req.trailing_stop,
-        reached_tps=req.reached_tps,
-    )
-    return StagedStopResponse(active_stop=active, stage=stage, reason=reason)
 
 
 @router.get("/risk/status")

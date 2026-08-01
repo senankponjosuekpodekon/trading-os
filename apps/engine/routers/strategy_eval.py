@@ -7,6 +7,7 @@ from typing import Optional
 from utils.predictive import compute_predictive_metrics
 from utils.direction import directions_aligned
 from utils.metrics import inc_labeled
+from utils.risk_reward import compute_rr
 
 
 @dataclass
@@ -459,7 +460,7 @@ def evaluate_strategy(
             take_profit_1 = round(entry_price - atr_val * tp1_mult, 6)
             take_profit_2 = round(entry_price - atr_val * tp2_mult, 6)
         if stop_loss is not None and take_profit_1 is not None and abs(entry_price - stop_loss) > 0:
-            risk_reward = round(abs(take_profit_1 - entry_price) / abs(entry_price - stop_loss), 2)
+            risk_reward = compute_rr(entry_price, stop_loss, take_profit_1)
 
     # --- Profile suitability ---
     profile_suitability = derive_profile_suitability(
