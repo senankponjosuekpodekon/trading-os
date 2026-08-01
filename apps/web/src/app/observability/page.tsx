@@ -4,21 +4,24 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 import {
   Activity, AlertTriangle, CheckCircle2, Clock, Gauge,
-  ShieldAlert, ShieldCheck, RefreshCw, XCircle, Zap, TrendingDown,
+  ShieldAlert, RefreshCw, XCircle, Zap, TrendingDown,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────
 
+interface FunnelStageData {
+  signal_decided?: number;
+  confidence_threshold?: number;
+  regime_filter?: number;
+  market_filter?: number;
+  trigger_check?: number;
+  dps_filter?: number;
+  final?: number;
+  [key: string]: number | undefined;
+}
+
 interface FunnelData {
-  [strategy: string]: {
-    signal_decided?: number;
-    confidence_threshold?: number;
-    regime_filter?: number;
-    market_filter?: number;
-    trigger_check?: number;
-    dps_filter?: number;
-    final?: number;
-  };
+  [strategy: string]: FunnelStageData;
 }
 
 interface HistogramData {
@@ -236,7 +239,7 @@ export default function ObservabilityPage() {
                   </div>
                   {strategies.map(strat => {
                     const f = funnel[strat];
-                    const maxVal = Math.max(...Object.values(f), 1);
+                    const maxVal = Math.max(...Object.values(f).filter((v): v is number => v !== undefined), 1);
                     return (
                       <div key={strat} className="md:grid md:grid-cols-8 md:gap-2 space-y-1 md:space-y-0">
                         <div className="text-sm font-medium text-white py-1">{strat}</div>
