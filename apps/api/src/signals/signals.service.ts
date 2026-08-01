@@ -8,6 +8,7 @@ import { FeatureStoreService } from './feature-store.service';
 import { RegimeClassifierService } from './regime-classifier.service';
 import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
 import { PatternPredictorService } from './pattern-predictor.service';
+import { ExpectedMoveService } from '../expected-move/expected-move.service';
 import { MarketDataService } from '../market-data/market-data.service';
 import { QuotaService } from '../billing/quota.service';
 import { EngineHttpService } from '../engine/engine-http.service';
@@ -16,9 +17,6 @@ import { SystemHealthService } from '../system-health/system-health.service';
 @Injectable()
 export class SignalsService {
   private readonly logger = new Logger(SignalsService.name);
-  private readonly expectedMoveCache = new Map<string, { expires: number; data: any }>();
-  private readonly expectedMoveInflight = new Map<string, Promise<any | null>>();
-  private readonly expectedMoveTtlMs = 5 * 60 * 1000;
 
   constructor(
     private prisma: PrismaService,
@@ -33,6 +31,7 @@ export class SignalsService {
     private engineHttp: EngineHttpService,
     private health: SystemHealthService,
     private patternPredictor: PatternPredictorService,
+    private expectedMove: ExpectedMoveService,
   ) {}
 
   private async predictMlRegime(symbol?: string, timeframe?: string): Promise<string | null> {
@@ -680,35 +679,13 @@ export class SignalsService {
     });
   }
 
-  private expectedMoveKey(symbol: string, timeframe: string) {
-    return `${symbol.toUpperCase()}|${timeframe}`;
-  }
-
   private async fetchExpectedMove(symbol: string, timeframe: string) {
-    const key = this.expectedMoveKey(symbol, timeframe);
-    const now = Date.now();
-    const cached = this.expectedMoveCache.get(key);
-    if (cached && cached.expires > now) {
-      return cached.data;
+    // #45 fix: delegate to ExpectedMoveService (single cache, single engine call)
+    try {
+      return await this.expectedMove.getExpectedMove(symbol, timeframe, undefined, 400);
+    } catch {
+      return null;
     }
-    if (this.expectedMoveInflight.has(key)) {
-      return this.expectedMoveInflight.get(key);
-    }
-
-    const request = this.engineHttp.get(`/expected-move/${encodeURIComponent(symbol)}`, { params: { timeframe, limit: 400 } })
-      .then(data => {
-        this.expectedMoveCache.set(key, { data, expires: Date.now() + this.expectedMoveTtlMs });
-        return data;
-      })
-      .catch(err => {
-        this.logger.warn(`expected_move_fetch_failed ${symbol}/${timeframe}: ${err?.message ?? err}`);
-        return null;
-      });
-
-    this.expectedMoveInflight.set(key, request);
-    const result = await request;
-    this.expectedMoveInflight.delete(key);
-    return result;
   }
 
   private buildExpectedMoveSummary(data: any) {
