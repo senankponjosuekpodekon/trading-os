@@ -6,6 +6,7 @@ pydantic-settings>=2.9.1
 # Market Data
 ccxt>=4.4.92
 yfinance>=1.0.0
+brvm-package>=0.2.1
 pandas>=2.2.3
 numpy>=2.2.3
 polars>=1.30.0
