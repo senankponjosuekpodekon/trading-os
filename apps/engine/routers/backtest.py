@@ -17,7 +17,9 @@ from routers.scan import (
     fetch_yfinance_klines,
     analyze_candles,
     TF_MAP,
+    _TF_HIERARCHY,
 )
+from routers.regime import detect_regime
 
 router = APIRouter()
 
@@ -246,7 +248,39 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
         # ── Scanner la bougie courante ──
         window = df.iloc[max(0, i - 200):i + 1].copy()
-        result = analyze_candles(req.symbol, req.timeframe, window, strategy=req.strategy)
+
+        # ── Calculer le régime MTF/HTF depuis les données historiques ──
+        mtf_tf, htf_tf = _TF_HIERARCHY.get(req.timeframe, ("4h", "1d"))
+        mtf_regime = None
+        htf_regime = None
+        try:
+            # Resample LTF data to MTF/HTF for regime detection
+            _mtf_map = TF_MAP.get(mtf_tf, mtf_tf)
+            _htf_map = TF_MAP.get(htf_tf, htf_tf)
+            _mtf_df = df.iloc[:i+1].copy()
+            if _mtf_map != tf:
+                _mtf_df = _mtf_df.resample(_mtf_map).agg({
+                    "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
+                }).dropna()
+            if len(_mtf_df) >= 50:
+                mtf_regime = detect_regime(_mtf_df["high"], _mtf_df["low"], _mtf_df["close"])
+
+            _htf_df = df.iloc[:i+1].copy()
+            if _htf_map != tf:
+                _htf_df = _htf_df.resample(_htf_map).agg({
+                    "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
+                }).dropna()
+            if len(_htf_df) >= 50:
+                htf_regime = detect_regime(_htf_df["high"], _htf_df["low"], _htf_df["close"])
+        except Exception:
+            pass  # regime detection failure should not crash backtest
+
+        result = analyze_candles(
+            req.symbol, req.timeframe, window,
+            strategy=req.strategy,
+            htf_regime=htf_regime,
+            mtf_regime=mtf_regime,
+        )
 
         sig  = result.get("signal", "NEUTRAL")
         conf = result.get("confidence", 0)

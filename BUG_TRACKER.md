@@ -17,7 +17,7 @@
 | 8 | probability_engine.py — branchement non confirmé | `probability.py` | ✅ | Moyenne | Confirmé: module autonome (continuation advice, trailing SL) exposé via API. Non branché dans scan — c'est un outil post-trade, pas un bug. |
 | 9 | regime_classifier HMM jamais persisté | `ml_regime.py` | ✅ | Moyenne | Ajout persistance sur disque (_save_model/_load_model) + endpoint /ml/regime/auto-train qui fetch BTC closes réels depuis Binance. |
 | 10 | regime_classifier HMM input fabriqué | `signals.service.ts:40-60` | ✅ | Moyenne | predictMlRegime fetch maintenant les closes historiques réels via engine /candles au lieu de fabriquer une série synthétique. |
-| 11 | 4-5 classifications asset_type divergentes | `scan.py`, `portfolio_risk.py`, `feature_factory.py` | 🟡 | Basse | get_asset_type vs ASSET_CLUSTERS vs _infer_asset_type donnent des résultats différents pour certains symboles (ex: EUR/USDT). |
+| 11 | 4-5 classifications asset_type divergentes | `scan.py`, `portfolio_risk.py`, `feature_factory.py` | ✅ | Basse | `feature_factory.py::_infer_asset_type` avait sa propre logique de classification divergente de `scan.py::get_asset_type`. Fix: `_infer_asset_type` délègue maintenant à `get_asset_type` (source unique). `portfolio_risk.py::get_cluster` reste séparé intentionnellement (clusters de corrélation, pas asset_type). |
 | 12 | Sous-scores non produits | `scan.py:1442-1456` | ✅ | Moyenne | Ajout score_trend, score_pa, score_sr, score_patterns, score_regime, score_smc, score_mtf, score_sentiment dans indicators. predictMlConfidence et signal-outcome reçoivent maintenant les sous-scores. |
 
 ## API (NestJS/TypeScript)
@@ -33,13 +33,12 @@
 ## Résumé
 
 - **Total bugs identifiés**: 17
-- **Fixés**: 16 (✅)
-- **À confirmer**: 1 (🟡 — #11 asset_type divergent, basse priorité)
+- **Fixés**: 17 (✅)
+- **À confirmer**: 0
 
 ## Priorités restantes
 
-1. **� #11 — Classifications asset_type divergentes** (basse priorité, impact marginal)
-2. **⚠️ Tests NestJS** — Les tests `signals.service.spec.ts` utilisent `_scanActiveAssets` qui n'existe plus (renommé `_scanActiveAssetsByTimeframe`). À mettre à jour.
+1. **⚠️ Tests NestJS** — Les tests `signals.service.spec.ts` utilisent `_scanActiveAssets` qui n'existe plus (renommé `_scanActiveAssetsByTimeframe`). À mettre à jour.
 
 ## Notes
 
@@ -74,8 +73,8 @@
 | 28 | 3 systèmes de calcul R:R non unifiés | `strategy_eval.py`, `risk.py`, `scan.py`, `synthetic_engine.py`, `brvm.py` | ✅ | Haute | Fonctions mortes supprimées de `probability.py` (`direction_engine`, `trade_quality_probability`, `entry_zone`, `tp_targets`, `trailing_sl`) et `compute_staged_stop` supprimé de `risk.py`. Calcul R:R unifié via `utils/risk_reward.py::compute_rr(entry, sl, tp1)`. Tous les modules (`strategy_eval.py`, `risk.py`, `scan.py`, `synthetic_engine.py`, `brvm.py`) importent maintenant cette fonction canonique. |
 | 29 | 3 mécanismes de trailing stop non orchestrés | `trailing_stop.py`, `scan.py` (SL liquidity-aware), `probability.py` | ✅ | Haute | `compute_staged_stop` (code mort confirmé par #43) supprimé de `risk.py` avec son endpoint `/risk/staged-stop` et ses tests. `trailing_sl` (code mort dans `probability.py`) supprimé. Reste 1 système vivant : `trailing_stop.py::compute_trailing_stop` (endpoint `/trailing-stop/compute`) + SL liquidity-aware dans `scan.py`. Ces 2 systèmes sont intentionnels : `trailing_stop.py` gère le trailing dynamique post-trade, le SL liquidity-aware ajuste le SL initial. |
 | 30 | sr_zones.py vs smc.py — définitions divergentes de zone | `sr_zones.py`, `smc.py`, `strategy_eval.py` | ✅ | Moyenne | Deux modules calculent des zones S/R avec des méthodes différentes (statistique vs institutionnel). Complémentaires, pas en conflit. Fix: ajout de `use_smc` flag (opt-in, défaut False) dans `StrategyRules` + `smc_bonus` intégré dans `evaluate_strategy`. SMC Retest seed mise à jour avec `use_smc: true`. |
-| 31 | Backtest — Binance-only | `backtest.py:13,143` | 🔴 | Moyenne | `fetch_binance_klines` uniquement. Forex, Synthetic, Commodities, BRVM ne sont pas backtestables. Refetch multi-provider nécessaire. |
-| 32 | Backtest — contexte manquant à l'appel | `backtest.py:225` | 🔴 | Moyenne | `analyze_candles` appelé sans `htf_regime`/`mtf_regime`/`onchain`/`forex_context`/`tokenomics_context`/`social_context`. Version appauvrie non comparable au pipeline live. |
+| 31 | Backtest — Binance-only | `backtest.py:13,143` | ✅ | Moyenne | Fixé par #44 : cascade `binance → deriv → twelvedata → yfinance` réutilisant les fonctions de `scan.py`. |
+| 32 | Backtest — contexte manquant à l'appel | `backtest.py:249` | ✅ | Moyenne | `analyze_candles` était appelé sans `htf_regime`/`mtf_regime`. Fix: calcul du régime MTF/HTF par resampling des données historiques (LTF → MTF/HTF via `df.resample()`) et passage à `analyze_candles`. On-chain/forex/tokenomics/social non passés (non disponibles en backtest hors-ligne). |
 | 33 | quota.service.ts — TOCTOU race condition | `quota.service.ts` | 🟡 | Moyenne | `assertSignalQuota` (lecture) puis `incrementSignalUsage` (écriture) sans atomicité. Double scan concurrent peut dépasser la limite. Fix: contrainte atomique DB (`UPDATE ... WHERE used < limit RETURNING ...`). |
 | 34 | quota.service.ts — fail-open sans abonnement | `quota.service.ts` | 🟡 | Moyenne | `getPlanLimits` retourne `null` si pas d'abonnement → toutes les fonctions `assert*` retournent sans restriction. Accès illimité pour utilisateurs sans abonnement. Décision design: fail-open volontaire ou free tier avec limites? |
 | 35 | brvm_reports.py — format date PDF à vérifier | `brvm_reports.py:83-90` | 🟡 | Moyenne | `_extract_pdf_date` suppose `YYYYMMDD-` ou `YYYYMMDD_` dans l'URL du PDF. Si le format réel diffère sur brvm.org, `published_at` reste `None` pour tous → `fundamental_score` retourne 0 silencieusement. À vérifier empiriquement. |
@@ -90,11 +89,11 @@
 | 39 | market_concept_layer.py — clé "zones" inexistante, contribution S/R toujours nulle | `market_concept_layer.py:190` | ✅ Fixé | 🟡 Moyenne | `sr.get("zones", [])` — la clé `zones` n'existe pas dans la sortie de `get_sr_zones()` qui retourne `{supports, resistances}`. Fix: `sr.get("supports", []) + sr.get("resistances", [])`. |
 | 40 | openFromSignal — pas de vérification anti-doublon | `positions.service.ts:382+` | ✅ Fixé | 🟡 Moyenne | `openFromSignal` ne vérifiait pas `status IN (OPEN, PARTIAL)` sur même portfolio+asset, contrairement à `create()`. Fix: ajout du même garde-fou `ConflictException('DUPLICATE_POSITION')`. |
 | 41 | parse_rules — ignore silencieusement les clés inconnues | `strategy_eval.py:200-206` | ✅ Fixé | 🟡 Moyenne | `if hasattr(r, key)` ignorait toute clé inconnue sans warning. Cause racine des bugs #37 et BRVM historique. Fix: warning `structlog` sur clés non présentes dans `StrategyRules.__dataclass_fields__`. |
-| 42 | #28 confirmé: `tp_targets`/`trade_quality_probability`/`entry_zone`/`direction_engine` — code mort | `probability.py` | 📝 Documenté | 🟡 Basse | Grep confirme: aucune fonction de `probability_engine.py` (sauf `continuation_score`) n'est appelée côté API. Le "3e système R:R" n'existe pas en production. 2 systèmes réels: `strategy_eval.py` (signaux) + `risk.py` (sizing manuel). |
-| 43 | #29 confirmé: `compute_staged_stop` et `trailing_sl` — code mort | `risk.py`, `probability.py` | 📝 Documenté | 🟡 Basse | Grep confirme: `/risk/staged-stop` n'a aucun appelant côté API. `trailing_sl` n'est appelé par aucun endpoint. 1 système de trailing réellement vivant: `trailing_stop.py` via `/trailing-stop/compute`. |
+| 42 | #28 confirmé: `tp_targets`/`trade_quality_probability`/`entry_zone`/`direction_engine` — code mort | `probability.py` | ✅ Supprimé | 🟡 Basse | Fonctions mortes supprimées dans le fix #28. Seul `continuation_score` reste. |
+| 43 | #29 confirmé: `compute_staged_stop` et `trailing_sl` — code mort | `risk.py`, `probability.py` | ✅ Supprimé | 🟡 Basse | Fonctions mortes supprimées dans le fix #29. `compute_staged_stop`, endpoint `/risk/staged-stop`, et `trailing_sl` retirés. |
 | 44 | #31 fixé: backtest multi-provider | `backtest.py:13,144` | ✅ Fixé | 🔴 Haute | `fetch_binance_klines` uniquement → Forex/Synthetic/BRVM/Commodities non backtestables. Fix: cascade `binance → deriv → twelvedata → yfinance` réutilisant les fonctions existantes de `scan.py`. |
 | 45 | Double cache expected-move | `signals.service.ts`, `ExpectedMoveService` | 📝 Ouvert | 🟡 Basse | Deux implémentations indépendantes de cache expected-move avec TTL séparés. Potentiellement double appel engine pour la même donnée. À unifier. |
-| 46 | PatternPredictorService non persisté, pas de cron d'auto-train | `signals.service.ts` | 📝 Ouvert | 🟡 Moyenne | `predict()` retourne `{probability: NaN}` après chaque redémarrage tant que `/signals/pattern-predictor/train` n'est pas appelé manuellement. Même classe de bug que le HMM avant son fix. |
+| 46 | PatternPredictorService non persisté, pas de cron d'auto-train | `signals.service.ts` | ✅ | Moyenne | `predict()` retournait `{probability: NaN}` après chaque redémarrage. Fix: cron `@Cron('45 */6 * * *')` ajouté — auto-train toutes les 6h (30 min après le predictor training). `PatternPredictorService` injecté dans `SignalsService`. |
 | 47 | price-alerts — vérification limitée aux paires Binance du ticker | `watcher.service.ts` | 📝 Ouvert | 🟡 Moyenne | `checkAlerts` est bien appelé par le cron `WatcherService` (EVERY_5_MINUTES), mais les prix proviennent uniquement du ticker Binance. Alertes sur Forex/Synthetic/BRVM ne se déclencheront jamais. |
 
 ## Addendum 3 — Audit du 31/07/2026 (tour 3 — patterns & direction normalization)

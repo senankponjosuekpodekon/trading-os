@@ -100,7 +100,7 @@ def test_level5_meta_features():
 
 
 def test_infer_asset_type():
-    assert _infer_asset_type("V75/USD") == "SYNTHETIC"
+    assert _infer_asset_type("VIX75/USD") == "SYNTHETIC"
     assert _infer_asset_type("EUR/USD") == "FOREX"
     assert _infer_asset_type("BTC/USDT") == "CRYPTO"
     assert _infer_asset_type("XAU/USD") == "COMMODITY"

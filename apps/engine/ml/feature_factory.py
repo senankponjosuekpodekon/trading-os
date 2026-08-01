@@ -266,20 +266,9 @@ def _compute_level5(
 
 
 def _infer_asset_type(symbol: str) -> str:
-    """Mirror the classification used in scan.py."""
-    s = symbol.upper()
-    if any(x in s for x in ["V75", "V100", "V50", "BOOM", "CRASH", "JUMP", "STEP", "RANGE"]):
-        return "SYNTHETIC"
-    if "/" in s:
-        base, quote = s.split("/", 1)
-        fiat = {"EUR", "USD", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "SGD", "HKD"}
-        if base in fiat and quote in fiat:
-            return "FOREX"
-        commodities = {"XAU", "XAG", "XPT", "WTI", "BRENT", "NG", "NATGAS"}
-        if base in commodities or quote in commodities:
-            return "COMMODITY"
-        return "CRYPTO"
-    return "UNKNOWN"
+    """Delegate to scan.py::get_asset_type (single source of truth)."""
+    from routers.scan import get_asset_type
+    return get_asset_type(symbol)
 
 
 def build_feature_vector(

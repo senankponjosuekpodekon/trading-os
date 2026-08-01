@@ -7,6 +7,7 @@ import { SignalOutcomeService } from './signal-outcome.service';
 import { FeatureStoreService } from './feature-store.service';
 import { RegimeClassifierService } from './regime-classifier.service';
 import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
+import { PatternPredictorService } from './pattern-predictor.service';
 import { MarketDataService } from '../market-data/market-data.service';
 import { QuotaService } from '../billing/quota.service';
 import { EngineHttpService } from '../engine/engine-http.service';
@@ -31,6 +32,7 @@ export class SignalsService {
     private quota: QuotaService,
     private engineHttp: EngineHttpService,
     private health: SystemHealthService,
+    private patternPredictor: PatternPredictorService,
   ) {}
 
   private async predictMlRegime(symbol?: string, timeframe?: string): Promise<string | null> {
@@ -148,6 +150,17 @@ export class SignalsService {
     } catch (error) {
       this.logger.warn('scheduled_predictor_train_failed', { error: (error as any)?.message ?? error });
       this.health.recordCronRun('predictor-training', 'error', (error as any)?.message);
+    }
+  }
+
+  @Cron('45 */6 * * *', { timeZone: 'UTC' })
+  async scheduledPatternPredictorTraining() {
+    try {
+      const result = await this.patternPredictor.train();
+      this.health.recordCronRun('pattern-predictor-training', result.trained ? 'ok' : 'error');
+    } catch (error) {
+      this.logger.warn('scheduled_pattern_predictor_train_failed', { error: (error as any)?.message ?? error });
+      this.health.recordCronRun('pattern-predictor-training', 'error', (error as any)?.message);
     }
   }
 
