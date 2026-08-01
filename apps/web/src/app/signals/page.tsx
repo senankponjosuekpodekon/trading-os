@@ -13,9 +13,9 @@ const SCAN_SYMBOLS_GROUPS = [
   { label: 'Crypto',      symbols: ['BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT','AVAX/USDT','ADA/USDT','DOT/USDT','LINK/USDT','MATIC/USDT','ATOM/USDT','LTC/USDT','XRP/USDT','DOGE/USDT','TRX/USDT','TON/USDT','PAXG/USDT'] },
   { label: 'Forex',       symbols: ['EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CHF','USD/CAD','NZD/USD'] },
   { label: 'Matières',    symbols: ['XAU/USD','XAG/USD','WTI/USD','BRENT/USD'] },
-  { label: 'Deriv Vol',   symbols: ['VIX10/USD','VIX25/USD','VIX50/USD','VIX75/USD','VIX100/USD'] },
-  { label: 'Deriv B&C',   symbols: ['BOOM300/USD','BOOM500/USD','BOOM1000/USD','CRASH300/USD','CRASH500/USD','CRASH1000/USD'] },
-  { label: 'Deriv Jump',  symbols: ['JUMP10/USD','JUMP25/USD','JUMP50/USD','JUMP75/USD','JUMP100/USD'] },
+  { label: 'Deriv Vol',   symbols: ['V10','V25','V50','V75','V100'] },
+  { label: 'Deriv B&C',   symbols: ['BOOM300','BOOM500','BOOM1000','CRASH300','CRASH500','CRASH1000'] },
+  { label: 'Deriv Jump',  symbols: ['JUMP10','JUMP25','JUMP50','JUMP75','JUMP100'] },
   { label: 'BRVM',        symbols: ['ONTBF','SGBF','BOABF','ETIT','SIVC','PALC','SOGC','SNTS','CIEC','NSIC','ORGT','BICC','CBIBF','ABJC','STAC'] },
 ];
 const ALL_SYMBOLS = SCAN_SYMBOLS_GROUPS.flatMap(g => g.symbols);

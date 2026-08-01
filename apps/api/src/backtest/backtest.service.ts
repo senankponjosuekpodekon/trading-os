@@ -1,22 +1,16 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 import { RunBacktestDto } from './dto/run-backtest.dto';
 
 @Injectable()
 export class BacktestService {
   private readonly logger = new Logger(BacktestService.name);
-  private engineUrl: string;
 
   constructor(
     private prisma: PrismaService,
-    private http: HttpService,
-    private config: ConfigService,
-  ) {
-    this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
-  }
+    private engine: EngineHttpService,
+  ) {}
 
   async run(userId: string, dto: RunBacktestDto) {
     const strategy = await this.resolveStrategy(dto, userId);
@@ -26,10 +20,7 @@ export class BacktestService {
     }
     delete payload.strategyId;
 
-    const { data } = await firstValueFrom(
-      this.http.post(`${this.engineUrl}/backtest/run`, payload),
-    );
-    return data;
+    return this.engine.post('/backtest/run', payload, { timeout: 30_000 });
   }
 
   async runMulti(userId: string, dtos: RunBacktestDto[]) {
@@ -43,10 +34,7 @@ export class BacktestService {
       }),
     );
 
-    const { data } = await firstValueFrom(
-      this.http.post(`${this.engineUrl}/backtest/multi`, requests),
-    );
-    return data;
+    return this.engine.post('/backtest/multi', requests, { timeout: 60_000 });
   }
 
   private async resolveStrategy(dto: RunBacktestDto, _userId: string) {

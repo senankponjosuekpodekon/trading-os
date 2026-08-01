@@ -16,7 +16,7 @@ import { AuditModule } from '../audit/audit.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET', 'fallback_secret'),
+        secret: config.get<string>('JWT_SECRET')!,
         signOptions: { expiresIn: config.get('JWT_EXPIRES_IN', '15m') as any },
       }),
     }),

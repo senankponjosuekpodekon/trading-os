@@ -15,4 +15,10 @@ export class SystemHealthController {
   async getHealth() {
     return this.health.getHealthSummary();
   }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('crons')
+  getCronStatus() {
+    return this.health.getCronStatus();
+  }
 }

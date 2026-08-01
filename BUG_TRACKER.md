@@ -110,3 +110,42 @@
 | 55 | _alternating_pivots — close.std() global vs local | `harmonic.py:69` | ✅ Fixé | 🟡 Moyenne | `close.std()` calculé sur toute la fenêtre (200+ bougies) au lieu d'une fenêtre glissante. Sur tendance longue, seuil explose → pivots filtrés → détection harmonique vide. Fix: `close.rolling(14, min_periods=3).std()`. |
 | 56 | Buffer methodology — single-candle range au lieu d'ATR(14) | `double_top.py`, `head_shoulders.py` | ✅ Fixé | 🟡 Moyenne | `buffer = range(dernière bougie) * 0.3` → une bougie anormale fausse le stop-loss. Fix: `_pattern_buffer()` utilise ATR(14) avec fallback single-candle, cohérent avec `smc.py`, `regime.py`, `price_action.py`. |
 | 57 | test_buy_targets_with_atr — assertion périmée | `test_risk.py:52-55` | ✅ Fixé | 🟡 Moyenne | Test encodait l'ancien comportement ATR-based (`106.0`/`110.5`) de `calc_targets`, mais le Fix #8 avait remplacé par R/R-based (`110.0`/`115.0`). Test jamais relancé en suite complète jusqu'ici. Fix: assertion mise à jour. |
+
+### Addendum 4: Audit Sécurité & Consolidation (Batch #4)
+
+**#58 `/deriv/scalp` — exécution de trades réels sans risk system**
+- **Status**: Fixed (live disabled)
+- **Priority**: 🔴 Critical
+- **Description**: Le endpoint `/deriv/scalp` plaçait de vrais contrats Deriv avec argent réel dès que `DERIV_API_TOKEN` était configuré, via sa propre logique de scoring (`_v75_scalp_strategy`) complètement séparée de `evaluate_strategy`/DSL. Aucun garde-fou : pas de risk engine, pas de drawdown guard, pas de position sizing, pas de quota, pas d'audit log, pas de RLS, pas de tracking dans `Portfolio.currentCapital`. Le frontend (`deriv/page.tsx`), le proxy NestJS (`engine-proxy.controller.ts`) et l'engine (`deriv.py`) formaient une chaîne complète exposée en production.
+- **Fix**: Bloc d'exécution live commenté dans `deriv.py::scalp_v75()`. Le endpoint retourne toujours `PAPER` avec un message explicite. Pour réactiver : intégrer le risk system complet avant toute exécution.
+
+**#59 `_stress_index` — seuil ATR% absolu 3% au lieu de percentile relatif**
+- **Status**: Fixed
+- **Priority**: 🟡 Moyenne
+- **Description**: `market_concept_layer.py::_stress_index` utilisait `vol_stress = min(1.0, atr_pct / 3.0)` avec un seuil absolu de 3%, réintroduisant le problème que `regime.py::detect_regime` avait explicitement corrigé avec `atr_percentile` (percentile relatif à l'historique propre de l'actif). Conséquence : Forex (ATR% ~0.1-0.5%) toujours sous-détecté, Synthetic (ATR% naturellement élevé) toujours sur-détecté. Embeddings cross-asset faussés.
+- **Fix**: Remplacé par `atr_percentile = regime.get("atr_percentile", 0.5)` (déjà calculé et disponible dans le dict `regime`).
+
+**#60 `geometry/core.py::filter_significant` — close.std() global au lieu de local**
+- **Status**: Fixed
+- **Priority**: 🟡 Moyenne
+- **Description**: Même bug que #55 corrigé dans `harmonic.py` : `close.std()` calculé sur toute la série au lieu d'une fenêtre glissante. `geometry.py` est un scaffold non branché (aucun module de pattern detection ne l'importe activement), mais le bug aurait ressurgi lors d'une future migration.
+- **Fix**: Remplacé par `close.rolling(14).std().iloc[p.idx]`.
+
+**#61 `llm_health()` — healthcheck ment sur l'état d'Ollama**
+- **Status**: Fixed
+- **Priority**: 🟡 Moyenne
+- **Description**: `_effective_provider()` retournait toujours `"ollama"` car `OLLAMA_BASE_URL` a une valeur par défaut non-vide (`http://localhost:11434`). Le healthcheck `/llm/health` affichait `"status": "ready"` même sur un serveur sans Ollama. Le fallback mock fonctionnait correctement à l'appel réel, mais le monitoring était trompeur.
+- **Fix**: `llm_health()` est maintenant `async` et fait un vrai ping `GET /api/tags` vers Ollama avec timeout 3s. Si pas de réponse → `provider = "mock"`.
+
+**#62 Mapping Deriv wire-symbol "N" dupliqué en 4 endroits**
+- **Status**: Fixed
+- **Priority**: 🟡 Moyenne
+- **Description**: La traduction `BOOM300→BOOM300N` / `CRASH300→CRASH300N` était hardcodée indépendamment dans `deriv.py`, `ws.py`, `synthetic_engine.py`, et `scan.py`. Quatre sources divergentes qui auraient inévitablement divergé si Deriv renomme un autre symbole.
+- **Fix**: Création de `utils/deriv_symbols.py` avec `to_wire_symbol()` comme source unique. Les 4 modules importent maintenant cette fonction au lieu de hardcoder le mapping.
+
+**#63 `_mock_candles` — mutation RNG global NumPy**
+- **Status**: Fixed
+- **Priority**: 🟢 Basse
+- **Description**: `np.random.seed()` mute l'état RNG global, risquant une contamination croisée avec d'autres simulations Monte Carlo du même process (`tick_stats.py`, `synthetic_engine.py`).
+- **Fix**: Remplacé par `rng = np.random.default_rng()` (Generator local).
+

@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 import { of } from 'rxjs';
 import { WatcherService } from './watcher.service';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
@@ -7,6 +8,7 @@ import { PositionsService } from '../positions/positions.service';
 import { JournalService } from '../journal/journal.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PriceAlertsService } from '../price-alerts/price-alerts.service';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 describe('WatcherService', () => {
   let service: WatcherService;
@@ -53,6 +55,8 @@ describe('WatcherService', () => {
         { provide: HttpService, useValue: mockHttp },
         { provide: NotificationsService, useValue: mockNotifications },
         { provide: PriceAlertsService, useValue: mockPriceAlerts },
+        { provide: ConfigService, useValue: { get: jest.fn((key: string, def: any) => def) } },
+        { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
       ],
     }).compile();
 
@@ -196,10 +200,11 @@ describe('WatcherService', () => {
       mockPrisma.signal.findMany.mockResolvedValue([
         { id: 's4', signal: 'BUY', entryPrice: 100, asset: { symbol: 'EUR/USD' } },
       ]);
+      // Engine returns empty candles for non-Binance symbol — no price, no activation
+      mockHttp.get.mockReturnValue(of({ data: { candles: [] } }));
 
       await service.watchPendingSignals();
 
-      expect(mockHttp.get).not.toHaveBeenCalled();
       expect(mockPrisma.signal.update).not.toHaveBeenCalled();
     });
 

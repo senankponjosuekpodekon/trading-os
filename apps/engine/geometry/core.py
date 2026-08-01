@@ -119,7 +119,7 @@ def filter_significant(
             continue
         current_atr = max(
             float(atr_s.iloc[p.idx]) if not pd.isna(atr_s.iloc[p.idx]) else 0.0,
-            close.std() * 0.5,
+            float(close.rolling(14).std().iloc[p.idx]) if p.idx < len(close) else 0.0,
         )
         amplitude = abs(p.price - last_opp.price)
         if amplitude >= min_atr_multiple * current_atr:

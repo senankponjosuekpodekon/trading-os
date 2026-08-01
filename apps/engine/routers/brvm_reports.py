@@ -22,6 +22,9 @@ from bs4 import BeautifulSoup
 
 from scrapers.brvm_scraper import BRVM_SYMBOLS, HEADERS
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 BRVM_REPORTS_INDEX = "https://www.brvm.org/fr/rapports-societes-cotees"
@@ -132,7 +135,8 @@ async def fetch_reports_index(page: int = 0) -> List[BrvmIssuer]:
         async with httpx.AsyncClient(timeout=15, headers=HEADERS, follow_redirects=True) as client:
             r = await client.get(url)
             r.raise_for_status()
-    except Exception:
+    except Exception as exc:
+        logger.warning("brvm_issuers_fetch_failed", url=url, error=str(exc))
         return []
     soup = BeautifulSoup(r.text, "lxml")
     return _issuers_from_soup(soup)
@@ -185,7 +189,8 @@ async def fetch_company_reports(slug: str, page: int = 0) -> List[BrvmReport]:
         async with httpx.AsyncClient(timeout=15, headers=HEADERS, follow_redirects=True) as client:
             r = await client.get(url)
             r.raise_for_status()
-    except Exception:
+    except Exception as exc:
+        logger.warning("brvm_reports_fetch_failed", url=url, error=str(exc))
         return []
     soup = BeautifulSoup(r.text, "lxml")
     return _reports_from_soup(soup)
@@ -284,7 +289,8 @@ async def fetch_fundamental_scores(symbols: List[str]) -> List[FundamentalScoreO
                 fetch_all_company_reports(issuer.slug),
                 timeout=8.0,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("brvm_company_reports_failed", issuer=issuer.slug, error=str(exc))
             reports = []
         score = fundamental_score(reports)
         latest = next((r for r in reports if r.published_at), None)

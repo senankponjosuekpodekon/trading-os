@@ -4,9 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Zap, Activity, AlertCircle, BarChart2, CheckSquare, Square, Wifi, WifiOff } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useTradingStore } from '@/store/trading.store';
-import axios from 'axios';
-
-const ENGINE = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
+import { api } from '@/lib/api';
 
 interface ScalpResult {
   symbol: string; label?: string; category?: string;
@@ -94,18 +92,18 @@ export default function DerivPage() {
 
   const { data: health } = useQuery({
     queryKey: ['deriv-health'],
-    queryFn:  async () => (await axios.get(`${ENGINE}/deriv/health`)).data,
+    queryFn:  async () => (await api.get('/deriv/health')).data,
     refetchInterval: 30_000,
   });
 
   const multiScan = useMutation({
-    mutationFn: async () => (await axios.post(`${ENGINE}/deriv/multi-analyze`, {
+    mutationFn: async () => (await api.post('/deriv/multi-analyze', {
       symbols: selectedSyms, count: 100,
     })).data as MultiAnalyzeResponse,
   });
 
   const scalp = useMutation({
-    mutationFn: async () => (await axios.post(`${ENGINE}/deriv/scalp`, {
+    mutationFn: async () => (await api.post('/deriv/scalp', {
       symbol: selectedSyms[0] ?? 'R_75', stake, duration, bars: 100,
     })).data as ScalpResponse,
     onSuccess: (data) => setResult(data),
@@ -144,12 +142,18 @@ export default function DerivPage() {
 
         {/* Status bar */}
         <div className={`flex items-center gap-3 p-3 rounded-xl border text-sm ${
-          health?.api_live
+          health === undefined
+            ? 'bg-gray-800 border-gray-700 text-gray-500'
+            : health?.api_live
             ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
             : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
         }`}>
           <Activity className="w-4 h-4 shrink-0" />
-          <span className="font-medium">{health?.api_live ? '⬤ API Deriv connectée' : '◎ Mode démo (API inaccessible)'}</span>
+          {health === undefined ? (
+            <span className="font-medium animate-pulse">Vérification de l'API Deriv…</span>
+          ) : (
+            <span className="font-medium">{health?.api_live ? '⬤ API Deriv connectée' : '◎ Mode démo (API inaccessible)'}</span>
+          )}
           {!health?.token_configured && (
             <span className="ml-auto text-xs opacity-70">DERIV_API_TOKEN manquant — paper trade uniquement</span>
           )}

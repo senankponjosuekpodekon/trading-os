@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { engineHeaders } from '../utils/engine-headers.util';
 
 export interface SignalFeatures {
   confidence: number;
@@ -50,7 +51,7 @@ export class SignalPredictorService {
 
   private async post(path: string, body: any) {
     try {
-      const res = await firstValueFrom(this.http.post(`${this.engineUrl}${path}`, body));
+      const res = await firstValueFrom(this.http.post(`${this.engineUrl}${path}`, body, { headers: engineHeaders(this.config) }));
       return res.data;
     } catch (error) {
       this.logger.error('SignalPredictor POST failed', { path, error: error?.message ?? error });
@@ -60,7 +61,7 @@ export class SignalPredictorService {
 
   private async get(path: string) {
     try {
-      const res = await firstValueFrom(this.http.get(`${this.engineUrl}${path}`));
+      const res = await firstValueFrom(this.http.get(`${this.engineUrl}${path}`, { headers: engineHeaders(this.config) }));
       return res.data;
     } catch (error) {
       this.logger.error('SignalPredictor GET failed', { path, error: error?.message ?? error });

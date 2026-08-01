@@ -8,6 +8,7 @@ import asyncio
 from typing import Optional
 
 from utils.rate_limiter import rate_limit
+from utils.http import retry_async
 
 router = APIRouter()
 
@@ -40,10 +41,12 @@ def _binance_symbol(symbol: str) -> str:
 
 @rate_limit(max_concurrent=5, min_delay=0.1)
 async def _binance_get(url: str, params: Optional[dict] = None):
-    async with httpx.AsyncClient(timeout=8) as client:
-        r = await client.get(url, params=params)
-        r.raise_for_status()
-        return r.json()
+    async def _do():
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            return r.json()
+    return await retry_async(_do, max_retries=1, base_delay=0.5, source="binance")
 
 
 @router.get("/funding/{symbol}")
@@ -131,10 +134,12 @@ async def btc_dominance():
     if cached:
         return cached
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(COINGECKO_GLOBAL)
-            r.raise_for_status()
-            data = r.json()
+        async def _do():
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(COINGECKO_GLOBAL)
+                r.raise_for_status()
+                return r.json()
+        data = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
         btc = data.get("data", {}).get("market_cap_percentage", {}).get("btc", 0)
         result = {"btc_dominance": round(float(btc), 2)}
         _set(cache_key, result)

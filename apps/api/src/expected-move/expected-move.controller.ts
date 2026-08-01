@@ -1,9 +1,11 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ExpectedMoveService } from './expected-move.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 const DEFAULT_HORIZONS = [5, 10, 20];
 
 @Controller('expected-move')
+@UseGuards(JwtAuthGuard)
 export class ExpectedMoveController {
   constructor(private readonly expectedMoveService: ExpectedMoveService) {}
 

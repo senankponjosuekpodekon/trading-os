@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { engineHeaders } from '../utils/engine-headers.util';
 import {
   TokenomicsMetric,
   SocialSentiment,
@@ -46,7 +47,7 @@ export class PhaseBDataService {
 
   private async engineGet<T>(path: string): Promise<T | null> {
     try {
-      const res = await firstValueFrom(this.http.get<T>(`${this.engineUrl}${path}`, { timeout: 4000 }));
+      const res = await firstValueFrom(this.http.get<T>(`${this.engineUrl}${path}`, { timeout: 4000, headers: engineHeaders(this.config) }));
       return res.data ?? null;
     } catch {
       return null;

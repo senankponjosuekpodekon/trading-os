@@ -45,4 +45,26 @@ export class AuditService {
       meta: { page: opts.page, limit: opts.limit, total, totalPages: Math.ceil(total / opts.limit) },
     };
   }
+
+  async findAll(opts: { page: number; limit: number; userId?: string; action?: string } = { page: 1, limit: 50 }) {
+    const skip = (opts.page - 1) * opts.limit;
+    const where: any = {};
+    if (opts.userId) where.userId = opts.userId;
+    if (opts.action) where.action = { contains: opts.action, mode: 'insensitive' };
+    const db = (this.prisma as any).auditLog;
+    const [data, total] = await Promise.all([
+      db.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: opts.limit,
+        include: { user: { select: { id: true, email: true, name: true, role: true } } },
+      }),
+      db.count({ where }),
+    ]);
+    return {
+      data,
+      meta: { page: opts.page, limit: opts.limit, total, totalPages: Math.ceil(total / opts.limit) },
+    };
+  }
 }

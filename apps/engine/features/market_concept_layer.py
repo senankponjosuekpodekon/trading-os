@@ -254,11 +254,13 @@ def _stress_index(
     if len(atr) < 20:
         return 0.5
 
-    atr_current = _safe(atr.iloc[-1])
     c = _safe(close.iloc[-1])
-    atr_pct = (atr_current / c) * 100 if c else 0
-    # Higher ATR% -> more stress
-    vol_stress = min(1.0, atr_pct / 3.0)  # 3% daily ATR = high stress
+
+    # Use regime's atr_percentile (relative to the asset's own history) instead
+    # of a fixed 3% absolute threshold that misclassifies Forex (always calm)
+    # and Synthetic (always stressed).
+    atr_percentile = _safe((regime or {}).get("atr_percentile"), 0.5)
+    vol_stress = min(1.0, atr_percentile)
 
     # drawdown from recent high
     recent_high = _safe(close.iloc[-20:].max())

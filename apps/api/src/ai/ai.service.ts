@@ -1,51 +1,27 @@
 import { Injectable } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import { EngineHttpService } from '../engine/engine-http.service';
 
 @Injectable()
 export class AiService {
-  private readonly engineUrl: string;
-
-  constructor(
-    private http: HttpService,
-    private config: ConfigService,
-  ) {
-    this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
-  }
+  constructor(private engine: EngineHttpService) {}
 
   async explainSignal(signalData: any): Promise<any> {
-    const { data } = await firstValueFrom(
-      this.http.post(`${this.engineUrl}/llm/explain`, signalData),
-    );
-    return data;
+    return this.engine.post('/llm/explain', signalData, { timeout: 30_000 });
   }
 
   async weeklyReport(reportData: any): Promise<any> {
-    const { data } = await firstValueFrom(
-      this.http.post(`${this.engineUrl}/llm/weekly-report`, reportData),
-    );
-    return data;
+    return this.engine.post('/llm/weekly-report', reportData, { timeout: 30_000 });
   }
 
   async reviewPosition(positionData: any): Promise<any> {
-    const { data } = await firstValueFrom(
-      this.http.post(`${this.engineUrl}/llm/review-position`, positionData),
-    );
-    return data;
+    return this.engine.post('/llm/review-position', positionData, { timeout: 30_000 });
   }
 
   async chat(chatData: any): Promise<any> {
-    const { data } = await firstValueFrom(
-      this.http.post(`${this.engineUrl}/llm/chat`, chatData),
-    );
-    return data;
+    return this.engine.post('/llm/chat', chatData, { timeout: 30_000 });
   }
 
   async health(): Promise<any> {
-    const { data } = await firstValueFrom(
-      this.http.get(`${this.engineUrl}/llm/health`),
-    );
-    return data;
+    return this.engine.get('/llm/health', { timeout: 5_000 });
   }
 }

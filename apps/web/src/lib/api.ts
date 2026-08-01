@@ -5,6 +5,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 export const api = axios.create({
   baseURL: `${API_URL}/api`,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
 let isRefreshing = false;
@@ -39,10 +40,9 @@ function clearTokens() {
 
 async function doRefresh() {
   const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('trading_os_refresh_token') : null;
-  if (!refreshToken) throw new Error('No refresh token');
-
-  const { data } = await axios.post(`${API_URL}/api/auth/refresh`, { refresh_token: refreshToken });
-  setTokens(data.access_token, data.refresh_token);
+  const body = refreshToken ? { refresh_token: refreshToken } : {};
+  const { data } = await axios.post(`${API_URL}/api/auth/refresh`, body, { withCredentials: true });
+  if (data.access_token) setTokens(data.access_token, data.refresh_token);
   return data.access_token as string;
 }
 

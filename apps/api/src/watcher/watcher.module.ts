@@ -5,9 +5,10 @@ import { PositionsModule } from '../positions/positions.module';
 import { JournalModule } from '../journal/journal.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PriceAlertsModule } from '../price-alerts/price-alerts.module';
+import { SystemHealthModule } from '../system-health/system-health.module';
 
 @Module({
-  imports: [HttpModule, PositionsModule, JournalModule, NotificationsModule, PriceAlertsModule],
+  imports: [HttpModule, PositionsModule, JournalModule, NotificationsModule, PriceAlertsModule, SystemHealthModule],
   providers: [WatcherService],
 })
 export class WatcherModule {}

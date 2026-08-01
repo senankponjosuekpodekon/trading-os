@@ -20,6 +20,9 @@ def _effective_provider() -> str:
         return "ollama"
     if OPENAI_API_KEY:
         return "openai"
+    # Auto-detect: if Ollama URL is set, prefer it over mock
+    if OLLAMA_BASE_URL:
+        return "ollama"
     return "mock"
 
 def _effective_model() -> str:
@@ -460,35 +463,9 @@ Sois factuel, cite les chiffres. Maximum 300 mots."""
 
 
 async def _call_llm(prompt: str, max_tokens: int = 400) -> str:
-    provider = _effective_provider()
-
-    if provider == "mock":
-        return _mock_response(prompt)
-
-    try:
-        from openai import AsyncOpenAI
-
-        if provider == "ollama":
-            # Ollama expose une API compatible OpenAI sur /v1
-            client = AsyncOpenAI(
-                base_url=f"{OLLAMA_BASE_URL}/v1",
-                api_key="ollama",  # Ollama n'exige pas de vraie clé
-            )
-            model = OLLAMA_MODEL
-        else:
-            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-            model  = OPENAI_MODEL
-
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens,
-            temperature=0.7,
-        )
-        return response.choices[0].message.content.strip()
-
-    except Exception as e:
-        return _mock_response(prompt, error=str(e))
+    """Delegate to _call_llm_with_fallback for consistent Ollama→OpenAI→mock chain."""
+    text, _provider, _model = await _call_llm_with_fallback(prompt, max_tokens=max_tokens)
+    return text
 
 
 async def _call_llm_with_fallback(prompt: str, max_tokens: int = 400) -> tuple[str, str, str]:
@@ -548,14 +525,14 @@ def _mock_response(prompt: str, error: str = "") -> str:
 @router.post("/llm/explain")
 async def explain_signal(req: ExplainRequest):
     prompt = _build_signal_prompt(req)
-    explanation = await _call_llm(prompt, max_tokens=350)
+    explanation, provider, model = await _call_llm_with_fallback(prompt, max_tokens=350)
     return {
         "symbol":      req.symbol,
         "signal":      req.signal,
         "confidence":  req.confidence,
         "ai_explanation": explanation,
-        "model":       _effective_model(),
-        "provider":    _effective_provider(),
+        "model":       model,
+        "provider":    provider,
         "language":    req.language,
     }
 
@@ -581,13 +558,14 @@ async def review_position(req: ReviewPositionRequest):
 @router.post("/llm/weekly-report")
 async def weekly_report(req: WeeklyReportRequest):
     prompt = _build_report_prompt(req)
-    report = await _call_llm(prompt, max_tokens=500)
+    report, provider, model = await _call_llm_with_fallback(prompt, max_tokens=500)
     return {
         "report":   report,
         "trades":   len(req.trades),
         "win_rate": req.win_rate,
         "total_pnl": req.total_pnl,
-        "model":    _effective_model(),
+        "model":    model,
+        "provider":  provider,
     }
 
 
@@ -640,33 +618,49 @@ def _build_chat_system_prompt(req: ChatRequest) -> str:
 async def chat(req: ChatRequest):
     system = _build_chat_system_prompt(req)
     messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
-    provider = _effective_provider()
+
+    # Build a single prompt from messages for the fallback chain
+    prompt_parts = [f"[{m['role']}] {m['content']}" for m in messages]
+    combined_prompt = "\n\n".join(prompt_parts)
+
     try:
         from openai import AsyncOpenAI
-        if provider == "ollama":
-            client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama")
-            model = OLLAMA_MODEL
-        else:
-            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-            model = OPENAI_MODEL
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=500,
-            temperature=0.7,
-        )
-        reply = response.choices[0].message.content.strip()
+
+        # Try Ollama first, then OpenAI, then mock — same fallback chain as everywhere
+        if OLLAMA_BASE_URL:
+            try:
+                client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama")
+                response = await client.chat.completions.create(
+                    model=OLLAMA_MODEL,
+                    messages=messages,
+                    max_tokens=500,
+                    temperature=0.7,
+                )
+                reply = response.choices[0].message.content.strip()
+                return {"reply": reply, "model": OLLAMA_MODEL, "provider": "ollama", "language": req.language}
+            except Exception:
+                pass
+
+        if OPENAI_API_KEY:
+            try:
+                client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                response = await client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=messages,
+                    max_tokens=500,
+                    temperature=0.7,
+                )
+                reply = response.choices[0].message.content.strip()
+                return {"reply": reply, "model": OPENAI_MODEL, "provider": "openai", "language": req.language}
+            except Exception as e:
+                pass
+
+        reply = _mock_chat_response(req.message)
+        return {"reply": reply, "model": "mock", "provider": "mock", "language": req.language}
+
     except Exception as e:
         reply = _mock_chat_response(req.message, error=str(e))
-        model = "mock"
-        provider = "mock"
-
-    return {
-        "reply":    reply,
-        "model":    model if provider != "mock" else "mock",
-        "provider": provider,
-        "language": req.language,
-    }
+        return {"reply": reply, "model": "mock", "provider": "mock", "language": req.language}
 
 
 def _mock_chat_response(message: str, error: str = "") -> str:
@@ -685,11 +679,23 @@ def _mock_chat_response(message: str, error: str = "") -> str:
 
 
 @router.get("/llm/health")
-def llm_health():
+async def llm_health():
     provider = _effective_provider()
+
+    # If provider is ollama, do a real ping to check if it's actually running
+    if provider == "ollama":
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
+                if resp.status_code != 200:
+                    provider = "mock"
+        except Exception:
+            provider = "mock"
+
     return {
         "provider":          provider,
-        "model":             _effective_model(),
+        "model":             _effective_model() if provider != "mock" else "mock",
         "openai_configured": bool(OPENAI_API_KEY),
         "ollama_url":        OLLAMA_BASE_URL if provider == "ollama" else None,
         "status":            "ready" if provider != "mock" else "mock_mode",

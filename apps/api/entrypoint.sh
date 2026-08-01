@@ -8,6 +8,7 @@ echo "[entrypoint] Running prisma db seed..."
 node --experimental-strip-types -e "
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = new PrismaClient();
 async function main() {
   const markets = [
@@ -79,10 +80,15 @@ async function main() {
       isActive: true,
     },
   });
-  const adminPassword = await bcrypt.hash('admin123', 12);
+  const rawPassword = process.env.ADMIN_PASSWORD;
+  if (!rawPassword) {
+    console.warn('[SECURITY] ADMIN_PASSWORD not set — generating a random one.');
+    console.warn('[SECURITY] Set ADMIN_PASSWORD in your .env to use a known password.');
+  }
+  const adminPassword = await bcrypt.hash(rawPassword || crypto.randomBytes(24).toString('hex'), 12);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
-    update: { role: 'SUPER_ADMIN' },
+    update: { role: 'SUPER_ADMIN', ...(rawPassword ? { password: adminPassword } : {}) },
     create: {
       email: 'admin@example.com',
       password: adminPassword,

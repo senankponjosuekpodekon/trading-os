@@ -5,6 +5,8 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { FeatureStoreService } from './feature-store.service';
+import { engineHeaders } from '../utils/engine-headers.util';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 const TF_TO_BARS_LOOKBACK: Record<string, number> = {
   '1m': 60, '5m': 48, '15m': 32, '1h': 24, '4h': 12, '1d': 5,
@@ -24,6 +26,7 @@ export class SignalOutcomeService {
     private http: HttpService,
     private config: ConfigService,
     private featureStore: FeatureStoreService,
+    private health: SystemHealthService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
@@ -96,22 +99,27 @@ export class SignalOutcomeService {
 
   @Cron('0 * * * *')
   async resolveOutcomes() {
-    this.logger.log('OUTCOME: vérification des signaux PENDING');
+    try {
+      this.logger.log('OUTCOME: vérification des signaux PENDING');
 
-    const pending = await this.prisma.signalLog.findMany({
-      where: { outcome: 'PENDING' },
-      take: 200,
-    });
+      const pending = await this.prisma.signalLog.findMany({
+        where: { outcome: 'PENDING' },
+        take: 200,
+      });
 
-    for (const log of pending) {
-      try {
-        await this._resolveOne(log);
-      } catch (e: any) {
-        this.logger.warn(`resolveOne failed ${log.symbol}: ${e?.message}`);
+      for (const log of pending) {
+        try {
+          await this._resolveOne(log);
+        } catch (e: any) {
+          this.logger.warn(`resolveOne failed ${log.symbol}: ${e?.message}`);
+        }
       }
-    }
 
-    this.logger.log(`OUTCOME: ${pending.length} signaux vérifiés`);
+      this.logger.log(`OUTCOME: ${pending.length} signaux vérifiés`);
+      this.health.recordCronRun('resolve-outcomes', 'ok');
+    } catch (e: any) {
+      this.health.recordCronRun('resolve-outcomes', 'error', e?.message);
+    }
   }
 
   private async _resolveOne(log: any) {
@@ -228,7 +236,7 @@ export class SignalOutcomeService {
     const bars = TF_TO_BARS_LOOKBACK[tf] ?? 24;
     try {
       const url = `${this.engineUrl}/candles/${encodeURIComponent(log.symbol)}?timeframe=${tf}&limit=${bars}`;
-      const { data } = await firstValueFrom(this.http.get(url));
+      const { data } = await firstValueFrom(this.http.get(url, { headers: engineHeaders(this.config) }));
 
       const candles = Array.isArray(data) ? data : (data?.candles ?? []);
       if (!candles || candles.length === 0) return false;

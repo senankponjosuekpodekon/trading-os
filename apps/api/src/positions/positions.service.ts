@@ -9,6 +9,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { JournalService } from '../journal/journal.service';
 import { AuditService } from '../audit/audit.service';
 import { CreatePositionDto } from './dto/create-position.dto';
+import { engineHeaders } from '../utils/engine-headers.util';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 const BINANCE_TICKER = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -31,6 +33,7 @@ export class PositionsService {
     private notifications: NotificationsService,
     private journal: JournalService,
     private audit: AuditService,
+    private health: SystemHealthService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
@@ -86,6 +89,7 @@ export class PositionsService {
       const { data } = await firstValueFrom(
         this.http.get<{ klines: any[] }>(`${this.engineUrl}/indicators/klines`, {
           params: { symbol, interval, limit },
+          headers: engineHeaders(this.config),
         }),
       );
       return data.klines || [];
@@ -115,7 +119,7 @@ export class PositionsService {
         activation_r: 0,
       };
       const { data } = await firstValueFrom(
-        this.http.post(`${this.engineUrl}/trailing-stop/compute`, payload),
+        this.http.post(`${this.engineUrl}/trailing-stop/compute`, payload, { headers: engineHeaders(this.config) }),
       );
       return {
         recommendedStop: data.recommended_stop ?? null,
@@ -466,25 +470,27 @@ export class PositionsService {
 
   @Cron('*/30 * * * * *')
   async syncTrailingStops() {
-    this.logger.log('TRAILING: synchronisation des trailing stops');
-    // Cross-user read: this cron scans every user's open positions, so it
-    // must bypass RLS (systemPrisma, owner role) — per-position writes below
-    // are re-scoped to that position's own user via rlsContext.run.
-    const open = await this.systemPrisma.position.findMany({
-      where: { status: { in: ['OPEN', 'PARTIAL'] } },
-      include: {
-        asset: { select: { symbol: true } },
-        portfolio: { select: { userId: true } },
-        signal: { select: { indicators: true, timeframe: true } },
-      },
-    });
+    try {
+      this.logger.log('TRAILING: synchronisation des trailing stops');
+      const open = await this.systemPrisma.position.findMany({
+        where: { status: { in: ['OPEN', 'PARTIAL'] } },
+        include: {
+          asset: { select: { symbol: true } },
+          portfolio: { select: { userId: true } },
+          signal: { select: { indicators: true, timeframe: true } },
+        },
+      });
 
-    for (const pos of open) {
-      try {
-        await rlsContext.run(pos.portfolio.userId, () => this._syncOneTrailingStop(pos));
-      } catch (e: any) {
-        this.logger.warn(`syncTrailingStops failed for ${pos.asset.symbol}: ${e?.message}`);
+      for (const pos of open) {
+        try {
+          await rlsContext.run(pos.portfolio.userId, () => this._syncOneTrailingStop(pos));
+        } catch (e: any) {
+          this.logger.warn(`syncTrailingStops failed for ${pos.asset.symbol}: ${e?.message}`);
+        }
       }
+      this.health.recordCronRun('sync-trailing-stops', 'ok');
+    } catch (e: any) {
+      this.health.recordCronRun('sync-trailing-stops', 'error', e?.message);
     }
   }
 
@@ -746,7 +752,7 @@ export class PositionsService {
     };
 
     const { data } = await firstValueFrom(
-      this.http.post(`${this.engineUrl}/probability/continuation`, payload),
+      this.http.post(`${this.engineUrl}/probability/continuation`, payload, { headers: engineHeaders(this.config) }),
     );
     return data;
   }

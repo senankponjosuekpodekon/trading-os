@@ -9,6 +9,7 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 
 from utils.rate_limiter import rate_limit
+from utils.http import retry_async
 
 router = APIRouter()
 
@@ -69,11 +70,13 @@ def _symbol_base(symbol: str) -> str:
 
 
 @rate_limit(max_concurrent=5, min_delay=0.1)
-async def _http_get(url: str, params: Optional[dict] = None):
-    async with httpx.AsyncClient(timeout=8) as client:
-        r = await client.get(url, params=params or {})
-        r.raise_for_status()
-        return r.json()
+async def _http_get(url: str, params: Optional[dict] = None, source: str = "coingecko"):
+    async def _do():
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url, params=params or {})
+            r.raise_for_status()
+            return r.json()
+    return await retry_async(_do, max_retries=1, base_delay=0.5, source=source)
 
 
 async def _fetch_coingecko_coin(base: str) -> Optional[dict]:

@@ -21,9 +21,7 @@ export function middleware(request: NextRequest) {
     "'self'",
     process.env.NEXT_PUBLIC_API_URL,
     process.env.NEXT_PUBLIC_ENGINE_URL,
-    process.env.NEXT_PUBLIC_WS_URL,
     process.env.NEXT_PUBLIC_ENGINE_WS_URL,
-    'https://api.binance.com',   // ChartView.tsx fetch direct des klines Binance
     'https://*.sentry.io',
     'https://*.ingest.sentry.io',
     'https://*.ingest.us.sentry.io',

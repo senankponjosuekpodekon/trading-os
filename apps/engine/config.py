@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     database_url: str = Field(..., validation_alias="DATABASE_URL")
     redis_url: str = Field(default="redis://localhost:6379", validation_alias="REDIS_URL")
     engine_port: int = Field(default=8000, validation_alias="ENGINE_PORT")
+    engine_api_key: str = Field(default="", validation_alias="ENGINE_API_KEY")
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN_ENGINE")
 
     sentry_traces_sample_rate: float = Field(default=0.05, validation_alias="SENTRY_TRACES_SAMPLE_RATE")
@@ -39,8 +40,13 @@ class Settings(BaseSettings):
     binance_api_key: str = Field(default="", validation_alias="BINANCE_API_KEY")
     binance_api_secret: str = Field(default="", validation_alias="BINANCE_API_SECRET")
     twelve_data_api_key: str = Field(default="", validation_alias="TWELVE_DATA_API_KEY")
-    alpha_vantage_api_key: str = Field(default="", validation_alias="ALPHA_VANTAGE_API_KEY")
     deriv_api_token: str = Field(default="", validation_alias="DERIV_API_TOKEN")
+
+    # ── On-chain / Social / Funding ────────────────────────────────
+    coinalyze_api_key: str = Field(default="", validation_alias="COINALYZE_API_KEY")
+    etherscan_api_key: str = Field(default="", validation_alias="ETHERSCAN_API_KEY")
+    whale_alert_api_key: str = Field(default="", validation_alias="WHALE_ALERT_API_KEY")
+    lunarcrush_api_key: str = Field(default="", validation_alias="LUNARCRUSH_API_KEY")
 
     # ── AI / LLM ───────────────────────────────────────────────────
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
@@ -76,6 +82,12 @@ def load_settings() -> Settings:
         print("[WARN] TWELVE_DATA_API_KEY absent — les données Forex seront mockées.", file=sys.stderr)
     if not settings.sentry_dsn:
         print("[WARN] SENTRY_DSN_ENGINE absent — aucune remontée d'erreurs moteur.", file=sys.stderr)
+    if not settings.coinalyze_api_key:
+        print("[WARN] COINALYZE_API_KEY absent — liquidations/OI/funding seront mockées.", file=sys.stderr)
+    if not settings.etherscan_api_key:
+        print("[WARN] ETHERSCAN_API_KEY absent — données on-chain ETH limitées.", file=sys.stderr)
+    if not settings.lunarcrush_api_key:
+        print("[WARN] LUNARCRUSH_API_KEY absent — sentiment social sera mocké.", file=sys.stderr)
 
     return settings
 

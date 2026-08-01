@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from utils.predictive import compute_predictive_metrics
 from utils.direction import directions_aligned
+from utils.metrics import inc_labeled
 
 
 @dataclass
@@ -350,6 +351,7 @@ def evaluate_strategy(
             reasons += r
 
     # ── Signal final ───────────────────────────────────────────
+    _strat = getattr(rules, "_name", None) or "unknown"
     confidence = min(abs(score), 95)
     if score >= 40:
         signal = "BUY"
@@ -359,10 +361,13 @@ def evaluate_strategy(
         signal = "NEUTRAL"
         confidence = 0
 
+    inc_labeled("strategy_funnel", {"strategy": _strat, "stage": "signal_decided", "signal": signal})
+
     if confidence < rules.min_confidence and signal != "NEUTRAL":
         reasons.append(f"Confiance {confidence}% < seuil {rules.min_confidence}% — filtré")
         signal = "NEUTRAL"
         confidence = 0
+        inc_labeled("strategy_funnel", {"strategy": _strat, "stage": "confidence_threshold", "result": "filtered"})
 
     # --- Filters (regime / market) ---
     if signal != "NEUTRAL":
@@ -373,11 +378,13 @@ def evaluate_strategy(
                 reasons.append(f"Regime {regime.get('regime')} not in {allowed_regimes} — filtré")
                 signal = "NEUTRAL"
                 confidence = 0
+                inc_labeled("strategy_funnel", {"strategy": _strat, "stage": "regime_filter", "result": "filtered"})
         if market and getattr(rules, "markets", None):
             if market not in rules.markets:
                 reasons.append(f"Market {market} not in {rules.markets} — filtré")
                 signal = "NEUTRAL"
                 confidence = 0
+                inc_labeled("strategy_funnel", {"strategy": _strat, "stage": "market_filter", "result": "filtered"})
 
     # --- Entry rules / trigger ---
     trigger = getattr(rules, "trigger", None)
@@ -396,6 +403,7 @@ def evaluate_strategy(
         if signal == "NEUTRAL":
             confidence = 0
             score = 0
+            inc_labeled("strategy_funnel", {"strategy": _strat, "stage": "trigger_check", "result": "filtered"})
 
     # --- Scheduler différencié analysis_timeframe / entry_timeframe (Sprint 3) ---
     # L'analyse (biais/score) est faite sur `timeframe` (= analysis_timeframe côté DSL).
@@ -477,6 +485,9 @@ def evaluate_strategy(
         signal = "NEUTRAL"
         confidence = 0
         score = 0
+        inc_labeled("strategy_funnel", {"strategy": _strat, "stage": "dps_filter", "result": "filtered"})
+
+    inc_labeled("strategy_funnel", {"strategy": _strat, "stage": "final", "signal": signal})
 
     return {
         "score":               score,

@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react';
-import { useLivePrices, useLiveSignals } from '../useLivePrices';
+import { useLivePrices } from '../useLivePrices';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -20,7 +20,7 @@ class MockWebSocket {
   }
 }
 
-describe('useLivePrices / useLiveSignals', () => {
+describe('useLivePrices', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     MockWebSocket.instances = [];
@@ -94,45 +94,6 @@ describe('useLivePrices / useLiveSignals', () => {
 
       act(() => ws.onerror?.());
       expect(closeSpy).toHaveBeenCalled();
-    });
-  });
-
-  describe('useLiveSignals', () => {
-    it('connects to the engine signals websocket endpoint on mount', () => {
-      renderHook(() => useLiveSignals());
-
-      expect(MockWebSocket.instances).toHaveLength(1);
-      expect(MockWebSocket.instances[0].url).toContain('/ws/signals');
-    });
-
-    it('updates signals state and invokes onNewSignal on incoming "signals" messages', () => {
-      const onNewSignal = jest.fn();
-      const { result } = renderHook(() => useLiveSignals(onNewSignal));
-      const ws = MockWebSocket.instances[0];
-
-      act(() => ws.onmessage?.({ data: JSON.stringify({ type: 'signals', data: [{ id: '1' }] }) }));
-
-      expect(result.current.signals).toEqual([{ id: '1' }]);
-      expect(onNewSignal).toHaveBeenCalledWith([{ id: '1' }]);
-    });
-
-    it('ignores non-"signals" message types', () => {
-      const { result } = renderHook(() => useLiveSignals());
-      const ws = MockWebSocket.instances[0];
-
-      act(() => ws.onmessage?.({ data: JSON.stringify({ type: 'prices', data: {} }) }));
-
-      expect(result.current.signals).toEqual([]);
-    });
-
-    it('reconnects with backoff after the socket closes', () => {
-      renderHook(() => useLiveSignals());
-      const ws1 = MockWebSocket.instances[0];
-
-      act(() => ws1.onclose?.());
-      act(() => jest.advanceTimersByTime(4500));
-
-      expect(MockWebSocket.instances).toHaveLength(2);
     });
   });
 });

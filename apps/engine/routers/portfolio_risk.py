@@ -24,10 +24,43 @@ ASSET_CLUSTERS: dict[str, str] = {
     "GBP/USD":    "FOREX",
     "GBP/USDT":   "FOREX",
     "USD/JPY":    "FOREX",
+    "AUD/USD":    "FOREX",
+    "NZD/USD":    "FOREX",
     # Métaux précieux
     "XAU/USD":    "METALS",
+    "XAG/USD":    "METALS",
     "PAXG/USDT":  "METALS",
+    # Matières premières
     "WTI/USD":    "COMMODITIES",
+    "BRENT/USD":  "COMMODITIES",
+    # Synthetic indices (Deriv) — non corrélés entre eux par construction
+    "V75":        "SYNTHETIC",
+    "V100":       "SYNTHETIC",
+    "V50":        "SYNTHETIC",
+    "V25":        "SYNTHETIC",
+    "V10":        "SYNTHETIC",
+    "BOOM1000":   "SYNTHETIC",
+    "BOOM500":    "SYNTHETIC",
+    "BOOM300":    "SYNTHETIC",
+    "CRASH1000":  "SYNTHETIC",
+    "CRASH500":   "SYNTHETIC",
+    "CRASH300":   "SYNTHETIC",
+    # BRVM actions
+    "ONTBF":      "BRVM",
+    "SGBF":       "BRVM",
+    "BOABF":      "BRVM",
+    "ETIT":       "BRVM",
+    "SIVC":       "BRVM",
+    "PALC":       "BRVM",
+    "SOGC":       "BRVM",
+    "SNTS":       "BRVM",
+    "CIEC":       "BRVM",
+    "NSIC":       "BRVM",
+    "ORGT":       "BRVM",
+    "BICC":       "BRVM",
+    "CBIBF":      "BRVM",
+    "ABJC":       "BRVM",
+    "STAC":       "BRVM",
 }
 
 # Seuil d'alerte : à partir de N signaux dans le même cluster + même direction
@@ -38,15 +71,24 @@ CLUSTER_LABELS: dict[str, str] = {
     "FOREX":        "Forex",
     "METALS":       "Métaux précieux",
     "COMMODITIES":  "Matières premières",
+    "SYNTHETIC":    "Indices synthétiques",
     "BRVM":         "BRVM",
+    "UNKNOWN":      "Autres",
 }
 
 
 def get_cluster(symbol: str) -> str:
     if symbol in ASSET_CLUSTERS:
         return ASSET_CLUSTERS[symbol]
-    # Fallback BRVM
-    return "BRVM"
+    # Fallback intelligent basé sur le format du symbole
+    if symbol.endswith("/USDT") or symbol.endswith("/USD"):
+        if symbol.startswith("V") and symbol[1:3].isdigit():
+            return "SYNTHETIC"
+        if "/" in symbol:
+            return "CRYPTO_MAJOR"
+    if "BOOM" in symbol or "CRASH" in symbol or "JUMP" in symbol:
+        return "SYNTHETIC"
+    return "UNKNOWN"
 
 
 def analyze_portfolio_risk(results: list[dict]) -> dict:

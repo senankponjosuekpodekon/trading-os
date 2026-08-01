@@ -3,24 +3,23 @@ Advanced on-chain context for crypto assets.
 Layers: exchange netflow, MVRV, developer activity, DeFi TVL / smart-contract activity.
 Most sources require optional API keys; when missing/unreachable we fallback to mock values.
 """
-import os
 import httpx
 import asyncio
 import random
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
+from config import settings
 from utils.rate_limiter import rate_limit
 
-COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY", "")
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
-WHALE_ALERT_API_KEY = os.getenv("WHALE_ALERT_API_KEY", "")
+COINALYZE_API_KEY = settings.coinalyze_api_key
+ETHERSCAN_API_KEY = settings.etherscan_api_key
+WHALE_ALERT_API_KEY = settings.whale_alert_api_key
 
 # Free API endpoints (no paid keys required)
 COINALYZE_BASE = "https://api.coinalyze.net/v1"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 GECKOTERMINAL_BASE = "https://api.geckoterminal.com/api/v2"
-DEXSCREENER_BASE = "https://api.dexscreener.com"
 DEFILLAMA_BASE = "https://api.llama.fi"
 DEFILLAMA_STABLE = "https://stablecoins.llama.fi"
 GITHUB_BASE = "https://api.github.com"

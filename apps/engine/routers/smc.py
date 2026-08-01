@@ -177,8 +177,8 @@ def detect_order_blocks(
             })
 
     # Plus récents en premier, max 3 (exclure mitigated)
-    bull_ob = [ob for ob in reversed(bullish_ob) if ob["status"] != "mitigated"][:3]
-    bear_ob = [ob for ob in reversed(bearish_ob) if ob["status"] != "mitigated"][:3]
+    bull_ob = [ob for ob in reversed(bullish_ob) if ob["status"] != "mitigated" and ob.get("valid", True)][:3]
+    bear_ob = [ob for ob in reversed(bearish_ob) if ob["status"] != "mitigated" and ob.get("valid", True)][:3]
 
     proximity_pct = 0.008  # 0.8%
     near_bull_ob = next(

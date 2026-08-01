@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { rlsContext } from '../prisma/rls-context';
@@ -9,6 +10,8 @@ import { JournalService } from '../journal/journal.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PriceAlertsService } from '../price-alerts/price-alerts.service';
 import { retryWithBackoff } from '../utils/retry';
+import { engineHeaders } from '../utils/engine-headers.util';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 const BINANCE_PRICES = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -19,6 +22,7 @@ const SYM_MAP: Record<string, string> = {
 @Injectable()
 export class WatcherService {
   private readonly logger = new Logger(WatcherService.name);
+  private readonly engineUrl: string;
 
   constructor(
     private prisma: PrismaService,
@@ -28,83 +32,128 @@ export class WatcherService {
     private http: HttpService,
     private notifications: NotificationsService,
     private priceAlerts: PriceAlertsService,
-  ) {}
+    private config: ConfigService,
+    private health: SystemHealthService,
+  ) {
+    this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
+  }
+
+  /** Fetch prices for non-Binance symbols from the engine (multi-provider fallback). */
+  private async _fetchEnginePrices(symbols: string[]): Promise<Record<string, number>> {
+    const result: Record<string, number> = {};
+    await Promise.all(
+      symbols.map(async (sym) => {
+        try {
+          const { data } = await firstValueFrom(
+            this.http.get<{ candles: Array<{ close: number }> }>(
+              `${this.engineUrl}/candles/${encodeURIComponent(sym)}`,
+              { params: { timeframe: '1m', limit: 1 }, timeout: 8000, headers: engineHeaders(this.config) },
+            ),
+          );
+          if (data.candles && data.candles.length > 0) {
+            result[sym] = parseFloat(String(data.candles[data.candles.length - 1].close));
+          }
+        } catch (e: any) {
+          this.logger.warn(`Watcher: engine price fetch failed for ${sym} — ${e?.message}`);
+        }
+      }),
+    );
+    return result;
+  }
+
+  /** Build a unified price map (internal symbol → price) from Binance + engine. */
+  private async _fetchAllPrices(allSymbols: string[]): Promise<Record<string, number>> {
+    const binanceSymbols = [...new Set(allSymbols.map(s => SYM_MAP[s]).filter(Boolean))];
+    const nonBinanceSymbols = allSymbols.filter(s => !SYM_MAP[s]);
+    const internalPrices: Record<string, number> = {};
+
+    // 1. Binance batch fetch
+    if (binanceSymbols.length > 0) {
+      try {
+        const data = await retryWithBackoff(
+          async () => {
+            const { data: resp } = await firstValueFrom(
+              this.http.get<{ symbol: string; price: string }[]>(BINANCE_PRICES, { timeout: 5000 }),
+            );
+            return resp;
+          },
+          {
+            maxRetries: 3,
+            baseDelayMs: 500,
+            onRetry: (attempt, err) =>
+              this.logger.warn(`Watcher: échec récupération prix Binance (tentative ${attempt}) — ${err.message}`),
+          },
+        );
+        const binanceToInternal = Object.fromEntries(
+          Object.entries(SYM_MAP).map(([internal, binance]) => [binance, internal]),
+        );
+        for (const d of data) {
+          if (binanceSymbols.includes(d.symbol)) {
+            const internal = binanceToInternal[d.symbol] ?? d.symbol;
+            internalPrices[internal] = parseFloat(d.price);
+          }
+        }
+      } catch {
+        this.logger.error('Watcher: impossible de récupérer les prix Binance après 3 tentatives');
+      }
+    }
+
+    // 2. Engine fetch for non-Binance symbols (forex, synthetics, BRVM, commodities)
+    if (nonBinanceSymbols.length > 0) {
+      const enginePrices = await this._fetchEnginePrices(nonBinanceSymbols);
+      Object.assign(internalPrices, enginePrices);
+    }
+
+    return internalPrices;
+  }
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async watchPositions() {
-    // Cross-user read: scans every user's open positions, must bypass RLS.
-    const openPositions = await this.systemPrisma.position.findMany({
-      where: { status: 'OPEN' },
-      include: {
-        asset:     { select: { symbol: true } },
-        portfolio: { select: { userId: true } },
-      },
-    });
-
-    if (openPositions.length === 0) return;
-
-    // Récupérer tous les prix en une seule requête
-    const symbols = [...new Set(openPositions.map(p => SYM_MAP[p.asset.symbol]).filter(Boolean))];
-    let prices: Record<string, number> = {};
-
     try {
-      const data = await retryWithBackoff(
-        async () => {
-          const { data: resp } = await firstValueFrom(
-            this.http.get<{ symbol: string; price: string }[]>(BINANCE_PRICES, { timeout: 5000 }),
-          );
-          return resp;
+      const openPositions = await this.systemPrisma.position.findMany({
+        where: { status: 'OPEN' },
+        include: {
+          asset:     { select: { symbol: true } },
+          portfolio: { select: { userId: true } },
         },
-        {
-          maxRetries: 3,
-          baseDelayMs: 500,
-          onRetry: (attempt, err) =>
-            this.logger.warn(`Watcher: échec récupération prix Binance (tentative ${attempt}) — ${err.message}`),
-        },
-      );
-      prices = Object.fromEntries(
-        data
-          .filter(d => symbols.includes(d.symbol))
-          .map(d => [d.symbol, parseFloat(d.price)]),
-      );
-    } catch {
-      this.logger.error('Watcher: impossible de récupérer les prix Binance après 3 tentatives');
-      return;
-    }
+      });
 
-    let closed = 0;
+      if (openPositions.length === 0) {
+        this.health.recordCronRun('watch-positions', 'ok');
+        return;
+      }
 
-    for (const pos of openPositions) {
-      const wasClosed = await rlsContext.run(pos.portfolio.userId, () =>
-        this._watchOnePosition(pos, prices),
-      );
-      if (wasClosed) closed++;
-    }
+      const allSymbols = [...new Set(openPositions.map(p => p.asset.symbol))];
+      const internalPrices = await this._fetchAllPrices(allSymbols);
 
-    if (closed > 0) {
-      this.logger.log(`Watcher: ${closed} position(s) fermée(s) automatiquement`);
-    }
+      let closed = 0;
 
-    // Vérifier les alertes prix pour les symboles surveillés
-    const BINANCE_TO_INTERNAL = Object.fromEntries(
-      Object.entries(SYM_MAP).map(([internal, binance]) => [binance, internal]),
-    );
-    const internalPrices = Object.fromEntries(
-      Object.entries(prices).map(([binSym, price]) => [BINANCE_TO_INTERNAL[binSym] ?? binSym, price]),
-    );
-    try {
-      await this.priceAlerts.checkAlerts(internalPrices);
+      for (const pos of openPositions) {
+        const wasClosed = await rlsContext.run(pos.portfolio.userId, () =>
+          this._watchOnePosition(pos, internalPrices),
+        );
+        if (wasClosed) closed++;
+      }
+
+      if (closed > 0) {
+        this.logger.log(`Watcher: ${closed} position(s) fermée(s) automatiquement`);
+      }
+
+      try {
+        await this.priceAlerts.checkAlerts(internalPrices);
+      } catch (e: any) {
+        this.logger.warn(`Watcher: price alert check failed — ${e?.message}`);
+      }
+      this.health.recordCronRun('watch-positions', 'ok');
     } catch (e: any) {
-      this.logger.warn(`Watcher: price alert check failed — ${e?.message}`);
+      this.health.recordCronRun('watch-positions', 'error', e?.message);
+      this.logger.warn(`Watcher: watchPositions failed — ${e?.message}`);
     }
   }
 
   /** Returns true if the position was closed. */
-  private async _watchOnePosition(pos: any, prices: Record<string, number>): Promise<boolean> {
-    const binSym = SYM_MAP[pos.asset.symbol];
-    if (!binSym) return false;
-
-    const livePrice = prices[binSym];
+  private async _watchOnePosition(pos: any, internalPrices: Record<string, number>): Promise<boolean> {
+    const livePrice = internalPrices[pos.asset.symbol];
     if (!livePrice) return false;
 
     const entry = parseFloat(pos.entryPrice.toString());
@@ -162,71 +211,51 @@ export class WatcherService {
   // Sprint 3 — Cycle de vie PENDING → ACTIVE / INVALIDATED pour les setups RETEST/LIMIT.
   @Cron(CronExpression.EVERY_5_MINUTES)
   async watchPendingSignals() {
-    const now = new Date();
-
-    // Setups expirés avant d'avoir été déclenchés → INVALIDATED
-    const expired = await this.prisma.signal.updateMany({
-      where: { status: 'PENDING', expiresAt: { lt: now } },
-      data: { status: 'INVALIDATED' },
-    });
-    if (expired.count > 0) {
-      this.logger.log(`Watcher: ${expired.count} signal(s) PENDING invalidé(s) (expiré)`);
-    }
-
-    const pending = await this.prisma.signal.findMany({
-      where: { status: 'PENDING', expiresAt: { gte: now } },
-      include: { asset: { select: { symbol: true } } },
-    });
-    if (pending.length === 0) return;
-
-    const symbols = [...new Set(pending.map(s => SYM_MAP[s.asset.symbol]).filter(Boolean))];
-    if (symbols.length === 0) return;
-
-    let prices: Record<string, number> = {};
     try {
-      const data = await retryWithBackoff(
-        async () => {
-          const { data: resp } = await firstValueFrom(
-            this.http.get<{ symbol: string; price: string }[]>(BINANCE_PRICES, { timeout: 5000 }),
-          );
-          return resp;
-        },
-        {
-          maxRetries: 3,
-          baseDelayMs: 500,
-          onRetry: (attempt, err) =>
-            this.logger.warn(`Watcher: échec récupération prix (pending signals, tentative ${attempt}) — ${err.message}`),
-        },
-      );
-      prices = Object.fromEntries(
-        data.filter(d => symbols.includes(d.symbol)).map(d => [d.symbol, parseFloat(d.price)]),
-      );
-    } catch {
-      this.logger.error('Watcher: impossible de récupérer les prix pour les signaux PENDING');
-      return;
-    }
+      const now = new Date();
 
-    let activated = 0;
-    for (const sig of pending) {
-      const binSym = SYM_MAP[sig.asset.symbol];
-      if (!binSym) continue;
-      const livePrice = prices[binSym];
-      if (!livePrice || !sig.entryPrice) continue;
+      const expired = await this.prisma.signal.updateMany({
+        where: { status: 'PENDING', expiresAt: { lt: now } },
+        data: { status: 'INVALIDATED' },
+      });
+      if (expired.count > 0) {
+        this.logger.log(`Watcher: ${expired.count} signal(s) PENDING invalidé(s) (expiré)`);
+      }
 
-      const entry = parseFloat(sig.entryPrice.toString());
-      // RETEST/LIMIT : le setup s'active quand le prix atteint (ou dépasse) le niveau d'entrée
-      // dans le sens favorable — BUY veut acheter au niveau ou plus bas, SELL au niveau ou plus haut.
-      const triggered =
-        (sig.signal === 'BUY' && livePrice <= entry) ||
-        (sig.signal === 'SELL' && livePrice >= entry);
-      if (!triggered) continue;
+      const pending = await this.prisma.signal.findMany({
+        where: { status: 'PENDING', expiresAt: { gte: now } },
+        include: { asset: { select: { symbol: true } } },
+      });
+      if (pending.length === 0) {
+        this.health.recordCronRun('watch-pending-signals', 'ok');
+        return;
+      }
 
-      await this.prisma.signal.update({ where: { id: sig.id }, data: { status: 'ACTIVE' } });
-      activated++;
-    }
+      const allSymbols = [...new Set(pending.map(s => s.asset.symbol))];
+      const internalPrices = await this._fetchAllPrices(allSymbols);
 
-    if (activated > 0) {
-      this.logger.log(`Watcher: ${activated} signal(s) PENDING activé(s)`);
+      let activated = 0;
+      for (const sig of pending) {
+        const livePrice = internalPrices[sig.asset.symbol];
+        if (!livePrice || !sig.entryPrice) continue;
+
+        const entry = parseFloat(sig.entryPrice.toString());
+        const triggered =
+          (sig.signal === 'BUY' && livePrice <= entry) ||
+          (sig.signal === 'SELL' && livePrice >= entry);
+        if (!triggered) continue;
+
+        await this.prisma.signal.update({ where: { id: sig.id }, data: { status: 'ACTIVE' } });
+        activated++;
+      }
+
+      if (activated > 0) {
+        this.logger.log(`Watcher: ${activated} signal(s) PENDING activé(s)`);
+      }
+      this.health.recordCronRun('watch-pending-signals', 'ok');
+    } catch (e: any) {
+      this.health.recordCronRun('watch-pending-signals', 'error', e?.message);
+      this.logger.warn(`Watcher: watchPendingSignals failed — ${e?.message}`);
     }
   }
 }

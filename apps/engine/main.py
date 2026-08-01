@@ -14,6 +14,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from middleware.security import SecurityHeadersMiddleware
 from middleware.errors import ErrorFormatterMiddleware
+from middleware.auth import EngineAuthMiddleware
 from routers import (
     health,
     indicators,
@@ -42,6 +43,7 @@ from routers import (
     ml_regime,
     ml_signals,
     dex_discovery,
+    dashboard,
 )
 from utils.errors import EngineException, format_error_response
 from config import settings  # noqa: F401 — valide les secrets au démarrage
@@ -65,6 +67,15 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(task, timeout=5.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
+    try:
+        await rag.close_pool()
+    except Exception:
+        pass
+    try:
+        from ml.signal_scorer import signal_scorer
+        await signal_scorer.close_pool()
+    except Exception:
+        pass
     logger.info("Trading OS Engine shutting down")
 
 
@@ -86,6 +97,11 @@ app = FastAPI(
 # ── Security headers ─────────────────────────────────────────────
 app.add_middleware(SecurityHeadersMiddleware)
 
+# ── Engine auth (shared secret) ──────────────────────────────────
+if not os.getenv("ENGINE_API_KEY"):
+    logger.warn("ENGINE_API_KEY not set — engine auth middleware is disabled (dev mode only)")
+app.add_middleware(EngineAuthMiddleware)
+
 # ── Rate limiting ──────────────────────────────────────────────
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -98,14 +114,14 @@ app.add_middleware(ErrorFormatterMiddleware)
 # ── CORS strict ──────────────────────────────────────────────
 _allowed_origins = [
     o.strip() for o in
-    os.getenv("ALLOWED_ORIGINS", "http://169.58.80.46:3000,http://169.58.80.46:3001,http://localhost:3000,http://localhost:3001").split(",")
+    os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001").split(",")
 ]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-Engine-Key"],
 )
 
 app.include_router(health.router, tags=["Health"])
@@ -135,6 +151,7 @@ app.include_router(ml_signals.router, tags=["ML"])
 app.include_router(expected_move.router)
 app.include_router(ml_regime.router, prefix="", tags=["ML"])
 app.include_router(dex_discovery.router, prefix="/dex", tags=["DEX Discovery"])
+app.include_router(dashboard.router, tags=["Dashboard"])
 
 
 # ── Candles endpoint (used by API predictMlRegime) ───────────────────

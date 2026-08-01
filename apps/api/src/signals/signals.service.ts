@@ -1,8 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AlertService } from '../notifications/alert.service';
@@ -12,19 +9,18 @@ import { RegimeClassifierService } from './regime-classifier.service';
 import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
 import { MarketDataService } from '../market-data/market-data.service';
 import { QuotaService } from '../billing/quota.service';
+import { EngineHttpService } from '../engine/engine-http.service';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 @Injectable()
 export class SignalsService {
   private readonly logger = new Logger(SignalsService.name);
-  private engineUrl: string;
   private readonly expectedMoveCache = new Map<string, { expires: number; data: any }>();
   private readonly expectedMoveInflight = new Map<string, Promise<any | null>>();
   private readonly expectedMoveTtlMs = 5 * 60 * 1000;
 
   constructor(
     private prisma: PrismaService,
-    private http: HttpService,
-    private config: ConfigService,
     private notifications: NotificationsService,
     private alertService: AlertService,
     private outcomeService: SignalOutcomeService,
@@ -33,17 +29,16 @@ export class SignalsService {
     private regimeClassifier: RegimeClassifierService,
     private marketData: MarketDataService,
     private quota: QuotaService,
-  ) {
-    this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
-  }
+    private engineHttp: EngineHttpService,
+    private health: SystemHealthService,
+  ) {}
 
   private async predictMlRegime(symbol?: string, timeframe?: string): Promise<string | null> {
     // Fetch real historical closes from the engine instead of fabricating prices
     const sym = symbol ?? 'BTC/USDT';
     const tf = timeframe ?? '1d';
     try {
-      const url = `${this.engineUrl}/candles/${encodeURIComponent(sym)}?timeframe=${tf}&limit=200`;
-      const { data } = await firstValueFrom(this.http.get(url));
+      const data = await this.engineHttp.get(`/candles/${encodeURIComponent(sym)}`, { params: { timeframe: tf, limit: 200 } });
       const candles = Array.isArray(data) ? data : (data?.candles ?? []);
       const prices: number[] = candles
         .map((c: any) => parseFloat(c.close ?? c.c ?? c.price))
@@ -126,21 +121,33 @@ export class SignalsService {
   @Cron('0 6 * * *', { timeZone: 'UTC' })
   async scheduledMorningScan() {
     this.logger.log('CRON: lancement du scan matinal (06:00 UTC)');
-    await this._scanActiveAssetsByTimeframe();
+    try {
+      await this._scanActiveAssetsByTimeframe();
+      this.health.recordCronRun('morning-scan', 'ok');
+    } catch (e: any) {
+      this.health.recordCronRun('morning-scan', 'error', e?.message);
+    }
   }
 
   @Cron('0 */4 * * *', { timeZone: 'UTC' })
   async scheduledDayScan() {
     this.logger.log('CRON: lancement du scan toutes les 4h');
-    await this._scanActiveAssetsByTimeframe();
+    try {
+      await this._scanActiveAssetsByTimeframe();
+      this.health.recordCronRun('day-scan', 'ok');
+    } catch (e: any) {
+      this.health.recordCronRun('day-scan', 'error', e?.message);
+    }
   }
 
   @Cron('15 */6 * * *', { timeZone: 'UTC' })
   async scheduledPredictorTraining() {
     try {
       await this.trainPredictor({ market: 'CRYPTO', timeframe: '1h' });
+      this.health.recordCronRun('predictor-training', 'ok');
     } catch (error) {
       this.logger.warn('scheduled_predictor_train_failed', { error: (error as any)?.message ?? error });
+      this.health.recordCronRun('predictor-training', 'error', (error as any)?.message);
     }
   }
 
@@ -278,9 +285,7 @@ export class SignalsService {
           },
         }));
       }
-      const { data } = await firstValueFrom(
-        this.http.post(`${this.engineUrl}/scan/multi`, payload),
-      );
+      const data = await this.engineHttp.post('/scan/multi', payload, { timeout: 30_000 });
       const dataGaps = Array.isArray((data as any)?.data_gaps) ? (data as any).data_gaps : [];
       if (dataGaps.length) {
         this.logger.warn('engine_scan_data_gaps', {
@@ -677,14 +682,10 @@ export class SignalsService {
       return this.expectedMoveInflight.get(key);
     }
 
-    const request = firstValueFrom(
-      this.http.get(`${this.engineUrl}/expected-move/${encodeURIComponent(symbol)}`, {
-        params: { timeframe, limit: 400 },
-      }),
-    )
-      .then(res => {
-        this.expectedMoveCache.set(key, { data: res.data, expires: Date.now() + this.expectedMoveTtlMs });
-        return res.data;
+    const request = this.engineHttp.get(`/expected-move/${encodeURIComponent(symbol)}`, { params: { timeframe, limit: 400 } })
+      .then(data => {
+        this.expectedMoveCache.set(key, { data, expires: Date.now() + this.expectedMoveTtlMs });
+        return data;
       })
       .catch(err => {
         this.logger.warn(`expected_move_fetch_failed ${symbol}/${timeframe}: ${err?.message ?? err}`);

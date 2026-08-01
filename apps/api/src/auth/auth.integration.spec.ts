@@ -54,6 +54,7 @@ describe('AuthController (integration)', () => {
   };
 
   beforeAll(async () => {
+    process.env.JWT_SECRET = process.env.JWT_SECRET || 'test_secret_key_for_integration_tests';
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule],
     })

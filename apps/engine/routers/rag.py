@@ -7,15 +7,13 @@ en s'appuyant sur des documents contextuels indexés.
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-import os
 import hashlib
+
+from config import settings
 
 router = APIRouter()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://trading_user:trading_pass@localhost:5433/trading_os"
-)
+DATABASE_URL = settings.database_url
 
 # Lazy init des ressources lourdes
 _embed_model = None
@@ -34,10 +32,17 @@ async def _get_pool():
     global _db_pool
     if _db_pool is None:
         import asyncpg
-        # Convertir URL psycopg2 → asyncpg
-        url = DATABASE_URL.replace("postgresql://", "postgresql://").replace("postgres://", "postgresql://")
+        # Convertir URL psycopg2/SQLAlchemy → asyncpg (postgresql+asyncpg:// → postgresql://)
+        url = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
         _db_pool = await asyncpg.create_pool(url, min_size=1, max_size=5)
     return _db_pool
+
+
+async def close_pool():
+    global _db_pool
+    if _db_pool is not None:
+        await _db_pool.close()
+        _db_pool = None
 
 
 def _embed(text: str) -> list:

@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { auditEnv } from './common/security/env-audit';
 import { randomUUID } from 'crypto';
 import * as Sentry from '@sentry/node';
+import * as cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const sentryDsn = process.env.SENTRY_DSN_API;
@@ -19,6 +20,8 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
 
+  app.use(cookieParser());
+
   // ── Sécurité HTTP headers ────────────────────────────────────────────
   app.use(helmet({
     crossOriginEmbedderPolicy: false,
@@ -28,7 +31,7 @@ async function bootstrap() {
   }));
 
   // ── CORS strict ────────────────────────────────────────────────
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://169.58.80.46:3000,http://169.58.80.46:3001,http://localhost:3000,http://localhost:3001')
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:3001')
     .split(',')
     .map(o => o.trim());
 
@@ -59,6 +62,10 @@ async function bootstrap() {
   });
 
   // ── Security env audit ─────────────────────────────────────────────
+  if (!process.env.JWT_SECRET) {
+    console.error('[FATAL] JWT_SECRET is not set. Refusing to start.');
+    process.exit(1);
+  }
   auditEnv(new Logger('SecurityAudit'));
 
   const port = process.env.API_PORT || 3001;

@@ -8,6 +8,8 @@ import asyncio
 from typing import Optional
 import yfinance as yf
 
+from utils.http import retry_async
+
 router = APIRouter()
 
 # Cache mémoire simple (TTL 5 min)
@@ -49,10 +51,12 @@ async def fear_greed():
     if cached:
         return cached
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get("https://api.alternative.me/fng/")
-            r.raise_for_status()
-            data = r.json()
+        async def _do():
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get("https://api.alternative.me/fng/")
+                r.raise_for_status()
+                return r.json()
+        data = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
         entry = data.get("data", [{}])[0]
         result = {
             "value": int(entry.get("value", 50)),
@@ -100,10 +104,12 @@ async def btc_dominance():
     if cached:
         return cached
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get("https://api.coingecko.com/api/v3/global")
-            r.raise_for_status()
-            data = r.json()
+        async def _do():
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get("https://api.coingecko.com/api/v3/global")
+                r.raise_for_status()
+                return r.json()
+        data = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
         market_cap_percentage = data.get("data", {}).get("market_cap_percentage", {})
         btc = market_cap_percentage.get("btc", 0)
         result = {"btc_dominance": round(float(btc), 2)}

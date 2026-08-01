@@ -5,13 +5,11 @@ import {
   TrendingUp, TrendingDown, X, Plus, AlertCircle, RefreshCw,
   Calculator, Zap, History, Activity, ChevronLeft, ChevronRight, Bot, Target,
 } from 'lucide-react';
-import axios from 'axios';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 import { useTradingStore } from '@/store/trading.store';
+import { PageSkeleton } from '@/components/ui/PageSkeleton';
 import { Portfolio, PortfolioSummary, Position, Signal } from '@/types';
-
-const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
 
 interface LivePosition extends Position {
   livePrice:    number | null;
@@ -72,7 +70,7 @@ export default function PortfolioPage() {
     if (!form.entryPrice || !form.stopLoss || !portfolio) return;
     setCalcLoading(true);
     try {
-      const { data } = await axios.post(`${ENGINE_URL}/risk/calculate`, {
+      const { data } = await api.post('/risk/calculate', {
         capital:     parseFloat(portfolio.currentCapital),
         entry_price: parseFloat(form.entryPrice),
         stop_loss:   parseFloat(form.stopLoss),
@@ -238,6 +236,10 @@ export default function PortfolioPage() {
   return (
     <AppLayout title="Portfolio">
       <div className="space-y-5">
+        {loadingPortfolio ? (
+          <PageSkeleton statCards={4} tableRows={5} />
+        ) : (
+        <>
 
         {errorPortfolio && <ErrorBox message="Impossible de charger le portfolio." onRetry={() => refetchPortfolio()} />}
         {errorSummary  && <ErrorBox message="Impossible de charger les positions." onRetry={() => refetchSummary()} />}
@@ -804,6 +806,8 @@ export default function PortfolioPage() {
           </div>
           );
         })()}
+        </>
+        )}
       </div>
 
       {/* Modal analyse IA */}

@@ -88,12 +88,8 @@ def calc_targets(
     """
     sl_dist = abs(entry - stop)
 
-    if atr:
-        tp1_dist = atr * 2.0
-        tp2_dist = atr * 3.5
-    else:
-        tp1_dist = sl_dist * rr1
-        tp2_dist = sl_dist * rr2
+    tp1_dist = sl_dist * rr1
+    tp2_dist = sl_dist * rr2
 
     if direction == "BUY":
         tp1 = entry + tp1_dist
@@ -382,3 +378,57 @@ def staged_stop(req: StagedStopRequest):
         reached_tps=req.reached_tps,
     )
     return StagedStopResponse(active_stop=active, stage=stage, reason=reason)
+
+
+@router.get("/risk/status")
+def risk_engine_status():
+    """Get the current state of the DisciplineController risk engine."""
+    from risk.engine import get_risk_engine
+    try:
+        engine = get_risk_engine()
+        return engine.get_status()
+    except Exception as e:
+        return {"error": str(e), "status": "unavailable"}
+
+
+class RiskEvaluateRequest(BaseModel):
+    symbol: str
+    direction: str          # BUY | SELL
+    entry: float
+    stop_loss: float
+    atr_pct: float = 0.0
+    signal_score: float = 0.7
+    strategy: str = "default"
+    regime: str = "UNKNOWN"
+
+
+@router.post("/risk/evaluate")
+def risk_evaluate(req: RiskEvaluateRequest):
+    """Evaluate a trade through the DisciplineController."""
+    from risk.engine import get_risk_engine
+    from risk.discipline_controller import TradeDecision
+    try:
+        engine = get_risk_engine()
+        assessment = engine.evaluate(
+            symbol=req.symbol,
+            direction=req.direction,
+            entry=req.entry,
+            stop_loss=req.stop_loss,
+            atr_pct=req.atr_pct,
+            signal_score=req.signal_score,
+            strategy=req.strategy,
+            regime=req.regime,
+        )
+        return {
+            "decision":       assessment.decision.value,
+            "size_multiplier": assessment.size_multiplier,
+            "risk_pct":        assessment.risk_pct,
+            "adjusted_score":  assessment.adjusted_score,
+            "reasons":         assessment.reasons,
+            "factors":         assessment.factors,
+            "kill_switch":     assessment.kill_switch_state,
+            "drawdown":        assessment.drawdown_level,
+            "crisis_mode":     assessment.crisis_mode,
+        }
+    except Exception as e:
+        return {"error": str(e), "decision": "BLOCKED"}

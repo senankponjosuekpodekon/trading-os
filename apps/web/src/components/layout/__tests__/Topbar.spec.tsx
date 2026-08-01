@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { useAuthStore } from '@/store/auth.store';
-import { useLivePrices } from '@/hooks/useLivePrices';
+import { useTradingStore } from '@/store/trading.store';
 import { useNotifications } from '@/hooks/useNotifications';
 import { Topbar } from '../Topbar';
 
@@ -8,8 +8,8 @@ jest.mock('@/store/auth.store', () => ({
   useAuthStore: jest.fn(),
 }));
 
-jest.mock('@/hooks/useLivePrices', () => ({
-  useLivePrices: jest.fn(),
+jest.mock('@/store/trading.store', () => ({
+  useTradingStore: jest.fn(),
 }));
 
 jest.mock('@/hooks/useNotifications', () => ({
@@ -28,7 +28,9 @@ describe('Topbar', () => {
     (useAuthStore as unknown as jest.Mock).mockImplementation((selector: any) =>
       selector({ user: { name: 'Ada Lovelace', role: 'ADMIN' } }),
     );
-    (useLivePrices as unknown as jest.Mock).mockReturnValue({ prices: { BTCUSDT: 65000, ETHUSDT: 3000 }, connected: true });
+    (useTradingStore as unknown as jest.Mock).mockImplementation((selector: any) =>
+      selector({ prices: { BTCUSDT: 65000, ETHUSDT: 3000 }, wsConnected: true }),
+    );
     (useNotifications as unknown as jest.Mock).mockReturnValue({ notifications: [], unread: 0, markAllRead });
   });
 
@@ -49,7 +51,9 @@ describe('Topbar', () => {
   });
 
   it('shows the OFF badge and a placeholder price when disconnected', () => {
-    (useLivePrices as unknown as jest.Mock).mockReturnValue({ prices: {}, connected: false });
+    (useTradingStore as unknown as jest.Mock).mockImplementation((selector: any) =>
+      selector({ prices: {}, wsConnected: false }),
+    );
     render(<Topbar title="Dashboard" />);
 
     expect(screen.getByText('OFF')).toBeInTheDocument();

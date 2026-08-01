@@ -1,7 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { of } from 'rxjs';
 import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { FeatureStoreService } from './feature-store.service';
@@ -12,6 +9,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AlertService } from '../notifications/alert.service';
 import { MarketDataService } from '../market-data/market-data.service';
 import { QuotaService } from '../billing/quota.service';
+import { EngineHttpService } from '../engine/engine-http.service';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 describe('SignalsService', () => {
   let service: SignalsService;
@@ -35,13 +34,9 @@ describe('SignalsService', () => {
     },
   };
 
-  const mockHttp = {
+  const mockEngineHttp = {
     post: jest.fn(),
     get: jest.fn(),
-  };
-
-  const mockConfig = {
-    get: jest.fn(() => 'http://localhost:8000'),
   };
 
   const mockNotifications = {
@@ -98,8 +93,7 @@ describe('SignalsService', () => {
         SignalsService,
         SignalOutcomeService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: HttpService, useValue: mockHttp },
-        { provide: ConfigService, useValue: mockConfig },
+        { provide: EngineHttpService, useValue: mockEngineHttp },
         { provide: NotificationsService, useValue: mockNotifications },
         { provide: AlertService, useValue: mockAlertService },
         { provide: SignalOutcomeService, useValue: mockOutcomeService },
@@ -108,18 +102,19 @@ describe('SignalsService', () => {
         { provide: RegimeClassifierService, useValue: mockRegimeClassifier },
         { provide: MarketDataService, useValue: mockMarketData },
         { provide: QuotaService, useValue: mockQuota },
+        { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
       ],
     }).compile();
 
     service = module.get<SignalsService>(SignalsService);
     jest.clearAllMocks();
-    mockHttp.get.mockImplementation((url: string) => {
+    mockEngineHttp.get.mockImplementation((path: string) => {
       // Return mock candle data for /candles/ endpoints (used by predictMlRegime)
-      if (url.includes('/candles/')) {
+      if (path.includes('/candles/')) {
         const candles = Array.from({ length: 10 }, (_, i) => ({ close: 100 + i * 0.5 }));
-        return of({ data: candles });
+        return Promise.resolve(candles);
       }
-      return of({ data: null });
+      return Promise.resolve(null);
     });
     mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1', market: { name: 'CRYPTO' } });
   });
@@ -130,15 +125,13 @@ describe('SignalsService', () => {
       const fetchSpy = jest
         .spyOn<any, any>(service as any, 'fetchExpectedMove')
         .mockResolvedValue({ close: 100, ranges: [{ move_pct: 2 }, { move_pct: 1.5 }, { move_pct: 0.8 }] });
-      mockHttp.post.mockReturnValue(of({
-        data: {
+      mockEngineHttp.post.mockResolvedValue({
           results: [
             { symbol: 'BTC/USDT', signal: 'BUY', confidence: 75, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test', news_sentiment: { score: 0.5 }, feature_vector: { levels: { trend: 0.8 } } },
             { symbol: 'ETH/USDT', signal: 'NEUTRAL', confidence: 40 },
           ],
           data_gaps: [{ symbol: 'XAU/USD', providers: ['binance', 'twelvedata'] }],
-        },
-      }));
+        });
       mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
       mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1', market: { name: 'CRYPTO' } });
       mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });
@@ -165,13 +158,11 @@ describe('SignalsService', () => {
 
     it('should not notify signals below 70 confidence', async () => {
       mockRegimePredict.mockResolvedValue({ regimes: ['LOW'] });
-      mockHttp.post.mockReturnValue(of({
-        data: {
+      mockEngineHttp.post.mockResolvedValue({
           results: [
             { symbol: 'BTC/USDT', signal: 'BUY', confidence: 60, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test' },
           ],
-        },
-      }));
+        });
       mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
       mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1' });
       mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });
@@ -183,13 +174,11 @@ describe('SignalsService', () => {
 
     it('should enforce user signal quota and skip notifications when exhausted', async () => {
       mockQuota.assertSignalQuota.mockResolvedValueOnce({ limit: 1, used: 1 });
-      mockHttp.post.mockReturnValue(of({
-        data: {
+      mockEngineHttp.post.mockResolvedValue({
           results: [
             { symbol: 'BTC/USDT', signal: 'BUY', confidence: 80, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'quota' },
           ],
-        },
-      }));
+        });
       mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
       mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1' });
       mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });
@@ -203,13 +192,11 @@ describe('SignalsService', () => {
 
     it('increments signal usage when notifications are sent for a user', async () => {
       mockQuota.assertSignalQuota.mockResolvedValueOnce({ limit: 3, used: 1 });
-      mockHttp.post.mockReturnValue(of({
-        data: {
+      mockEngineHttp.post.mockResolvedValue({
           results: [
             { symbol: 'BTC/USDT', signal: 'BUY', confidence: 80, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'ok', news_sentiment: { score: 0.5 } },
           ],
-        },
-      }));
+        });
       mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
       mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1' });
       mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });

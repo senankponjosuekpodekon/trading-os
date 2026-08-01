@@ -15,7 +15,10 @@ describe('SignalPredictorService', () => {
   } as unknown as HttpService;
 
   const mockConfig = {
-    get: jest.fn().mockReturnValue('http://engine:8000'),
+    get: jest.fn((key: string, def: any) => {
+      if (key === 'ENGINE_URL') return 'http://engine:8000';
+      return def;
+    }),
   } as unknown as ConfigService;
 
   beforeEach(async () => {
@@ -42,7 +45,7 @@ describe('SignalPredictorService', () => {
         market: 'CRYPTO',
         timeframe: '1h',
         limit: 500,
-      });
+      }, { headers: expect.any(Object) });
       expect(result).toEqual({ trained: true });
     });
 
@@ -60,7 +63,7 @@ describe('SignalPredictorService', () => {
       const features = { confidence: 80, scoreTotal: 75 } as any;
       const result = await service.predict(features);
 
-      expect(mockHttp.post).toHaveBeenCalledWith('http://engine:8000/ml/predict', { features });
+      expect(mockHttp.post).toHaveBeenCalledWith('http://engine:8000/ml/predict', { features }, { headers: expect.any(Object) });
       expect(result.probability).toBe(0.7);
     });
   });
@@ -75,7 +78,7 @@ describe('SignalPredictorService', () => {
       expect(status.trained).toBe(true);
       expect(weights.trained).toBe(true);
       expect(mockHttp.get).toHaveBeenCalledTimes(2);
-      expect(mockHttp.get).toHaveBeenCalledWith('http://engine:8000/ml/status');
+      expect(mockHttp.get).toHaveBeenCalledWith('http://engine:8000/ml/status', { headers: expect.any(Object) });
     });
   });
 });

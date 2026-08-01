@@ -2,6 +2,7 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { engineHeaders } from '../utils/engine-headers.util';
 
 @Injectable()
 export class ExpectedMoveService {
@@ -61,7 +62,7 @@ export class ExpectedMoveService {
     const encodedSymbol = encodeURIComponent(symbol);
     try {
       const { data } = await firstValueFrom(
-        this.http.get(`${this.engineUrl}/expected-move/${encodedSymbol}`, { params }),
+        this.http.get(`${this.engineUrl}/expected-move/${encodedSymbol}`, { params, headers: engineHeaders(this.config) }),
       );
       return data;
     } catch (error: any) {

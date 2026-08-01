@@ -1,9 +1,9 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import axios from 'axios';
 import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { api } from '@/lib/api';
 import { Play, TrendingUp, TrendingDown, BarChart2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 
 const MiniEquityChart = dynamic(
@@ -38,8 +38,6 @@ const PatternBreakdown = dynamic(
   () => import('@/components/backtest/PatternBreakdown').then(mod => mod.PatternBreakdown),
   { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
 );
-
-const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
 
 interface TradeItem {
   entry_bar:      number;
@@ -122,7 +120,7 @@ export default function BacktestPage() {
 
   const { mutate, data: result, isPending, error } = useMutation<BacktestResult>({
     mutationFn: async () => {
-      const res = await axios.post(`${ENGINE_URL}/backtest/run`, {
+      const res = await api.post('/backtest/run', {
         symbol,
         timeframe,
         lookback_bars:   lookback,

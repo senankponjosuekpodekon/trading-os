@@ -423,5 +423,11 @@ class SignalScorer:
         except Exception as exc:
             logger.warning("signal_scorer.persist_failed", error=str(exc))
 
+    async def close_pool(self):
+        if self._pool is not None:
+            await self._pool.close()
+            self._pool = None
+            logger.info("signal_scorer.pool_closed")
+
 
 signal_scorer = SignalScorer()

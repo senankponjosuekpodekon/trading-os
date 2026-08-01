@@ -114,8 +114,13 @@ BREAKERS: dict[str, CircuitBreaker] = {
     "coingecko": CircuitBreaker("coingecko", failure_threshold=3, recovery_timeout=120.0),
     "newsapi": CircuitBreaker("newsapi", failure_threshold=5, recovery_timeout=300.0),
     "lunarcrush": CircuitBreaker("lunarcrush", failure_threshold=3, recovery_timeout=120.0),
-    "cryptoquant": CircuitBreaker("cryptoquant", failure_threshold=3, recovery_timeout=120.0),
-    "glassnode": CircuitBreaker("glassnode", failure_threshold=3, recovery_timeout=120.0),
+    "coinalyze": CircuitBreaker("coinalyze", failure_threshold=3, recovery_timeout=120.0),
+    "dexscreener": CircuitBreaker("dexscreener", failure_threshold=3, recovery_timeout=60.0),
+    "geckoterminal": CircuitBreaker("geckoterminal", failure_threshold=3, recovery_timeout=120.0),
+    "defillama": CircuitBreaker("defillama", failure_threshold=3, recovery_timeout=120.0),
+    "whale-alert": CircuitBreaker("whale-alert", failure_threshold=5, recovery_timeout=300.0),
+    "brvm": CircuitBreaker("brvm", failure_threshold=5, recovery_timeout=300.0),
+    "deriv": CircuitBreaker("deriv", failure_threshold=3, recovery_timeout=60.0),
 }
 
 

@@ -3,9 +3,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Globe, FileText, Building2, LayoutList, BarChart3 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import axios from 'axios';
-
-const ENGINE = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
+import { api } from '@/lib/api';
+import { PageSkeleton } from '@/components/ui/PageSkeleton';
 
 interface BrvmQuote {
   symbol: string; name: string; price: number;
@@ -31,27 +30,27 @@ export default function BrvmPage() {
 
   const { data: scan, isLoading, refetch } = useQuery({
     queryKey: ['brvm-scan'],
-    queryFn: async () => (await axios.post(`${ENGINE}/brvm/scan`, {})).data,
+    queryFn: async () => (await api.post('/brvm/scan', {})).data,
     refetchInterval: 5 * 60_000,
   });
 
   const { data: movers } = useQuery({
     queryKey: ['brvm-movers'],
-    queryFn: async () => (await axios.get(`${ENGINE}/brvm/top-movers`)).data,
+    queryFn: async () => (await api.get('/brvm/top-movers')).data,
     refetchInterval: 5 * 60_000,
   });
 
   const symbols = (scan?.results ?? []).map((r: BrvmQuote) => r.symbol);
   const { data: fScores } = useQuery({
     queryKey: ['brvm-fundamental', symbols],
-    queryFn: async () => (await axios.post(`${ENGINE}/brvm/reports/scores`, symbols)).data as FundamentalScore[],
+    queryFn: async () => (await api.post('/brvm/reports/scores', symbols)).data as FundamentalScore[],
     enabled: symbols.length > 0,
     refetchInterval: 30 * 60_000,
   });
 
   const { data: issuers } = useQuery({
     queryKey: ['brvm-issuers'],
-    queryFn: async () => (await axios.get(`${ENGINE}/brvm/reports/issuers`)).data as { code: string; name: string; slug: string; description?: string }[],
+    queryFn: async () => (await api.get('/brvm/reports/issuers')).data as { code: string; name: string; slug: string; description?: string }[],
     enabled: tab === 'reports',
   });
 
@@ -62,6 +61,10 @@ export default function BrvmPage() {
   return (
     <AppLayout title="BRVM">
       <div className="space-y-5">
+        {isLoading && !scan ? (
+          <PageSkeleton statCards={4} tableRows={6} />
+        ) : (
+        <>
 
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -307,6 +310,8 @@ export default function BrvmPage() {
           </div>
           </div>
         </div>
+        )}
+        </>
         )}
       </div>
     </AppLayout>

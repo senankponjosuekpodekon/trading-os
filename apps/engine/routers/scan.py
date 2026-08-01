@@ -13,6 +13,7 @@ from routers.price_action import detect_market_structure, price_action_bonus
 from routers.synthetic_engine import analyze_synthetic, evaluate_synthetic_strategy, SYMBOL_TO_DERIV as SYNTHETIC_SYMBOLS
 from routers.boom_crash_model import analyze_boom_crash
 from routers.sr_zones import get_sr_zones, sr_bonus
+from utils.deriv_symbols import to_wire_symbol
 from routers.patterns import scan_last_patterns, patterns_bonus
 from patterns.detector import detect_all as detect_chart_patterns
 from patterns.confluence import score_pattern_confluence
@@ -44,6 +45,9 @@ from utils.rate_limiter import rate_limit
 from utils.market_context import get_signal_context
 from utils.metrics import inc, observe
 from utils.session import get_session_info
+from risk.engine import get_risk_engine
+from risk.discipline_controller import TradeDecision
+from utils.correlation import set_correlation_id, get_correlation_id, clear_correlation_id
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=8)
@@ -172,10 +176,10 @@ SYMBOL_TO_DERIV = {
     "V75":   "R_75",   "VIX75/USD":   "R_75",
     "V100":  "R_100",  "VIX100/USD":  "R_100",
     # Boom & Crash
-    "BOOM300":   "BOOM300N", "BOOM300/USD":   "BOOM300N",
+    "BOOM300":   to_wire_symbol("BOOM300"), "BOOM300/USD":   to_wire_symbol("BOOM300"),
     "BOOM500":   "BOOM500",  "BOOM500/USD":   "BOOM500",
     "BOOM1000":  "BOOM1000", "BOOM1000/USD":  "BOOM1000",
-    "CRASH300":  "CRASH300N","CRASH300/USD":  "CRASH300N",
+    "CRASH300":  to_wire_symbol("CRASH300"),"CRASH300/USD":  to_wire_symbol("CRASH300"),
     "CRASH500":  "CRASH500", "CRASH500/USD":  "CRASH500",
     "CRASH1000": "CRASH1000","CRASH1000/USD": "CRASH1000",
     # Jump Indices
@@ -715,8 +719,13 @@ def analyze_candles(
     tokenomics_context: Optional[dict] = None,  # token unlocks / concentration risk
     social_context: Optional[dict] = None,  # LunarCrush social sentiment
 ) -> dict:
+    # ── Correlation ID for end-to-end tracing ──
+    corr_id = set_correlation_id()
+    logger.info("analyze_candles.start", correlation_id=corr_id, symbol=symbol, timeframe=timeframe)
+
     if len(df) < 50:
-        return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data"}
+        clear_correlation_id()
+        return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data", "correlation_id": corr_id}
 
     asset_type = get_asset_type(symbol)
 
@@ -1212,6 +1221,7 @@ def analyze_candles(
         rules = parse_rules(strategy.get("rules", {}))
         rules.analysis_timeframe = strategy.get("analysisTimeframe") or strategy.get("analysis_timeframe")
         rules.entry_timeframe = strategy.get("entryTimeframe") or strategy.get("entry_timeframe")
+        rules._name = strategy.get("name", "unknown")
         ev = evaluate_strategy(
             rules,
             indicators={
@@ -1478,7 +1488,38 @@ def analyze_candles(
         tp2 = None
         rr = None
 
-    return {
+    # ── Risk engine evaluation ──
+    risk_assessment = None
+    if signal != "NEUTRAL" and entry is not None and sl is not None:
+        try:
+            _risk = get_risk_engine()
+            _direction = "BUY" if signal == "BUY" else "SELL"
+            _atr_pct = (atr_v / entry) * 100 if atr_v and entry else 0.0
+            _score_norm = min(abs(score) / 100.0, 1.0) if score else 0.5
+            _strategy_name = (strategy or {}).get("name", "default").lower().replace(" ", "_") if strategy else "default"
+            _regime_name = (regime or {}).get("regime", "UNKNOWN")
+            risk_assessment = _risk.evaluate(
+                symbol=symbol,
+                direction=_direction,
+                entry=entry,
+                stop_loss=sl,
+                atr_pct=_atr_pct,
+                signal_score=_score_norm,
+                strategy=_strategy_name,
+                regime=_regime_name,
+            )
+            if risk_assessment.decision == TradeDecision.BLOCKED:
+                signal = "NEUTRAL"
+                confidence = 0
+                sl = None
+                tp1 = None
+                tp2 = None
+                rr = None
+                reasons.append(f"[RISK BLOCKED] {'; '.join(risk_assessment.reasons)}")
+        except Exception as _e:
+            logger.warning("risk_engine.evaluate failed", error=str(_e))
+
+    result = {
         "symbol":       symbol,
         "strategy_id":  strategy_id,
         "strategy_name": strategy_name,
@@ -1608,7 +1649,23 @@ def analyze_candles(
                 "UNKNOWN"
             ),
         },
+        "risk": {
+            "decision":       risk_assessment.decision.value if risk_assessment else "SKIPPED",
+            "size_multiplier": risk_assessment.size_multiplier if risk_assessment else 1.0,
+            "risk_pct":        risk_assessment.risk_pct if risk_assessment else 0.0,
+            "adjusted_score":  risk_assessment.adjusted_score if risk_assessment else 0.0,
+            "reasons":         risk_assessment.reasons if risk_assessment else [],
+            "factors":         risk_assessment.factors if risk_assessment else {},
+            "kill_switch":     risk_assessment.kill_switch_state if risk_assessment else "",
+            "drawdown":        risk_assessment.drawdown_level if risk_assessment else "",
+            "crisis_mode":     risk_assessment.crisis_mode if risk_assessment else False,
+        } if risk_assessment else None,
+        "correlation_id": corr_id,
     }
+
+    logger.info("analyze_candles.end", correlation_id=corr_id, symbol=symbol, signal=signal, confidence=confidence)
+    clear_correlation_id()
+    return result
 
 
 async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None) -> dict:

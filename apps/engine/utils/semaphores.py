@@ -13,8 +13,11 @@ SEMAPHORE_LIMITS: dict[str, int] = {
     "coingecko":  3,
     "newsapi":    1,
     "lunarcrush": 2,
-    "cryptoquant": 2,
-    "glassnode":  2,
+    "coinalyze": 2,   # 40 req/min free
+    "dexscreener": 5,  # 300 req/min free, no key
+    "geckoterminal": 1, # 10 req/min free, no key
+    "defillama":  3,   # free, no key
+    "whale-alert": 1,
     "brvm":       3,
     "deriv":      5,
     "default":    5,

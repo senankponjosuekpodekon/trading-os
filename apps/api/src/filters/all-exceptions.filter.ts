@@ -14,6 +14,20 @@ import * as Sentry from '@sentry/node';
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+  private readonly SENSITIVE_KEYS = new Set(['password', 'token', 'totptoken', 'refresh_token', 'authorization', 'secret']);
+
+  private sanitizeBody(body: any): any {
+    if (!body || typeof body !== 'object') return body;
+    const sanitized: Record<string, any> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (this.SENSITIVE_KEYS.has(key.toLowerCase())) {
+        sanitized[key] = '[REDACTED]';
+      } else {
+        sanitized[key] = value;
+      }
+    }
+    return sanitized;
+  }
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -47,7 +61,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       path: request.url,
       method: request.method,
       userId: (request as any).user?.id,
-      body: request.body,
+      body: this.sanitizeBody(request.body),
       error: exception instanceof Error ? exception.message : String(exception),
       stack: isProd ? undefined : exception instanceof Error ? exception.stack : undefined,
       details,

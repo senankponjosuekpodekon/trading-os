@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Bell, User, Wifi, WifiOff, X } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
-import { useLivePrices } from '@/hooks/useLivePrices';
+import { useTradingStore } from '@/store/trading.store';
 import { useNotifications } from '@/hooks/useNotifications';
 import { ModeToggle } from './ModeToggle';
 
@@ -27,7 +27,8 @@ const TYPE_COLOR: Record<string, string> = {
 
 export function Topbar({ title }: { title: string }) {
   const user = useAuthStore((s) => s.user);
-  const { prices, connected } = useLivePrices();
+  const prices = useTradingStore((s) => s.prices);
+  const connected = useTradingStore((s) => s.wsConnected);
   const { notifications, unread, markAllRead } = useNotifications();
   const [showNotifs, setShowNotifs] = useState(false);
 

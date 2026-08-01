@@ -1,9 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
 import { of } from 'rxjs';
 import { LabService } from './lab.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 
 describe('LabService', () => {
   let service: LabService;
@@ -22,12 +21,8 @@ describe('LabService', () => {
     },
   };
 
-  const mockHttp = {
+  const mockEngine = {
     post: jest.fn(),
-  };
-
-  const mockConfig = {
-    get: jest.fn((key: string, def: string) => def),
   };
 
   beforeEach(async () => {
@@ -35,8 +30,7 @@ describe('LabService', () => {
       providers: [
         LabService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: HttpService, useValue: mockHttp },
-        { provide: ConfigService, useValue: mockConfig },
+        { provide: EngineHttpService, useValue: mockEngine },
       ],
     }).compile();
 
@@ -82,23 +76,21 @@ describe('LabService', () => {
       };
       mockPrisma.labSession.findFirst.mockResolvedValue(session);
       mockPrisma.labSession.update.mockResolvedValue({ ...session, status: 'COMPLETED' });
-      mockHttp.post.mockReturnValue(of({
-        data: {
-          win_rate: 60,
-          total_pnl: 100,
-          total_pnl_pct: 1,
-          max_drawdown: 50,
-          max_drawdown_pct: 0.5,
-          sharpe_ratio: 1.2,
-          profit_factor: 1.8,
-          expectancy: 0.6,
-          trades: 10,
-          final_capital: 10100,
-          benchmark_pnl_pct: 0.5,
-          outperformance_pct: 0.5,
-          trade_list: [{ pnl: 10 }],
-        },
-      }));
+      mockEngine.post.mockResolvedValue({
+        win_rate: 60,
+        total_pnl: 100,
+        total_pnl_pct: 1,
+        max_drawdown: 50,
+        max_drawdown_pct: 0.5,
+        sharpe_ratio: 1.2,
+        profit_factor: 1.8,
+        expectancy: 0.6,
+        trades: 10,
+        final_capital: 10100,
+        benchmark_pnl_pct: 0.5,
+        outperformance_pct: 0.5,
+        trade_list: [{ pnl: 10 }],
+      });
 
       const result = await service.runBacktest('u1', 'lab-1', {});
 
@@ -115,7 +107,7 @@ describe('LabService', () => {
       mockPrisma.labSession.findFirst.mockResolvedValue({
         id: 'lab-1', symbol: 'BTC/USDT', timeframe: '1h', strategy: {},
       });
-      mockHttp.post.mockImplementation(() => { throw new Error('engine down'); });
+      mockEngine.post.mockRejectedValue(new Error('engine down'));
 
       await expect(service.runBacktest('u1', 'lab-1', {})).rejects.toThrow('engine down');
 

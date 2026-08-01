@@ -15,6 +15,9 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
+from risk.engine import get_risk_engine
+from risk.discipline_controller import TradeDecision
+
 router = APIRouter()
 
 DERIV_WS_URL  = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
@@ -319,17 +322,70 @@ async def scalp_v75(req: DerivScalpRequest):
         "currency":      "USD",
     }
 
-    # Mode live : place vraiment le trade via API Deriv
+    # ── Risk evaluation via DisciplineController ──
+    direction = "BUY" if signal == "CALL" else "SELL"
+    entry_price = float(analysis.get("indicators", {}).get("close", 0))
+    atr_pct = 0.0
+    df_candles = pd.DataFrame(candles, columns=["time", "open", "high", "low", "close"])
+    if len(df_candles) >= 15:
+        high = df_candles["high"].astype(float)
+        low = df_candles["low"].astype(float)
+        close = df_candles["close"].astype(float)
+        atr_raw = pd.concat([
+            high - low,
+            (high - close.shift()).abs(),
+            (low - close.shift()).abs(),
+        ], axis=1).max(axis=1).rolling(14).mean()
+        atr_val = float(atr_raw.iloc[-1]) if len(atr_raw) >= 15 else 0.0
+        if atr_val > 0 and entry_price > 0:
+            atr_pct = (atr_val / entry_price) * 100
+
+    signal_score = float(analysis.get("confidence", 0)) / 100.0
+    stop_loss = entry_price - atr_val * 1.5 if signal == "CALL" else entry_price + atr_val * 1.5
+
+    risk_engine = get_risk_engine()
+    assessment = risk_engine.evaluate(
+        symbol=req.symbol,
+        direction=direction,
+        entry=entry_price,
+        stop_loss=stop_loss,
+        atr_pct=atr_pct,
+        signal_score=signal_score,
+        strategy="scalp",
+        regime="UNKNOWN",
+    )
+
+    if assessment.decision == TradeDecision.BLOCKED:
+        return {
+            "action":     "BLOCKED",
+            "analysis":   analysis,
+            "source":     source,
+            "risk":       {
+                "decision":   assessment.decision.value,
+                "reasons":    assessment.reasons,
+                "factors":    assessment.factors,
+            },
+            "note":       "Trade bloqué par le risk engine",
+        }
+
+    adjusted_stake = round(req.stake * assessment.size_multiplier, 2)
+    trade_suggestion["stake"] = adjusted_stake
+
+    if assessment.decision == TradeDecision.REDUCED:
+        trade_suggestion["risk_note"] = f"Size reduced to {assessment.size_multiplier:.0%} — {'; '.join(assessment.reasons)}"
+
+    risk_engine.register_position(req.symbol, direction)
+
+    # Mode live : place le trade via API Deriv (avec risk gate)
     if DERIV_TOKEN and source == "live":
-        # 1. Authorize
         auth_resp = await _deriv_request({"authorize": DERIV_TOKEN})
         if "error" in auth_resp:
+            risk_engine.unregister_position(req.symbol)
             return {"action": "AUTH_FAILED", "error": auth_resp["error"]["message"]}
 
-        # 2. Buy contract
         buy_payload = {
             "buy": 1,
-            "price": req.stake,
+            "price": adjusted_stake,
             "parameters": {
                 **trade_suggestion,
                 "contract_type": signal,
@@ -337,6 +393,7 @@ async def scalp_v75(req: DerivScalpRequest):
         }
         buy_resp = await _deriv_request(buy_payload, timeout=15)
         if "error" in buy_resp:
+            risk_engine.unregister_position(req.symbol)
             return {"action": "BUY_FAILED", "error": buy_resp["error"]["message"], "analysis": analysis}
 
         return {
@@ -346,14 +403,25 @@ async def scalp_v75(req: DerivScalpRequest):
             "trade":       trade_suggestion,
             "analysis":    analysis,
             "source":      "live",
+            "risk":        {
+                "decision":       assessment.decision.value,
+                "size_multiplier": assessment.size_multiplier,
+                "risk_pct":        assessment.risk_pct,
+                "reasons":         assessment.reasons,
+            },
         }
 
-    # Mode paper
     return {
         "action":     "PAPER",
         "trade":      trade_suggestion,
         "analysis":   analysis,
         "source":     source,
+        "risk":       {
+            "decision":       assessment.decision.value,
+            "size_multiplier": assessment.size_multiplier,
+            "risk_pct":        assessment.risk_pct,
+            "reasons":         assessment.reasons,
+        },
         "note":       "Paper trade — configurez DERIV_API_TOKEN pour placer des trades réels",
     }
 

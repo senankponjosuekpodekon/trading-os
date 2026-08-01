@@ -8,6 +8,8 @@ from typing import Literal
 import pandas as pd
 import numpy as np
 
+from utils.deriv_symbols import to_wire_symbol
+
 from routers.deriv import _fetch_v75_candles, _mock_candles
 
 router = APIRouter()
@@ -145,17 +147,17 @@ SYMBOL_TO_DERIV = {
     "V50": "R_50",
     "V75": "R_75",
     "V100": "R_100",
-    "BOOM300/USD": "BOOM300N",
+    "BOOM300/USD": to_wire_symbol("BOOM300"),
     "BOOM500/USD": "BOOM500",
     "BOOM1000/USD": "BOOM1000",
-    "CRASH300/USD": "CRASH300N",
+    "CRASH300/USD": to_wire_symbol("CRASH300"),
     "CRASH500/USD": "CRASH500",
     "CRASH1000/USD": "CRASH1000",
     # Short format (matches seeded asset symbols)
-    "BOOM300": "BOOM300N",
+    "BOOM300": to_wire_symbol("BOOM300"),
     "BOOM500": "BOOM500",
     "BOOM1000": "BOOM1000",
-    "CRASH300": "CRASH300N",
+    "CRASH300": to_wire_symbol("CRASH300"),
     "CRASH500": "CRASH500",
     "CRASH1000": "CRASH1000",
     "JUMP10/USD": "JD10",

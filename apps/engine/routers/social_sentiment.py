@@ -2,17 +2,18 @@
 Social sentiment layer — LunarCrush integration.
 Optional API key; when missing/unreachable we fallback to a plausible mock table.
 """
-import os
 import httpx
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 
+from config import settings
 from utils.rate_limiter import rate_limit
+from utils.http import retry_async
 
 router = APIRouter()
 
-LUNARCRUSH_API_KEY = os.getenv("LUNARCRUSH_API_KEY", "")
+LUNARCRUSH_API_KEY = settings.lunarcrush_api_key
 LUNARCRUSH_BASE = "https://api.lunarcrush.com/v2"
 
 # Mock social metrics by symbol for demo / API-fail fallback
@@ -41,11 +42,13 @@ def _symbol_base(symbol: str) -> str:
 
 
 @rate_limit(max_concurrent=5, min_delay=0.1)
-async def _http_get(url: str, params: Optional[dict] = None):
-    async with httpx.AsyncClient(timeout=8) as client:
-        r = await client.get(url, params=params or {})
-        r.raise_for_status()
-        return r.json()
+async def _http_get(url: str, params: Optional[dict] = None, source: str = "lunarcrush"):
+    async def _do():
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url, params=params or {})
+            r.raise_for_status()
+            return r.json()
+    return await retry_async(_do, max_retries=1, base_delay=0.5, source=source)
 
 
 async def fetch_social_metrics(symbol: str) -> dict:

@@ -2,13 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { engineHeaders } from '../utils/engine-headers.util';
 
 @Injectable()
 export class RegimeClassifierService {
   private readonly logger = new Logger(RegimeClassifierService.name);
   private readonly engineUrl: string;
 
-  constructor(private http: HttpService, config: ConfigService) {
+  constructor(private http: HttpService, private config: ConfigService) {
     this.engineUrl = config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
 
@@ -26,7 +27,7 @@ export class RegimeClassifierService {
 
   private async post(path: string, body: any) {
     try {
-      const res = await firstValueFrom(this.http.post(`${this.engineUrl}${path}`, body));
+      const res = await firstValueFrom(this.http.post(`${this.engineUrl}${path}`, body, { headers: engineHeaders(this.config) }));
       return res.data;
     } catch (error) {
       this.logger.error('RegimeClassifier POST failed', { path, error: (error as any)?.message ?? error });
@@ -36,7 +37,7 @@ export class RegimeClassifierService {
 
   private async get(path: string) {
     try {
-      const res = await firstValueFrom(this.http.get(`${this.engineUrl}${path}`));
+      const res = await firstValueFrom(this.http.get(`${this.engineUrl}${path}`, { headers: engineHeaders(this.config) }));
       return res.data;
     } catch (error) {
       this.logger.error('RegimeClassifier GET failed', { path, error: (error as any)?.message ?? error });

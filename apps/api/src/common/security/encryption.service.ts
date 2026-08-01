@@ -22,8 +22,17 @@ export class EncryptionService {
     const raw = this.config.get<string>('ENCRYPTION_KEY');
     if (raw) {
       try {
-        // Accept either a 64-char hex key or a passphrase that we derive to 32 bytes.
-        this.key = raw.length === 64 ? Buffer.from(raw, 'hex') : scryptSync(raw, 'trading-os-salt', 32);
+        if (raw.length === 64) {
+          this.key = Buffer.from(raw, 'hex');
+        } else {
+          const salt = this.config.get<string>('ENCRYPTION_SALT');
+          if (!salt) {
+            this.logger.warn('ENCRYPTION_SALT not set — using random salt (encrypted values will not be decryptable after restart). Set ENCRYPTION_SALT for production.');
+            this.key = scryptSync(raw, randomBytes(16), 32);
+          } else {
+            this.key = scryptSync(raw, salt, 32);
+          }
+        }
         if (this.key.length !== 32) {
           this.logger.error('ENCRYPTION_KEY must resolve to exactly 32 bytes');
           this.key = null;

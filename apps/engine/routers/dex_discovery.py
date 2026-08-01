@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 
 from utils.rate_limiter import rate_limit
+from utils.http import retry_async
 
 router = APIRouter()
 
@@ -30,12 +31,14 @@ def _set(key: str, val: any):
 
 
 @rate_limit(max_concurrent=5, min_delay=0.2)
-async def _http_get(url: str, params: Optional[dict] = None):
+async def _http_get(url: str, params: Optional[dict] = None, source: str = "dexscreener"):
     import httpx
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url, params=params or {})
-        r.raise_for_status()
-        return r.json()
+    async def _do():
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url, params=params or {})
+            r.raise_for_status()
+            return r.json()
+    return await retry_async(_do, max_retries=1, base_delay=0.5, source=source)
 
 
 # ── DexScreener: search pairs across all chains ───────────────────

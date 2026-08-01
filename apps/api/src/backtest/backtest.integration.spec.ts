@@ -69,6 +69,7 @@ describe('BacktestController (integration)', () => {
     expect(httpService.post).toHaveBeenCalledWith(
       expect.stringContaining('/backtest/run'),
       expect.objectContaining({ symbol: 'BTC/USDT' }),
+      expect.objectContaining({ headers: expect.any(Object) }),
     );
   });
 

@@ -5,6 +5,7 @@ import { of } from 'rxjs';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FeatureStoreService } from './feature-store.service';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 describe('SignalOutcomeService', () => {
   let service: SignalOutcomeService;
@@ -37,6 +38,7 @@ describe('SignalOutcomeService', () => {
         { provide: HttpService, useValue: mockHttp },
         { provide: ConfigService, useValue: mockConfig },
         { provide: FeatureStoreService, useValue: mockFeatureStore },
+        { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
       ],
     }).compile();
 
@@ -240,6 +242,7 @@ describe('SignalOutcomeService', () => {
       // Engine was called for non-Binance symbol
       expect(mockHttp.get).toHaveBeenCalledWith(
         expect.stringContaining('/candles/SNTS'),
+        expect.objectContaining({ headers: expect.any(Object) }),
       );
       expect(mockPrisma.signalLog.update).toHaveBeenCalledWith({
         where: { id: 'log-5' },

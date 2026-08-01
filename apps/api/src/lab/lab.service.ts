@@ -1,8 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 import { CreateLabSessionDto } from './dto/create-lab-session.dto';
 
 export interface RunLabBacktestDto {
@@ -15,15 +13,11 @@ export interface RunLabBacktestDto {
 @Injectable()
 export class LabService {
   private readonly logger = new Logger(LabService.name);
-  private engineUrl: string;
 
   constructor(
     private prisma: PrismaService,
-    private http: HttpService,
-    private config: ConfigService,
-  ) {
-    this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
-  }
+    private engine: EngineHttpService,
+  ) {}
 
   async createSession(userId: string, dto: CreateLabSessionDto) {
     return this.prisma.labSession.create({
@@ -86,9 +80,7 @@ export class LabService {
     };
 
     try {
-      const { data } = await firstValueFrom(
-        this.http.post(`${this.engineUrl}/backtest/run`, payload),
-      );
+      const data = await this.engine.post('/backtest/run', payload, { timeout: 30_000 });
 
       const metrics = {
         win_rate: data.win_rate,

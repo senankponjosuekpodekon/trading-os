@@ -1,9 +1,10 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ConfigService } from '@nestjs/config';
 
 class RefreshDto {
   refresh_token: string;
@@ -18,18 +19,48 @@ class LogoutDto {
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private config: ConfigService,
+  ) {}
+
+  private setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
+    const isProd = this.config.get<string>('NODE_ENV') === 'production';
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+  }
+
+  private clearAuthCookies(res: Response) {
+    res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
+  }
 
   @Post('register')
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+    const data = await this.authService.register(dto);
+    this.setAuthCookies(res, data.access_token, data.refresh_token);
+    return data;
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: LoginDto, @Req() req: Request) {
+  async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     try {
-      return await this.authService.login(dto);
+      const data = await this.authService.login(dto);
+      this.setAuthCookies(res, data.access_token, data.refresh_token);
+      return data;
     } catch (err) {
       this.logger.warn({
         email: dto.email,
@@ -44,9 +75,13 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Body() dto: RefreshDto, @Req() req: Request) {
+  async refresh(@Body() dto: RefreshDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     try {
-      return await this.authService.refresh(dto.refresh_token);
+      const refreshToken = dto.refresh_token || req.cookies?.['refresh_token'];
+      if (!refreshToken) throw new UnauthorizedException('No refresh token');
+      const data = await this.authService.refresh(refreshToken);
+      this.setAuthCookies(res, data.access_token, data.refresh_token);
+      return data;
     } catch (err) {
       this.logger.warn({
         ip: req.ip || req.socket.remoteAddress,
@@ -60,7 +95,11 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async logout(@Body() dto: LogoutDto) {
-    await this.authService.logout(dto.refresh_token);
+  async logout(@Body() dto: LogoutDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const refreshToken = dto.refresh_token || req.cookies?.['refresh_token'];
+    if (refreshToken) {
+      await this.authService.logout(refreshToken);
+    }
+    this.clearAuthCookies(res);
   }
 }

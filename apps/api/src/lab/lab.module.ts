@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { HttpModule } from '@nestjs/axios';
 import { LabService } from './lab.service';
 import { LabController } from './lab.controller';
+import { EngineHttpModule } from '../engine/engine-http.module';
 
 @Module({
-  imports: [HttpModule],
+  imports: [EngineHttpModule],
   controllers: [LabController],
   providers: [LabService],
   exports: [LabService],

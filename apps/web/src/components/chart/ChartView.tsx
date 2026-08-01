@@ -3,13 +3,13 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import axios from 'axios';
 import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { OHLCBar, ChartMarker, Drawing, IndicatorSeries, PriceLevel, SmcZone } from '@/components/chart/CandlestickChart';
 import { DrawingToolbar, DrawingTool } from '@/components/chart/DrawingToolbar';
 import { Signal } from '@/types';
 import { useTradingStore } from '@/store/trading.store';
+import { api } from '@/lib/api';
 import { RefreshCw, TrendingUp, TrendingDown, Minus, BarChart2, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 
 const CandlestickChart = dynamic(
@@ -21,7 +21,7 @@ const SYMBOL_GROUPS = [
   { label: 'Crypto',   symbols: ['BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT','AVAX/USDT','XRP/USDT','LINK/USDT','ADA/USDT','DOGE/USDT','MATIC/USDT','PAXG/USDT'] },
   { label: 'Forex',    symbols: ['EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CHF','USD/CAD','NZD/USD'] },
   { label: 'Matières', symbols: ['XAU/USD','XAG/USD','WTI/USD','BRENT/USD'] },
-  { label: 'Deriv',    symbols: ['VIX75/USD','VIX25/USD','VIX10/USD','BOOM1000/USD','BOOM500/USD','BOOM300/USD','CRASH1000/USD','CRASH500/USD','CRASH300/USD','JUMP75/USD','JUMP25/USD'] },
+  { label: 'Deriv',    symbols: ['V75','V25','V10','V100','V50','BOOM1000','BOOM500','BOOM300','CRASH1000','CRASH500','CRASH300','JUMP75','JUMP25','JUMP50','JUMP10','JUMP100'] },
 ];
 const ALL_SYMBOLS = SYMBOL_GROUPS.flatMap(g => g.symbols);
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'];
@@ -38,26 +38,15 @@ const SYMBOL_TO_PRICE_KEY: Record<string, string> = {
   'EUR/USD': 'EUR/USD', 'GBP/USD': 'GBP/USD', 'USD/JPY': 'USD/JPY',
   'AUD/USD': 'AUD/USD', 'USD/CHF': 'USD/CHF', 'USD/CAD': 'USD/CAD', 'NZD/USD': 'NZD/USD',
   'XAU/USD': 'XAU/USD', 'XAG/USD': 'XAG/USD', 'WTI/USD': 'WTI/USD', 'BRENT/USD': 'BRENT/USD',
-  'VIX10/USD': 'VIX10/USD', 'VIX25/USD': 'VIX25/USD', 'VIX75/USD': 'VIX75/USD',
-  'BOOM1000/USD': 'BOOM1000/USD', 'BOOM500/USD': 'BOOM500/USD', 'BOOM300/USD': 'BOOM300/USD',
-  'CRASH1000/USD': 'CRASH1000/USD', 'CRASH500/USD': 'CRASH500/USD', 'CRASH300/USD': 'CRASH300/USD',
-  'JUMP75/USD': 'JUMP75/USD', 'JUMP25/USD': 'JUMP25/USD',
+  'V10': 'V10', 'V25': 'V25', 'V50': 'V50', 'V75': 'V75', 'V100': 'V100',
+  'BOOM1000': 'BOOM1000', 'BOOM500': 'BOOM500', 'BOOM300': 'BOOM300',
+  'CRASH1000': 'CRASH1000', 'CRASH500': 'CRASH500', 'CRASH300': 'CRASH300',
+  'JUMP10': 'JUMP10', 'JUMP25': 'JUMP25', 'JUMP50': 'JUMP50', 'JUMP75': 'JUMP75', 'JUMP100': 'JUMP100',
 };
 
-const ENGINE = process.env.NEXT_PUBLIC_ENGINE_URL ?? 'http://localhost:8000';
 
 async function fetchKlines(symbol: string, timeframe: string): Promise<OHLCBar[]> {
-  const binSym = SYM_BINANCE[symbol];
-  if (binSym) {
-    const url = `https://api.binance.com/api/v3/klines?symbol=${binSym}&interval=${timeframe}&limit=300`;
-    const { data } = await axios.get(url);
-    return data.map((k: any[]) => ({
-      time: Math.floor(k[0] / 1000), open: parseFloat(k[1]),
-      high: parseFloat(k[2]), low: parseFloat(k[3]),
-      close: parseFloat(k[4]), volume: parseFloat(k[5]),
-    }));
-  }
-  const { data } = await axios.get(`${ENGINE}/indicators/klines`, {
+  const { data } = await api.get('/indicators/klines', {
     params: { symbol, interval: timeframe, limit: 300 },
   });
   return (data.klines ?? []).map((k: any) => ({

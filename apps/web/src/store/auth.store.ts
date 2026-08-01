@@ -14,10 +14,8 @@ interface AuthState {
   init: () => void;
 }
 
-function storeTokens(data: { access_token: string; refresh_token: string; user: User }) {
+function storeUser(data: { access_token: string; refresh_token: string; user: User }) {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('trading_os_token', data.access_token);
-  localStorage.setItem('trading_os_refresh_token', data.refresh_token);
   localStorage.setItem('trading_os_user', JSON.stringify(data.user));
 }
 
@@ -36,35 +34,32 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   init: () => {
     if (typeof window === 'undefined') return;
-    const token = localStorage.getItem('trading_os_token');
-    const refreshToken = localStorage.getItem('trading_os_refresh_token');
     const userRaw = localStorage.getItem('trading_os_user');
-    if (token && userRaw) {
-      set({ token, refreshToken, user: JSON.parse(userRaw) });
+    if (userRaw) {
+      try {
+        set({ user: JSON.parse(userRaw) });
+      } catch {}
     }
   },
 
   login: async (email, password, totpToken) => {
     set({ isLoading: true });
     const { data } = await api.post('/auth/login', { email, password, totpToken });
-    storeTokens(data);
+    storeUser(data);
     set({ user: data.user, token: data.access_token, refreshToken: data.refresh_token, isLoading: false });
   },
 
   register: async (email, password, name) => {
     set({ isLoading: true });
     const { data } = await api.post('/auth/register', { email, password, name });
-    storeTokens(data);
+    storeUser(data);
     set({ user: data.user, token: data.access_token, refreshToken: data.refresh_token, isLoading: false });
   },
 
   logout: async () => {
-    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('trading_os_refresh_token') : null;
-    if (refreshToken) {
-      try {
-        await api.post('/auth/logout', { refresh_token: refreshToken });
-      } catch {}
-    }
+    try {
+      await api.post('/auth/logout', {});
+    } catch {}
     clearStorage();
     set({ user: null, token: null, refreshToken: null });
     window.location.href = '/auth/login';

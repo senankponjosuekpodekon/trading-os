@@ -3,7 +3,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
-import { useLivePrices } from '@/hooks/useLivePrices';
 import { useNotifications } from '@/hooks/useNotifications';
 import { api } from '@/lib/api';
 import DashboardPage from '../page';
@@ -16,10 +15,6 @@ jest.mock('next/navigation', () => ({
 
 jest.mock('@/store/auth.store', () => ({
   useAuthStore: jest.fn() as jest.Mock,
-}));
-
-jest.mock('@/hooks/useLivePrices', () => ({
-  useLivePrices: jest.fn() as jest.Mock,
 }));
 
 jest.mock('@/hooks/useNotifications', () => ({
@@ -55,10 +50,6 @@ describe('DashboardPage', () => {
       user: { id: '1', name: 'Test User', email: 'test@example.com', role: 'USER' },
       token: 'token',
       init: jest.fn(),
-    });
-    (useLivePrices as unknown as jest.Mock).mockReturnValue({
-      prices: {},
-      connected: true,
     });
     (useNotifications as unknown as jest.Mock).mockReturnValue({
       notifications: [],

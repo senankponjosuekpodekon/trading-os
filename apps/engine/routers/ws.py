@@ -8,6 +8,8 @@ import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Set
 
+from utils.deriv_symbols import to_wire_symbol
+
 from utils.http import retry_async
 from utils.logger import get_logger
 
@@ -35,8 +37,8 @@ YF_PRICE_SYMBOLS: dict = {
 DERIV_PRICE_SYMBOLS: dict = {
     "VIX10/USD": "R_10",   "VIX25/USD": "R_25",   "VIX50/USD": "R_50",
     "VIX75/USD": "R_75",   "VIX100/USD": "R_100",
-    "BOOM300/USD": "BOOM300N",   "BOOM500/USD": "BOOM500",   "BOOM1000/USD": "BOOM1000",
-    "CRASH300/USD": "CRASH300N", "CRASH500/USD": "CRASH500", "CRASH1000/USD": "CRASH1000",
+    "BOOM300/USD": to_wire_symbol("BOOM300"),   "BOOM500/USD": "BOOM500",   "BOOM1000/USD": "BOOM1000",
+    "CRASH300/USD": to_wire_symbol("CRASH300"), "CRASH500/USD": "CRASH500", "CRASH1000/USD": "CRASH1000",
     "JUMP10/USD": "JD10", "JUMP25/USD": "JD25", "JUMP50/USD": "JD50",
     "JUMP75/USD": "JD75", "JUMP100/USD": "JD100",
 }
@@ -55,7 +57,8 @@ async def broadcast(clients: Set[WebSocket], payload: dict):
     for ws in clients:
         try:
             await ws.send_text(msg)
-        except Exception:
+        except Exception as exc:
+            logger.debug("ws_broadcast_failed", error=str(exc))
             dead.add(ws)
     clients -= dead
 
@@ -86,8 +89,8 @@ def _fetch_yf_prices_sync() -> dict:
                     col = close[yf_ticker].dropna()
                     if not col.empty:
                         prices[sym_internal] = float(col.iloc[-1])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("yfinance_ticker_failed", ticker=yf_ticker, error=str(exc))
         else:
             # Un seul ticker
             col = close.dropna()
@@ -95,7 +98,8 @@ def _fetch_yf_prices_sync() -> dict:
                 first_internal = next(iter(reverse.values()))
                 prices[first_internal] = float(col.iloc[-1])
         return prices
-    except Exception:
+    except Exception as exc:
+        logger.debug("yfinance_prices_failed", error=str(exc))
         return {}
 
 
@@ -170,8 +174,8 @@ async def price_broadcaster():
                     try:
                         deriv_prices = await asyncio.wait_for(_fetch_deriv_prices(), timeout=8.0)
                         prices.update(deriv_prices)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("deriv_prices_fetch_failed", error=str(exc))
 
                 # --- yfinance Forex/Commodités (toutes les 30s ~ 10 cycles) ---
                 _yf_counter += 1
@@ -184,8 +188,8 @@ async def price_broadcaster():
                             timeout=20.0
                         )
                         prices.update(yf_prices)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("yfinance_prices_fetch_failed", error=str(exc))
 
                 _last_prices.update(prices)
                 if _price_clients:

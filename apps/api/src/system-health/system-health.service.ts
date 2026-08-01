@@ -18,6 +18,7 @@ export class SystemHealthService {
   private readonly logger = new Logger(SystemHealthService.name);
   private lastAlertTime = new Map<string, Date>();
   private readonly alertCooldownMs = 30 * 60 * 1000;
+  private readonly cronStatus = new Map<string, { lastRun: Date; lastStatus: 'ok' | 'error'; lastError?: string }>();
 
   constructor(
     private prismaSystem: PrismaSystemService,
@@ -28,22 +29,28 @@ export class SystemHealthService {
 
   @Cron('*/15 * * * *')
   async runHealthChecks() {
-    const results: HealthCheckResult[] = [];
-    results.push(await this.checkEngine());
-    results.push(await this.checkDatabase());
-    results.push(await this.checkAssetsAndStrategies());
-    results.push(await this.checkRecentSignals());
+    try {
+      const results: HealthCheckResult[] = [];
+      results.push(await this.checkEngine());
+      results.push(await this.checkDatabase());
+      results.push(await this.checkAssetsAndStrategies());
+      results.push(await this.checkRecentSignals());
 
-    const criticals = results.filter((r) => r.status === 'critical');
-    const warnings = results.filter((r) => r.status === 'warning');
+      const criticals = results.filter((r) => r.status === 'critical');
+      const warnings = results.filter((r) => r.status === 'warning');
 
-    if (criticals.length > 0 || warnings.length > 0) {
-      this.logger.warn(
-        `Health checks: ${criticals.length} critical, ${warnings.length} warning`,
-      );
-      await this.alertSuperAdmins(results);
-    } else {
-      this.logger.log('Health checks: all OK');
+      if (criticals.length > 0 || warnings.length > 0) {
+        this.logger.warn(
+          `Health checks: ${criticals.length} critical, ${warnings.length} warning`,
+        );
+        await this.alertSuperAdmins(results);
+      } else {
+        this.logger.log('Health checks: all OK');
+      }
+      this.recordCronRun('health-checks', 'ok');
+    } catch (e: any) {
+      this.recordCronRun('health-checks', 'error', e?.message);
+      throw e;
     }
   }
 
@@ -209,5 +216,21 @@ export class SystemHealthService {
       checks,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  recordCronRun(name: string, status: 'ok' | 'error', error?: string) {
+    this.cronStatus.set(name, { lastRun: new Date(), lastStatus: status, lastError: error });
+  }
+
+  getCronStatus(): Record<string, { lastRun: string; lastStatus: string; lastError?: string }> {
+    const result: Record<string, any> = {};
+    for (const [name, status] of this.cronStatus.entries()) {
+      result[name] = {
+        lastRun: status.lastRun.toISOString(),
+        lastStatus: status.lastStatus,
+        lastError: status.lastError,
+      };
+    }
+    return result;
   }
 }

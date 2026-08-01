@@ -73,6 +73,85 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
     - `SystemHealthService` : 8 tests ✅ | `RolesGuard` : 14 tests ✅
     - Reste : signals.service (cron), positions.service, auth.service
 
+### Phase 0++ — Qualité Data Production (Moonshot & Risk-Aware)
+
+> Issu de l'analyse croisée : article "Moonshot Crypto" (Bitcoin Foundation) + stratégie Ezenwaogene (ifean.md).
+> Objectif : le moteur traite actuellement un memecoin à $50K market cap comme BTC — ces items corrigent ce aveuglement.
+
+#### ⚡ Priorité haute — Fondations qualité data
+
+- [ ] 🤖 ⚡ **`risk_level` sur signaux** (EXTREME/HIGH/MODERATE/LOW)
+  - Calculé à partir de : asset type + liquidité + volatilité + market cap tier
+  - EXTREME = micro-cap crypto + faible liquidité + volatilité extrême
+  - HIGH = small-cap crypto ou forex émergent
+  - MODERATE = crypto majeure (BTC/ETH) ou forex majeur
+  - LOW = BRVM ou commodities
+  - Stocké dans `metadata.risk_level` + affiché en frontend (badge coloré sur SignalCard)
+  - Filtre optionnel : `?risk_level=MODERATE` sur `/signals`
+
+- [ ] 🤖 ⚡ **`market_cap_tier` dans `get_cluster()`** (MICRO/SMALL/MID/LARGE)
+  - Étendre `portfolio_risk.py::ASSET_CLUSTERS` avec market cap tier pour les actifs crypto
+  - MICRO < $50M | SMALL $50M-$500M | MID $500M-$10B | LARGE > $10B
+  - Source : CoinGecko API (déjà utilisé) ou cache manuel mis à jour mensuellement
+  - Impact : `risk_level` dérive directement de ce tier + volatilité
+  - Permet d'adapter le sizing : MICRO = max 1% capital, LARGE = max 5%
+
+- [ ] 🤖 ⚡ **`liquidity_score` au moteur** (0-100)
+  - Composantes : depth du carnet d'ordres, volume profile 24h, bid-ask spread
+  - Source : Binance API (depth20) pour crypto, Twelve Data pour forex
+  - Score < 30 = liquidité critique → SL élargi + warning "Exit difficile"
+  - Score < 10 = signal désactivé ou confidence réduite de 50%
+  - Intégré dans `analyze_candles()` → `metadata.liquidity_score`
+  - L'article insiste : liquidité est le critère #1 d'évaluation d'un moonshot
+
+#### Priorité moyenne — Stratégie & gestion de risque
+
+- [ ] 🤖 **Take-profit moonshot** (sell 50% à 2x) en plus du R:R standard
+  - Règle Ezenwaogene : "sell 50% quand le prix double → récupération de l'investissement initial"
+  - Ajouter `tp_moonshot` dans `risk.py::calc_targets()` quand `market_cap_tier == MICRO`
+  - `tp_moonshot = entry * 2.0` + `tp_moonshot_pct = 50%` (taille de sortie)
+  - Les TP1/TP2 standards restent pour les 50% restants
+  - Frontend : afficher le TP moonshot avec mention "Récupération capital"
+
+- [ ] 🤖 **Fear & Greed Index — seuil d'accumulation**
+  - Déjà implémenté dans `macro.py` pour le scoring crypto (±20/15 pts)
+  - Étendre : seuil < 20 = signal d'accumulation (tranche deployment)
+  - Déclencher une notification "Opportunité d'accumulation BTC/ETH" aux profils INVESTOR
+  - Connecter au tranche/DCA logic (item suivant)
+
+- [ ] 🤖 **Tranche/DCA logic** — déploiement progressif en 4 tranches
+  - Stratégie Ezenwaogene : diviser 80% en 4 buckets, déployer un à chaque leg down
+  - Crashes -30% à -50% depuis les highs → déclencher une tranche
+  - Implémenter dans `portfolio_risk.py` : `tranche_plan(capital, asset, current_drawdown)`
+  - Notification : "Tranche 2/4 déployée — BTC à -35% du high"
+  - Dashboard : suivi des tranches déployées vs en attente
+
+- [ ] 🤖 **Red flags checklist en metadata** pour micro-caps
+  - 10 red flags de l'article : anon team, unlocked liquidity, whale concentration, no audit, fake social, aggressive influencer, no product, copy-paste website, suspicious APY, token taxes
+  - Source : on-chain data (holder distribution via Etherscan/BSCScan) + manual flags
+  - Stocké dans `metadata.red_flags[]` + `metadata.red_flag_count`
+  - Si `red_flag_count >= 5` → signal désactivé + warning "Projet à risque extrême"
+  - Frontend : icône ⚠️ avec tooltip listant les red flags
+
+- [ ] 🤖 **Allocation 80/20 par profil** dans `portfolio_risk.py`
+  - 80% Accumulation Portfolio : BTC/ETH uniquement, tranche DCA lors de crashes
+  - 20% Moonshot Portfolio : max 1-2% par token, assume total loss
+  - Implémenter `compute_allocation_profile(capital, profile)` → `{accumulation, moonshot, per_token_max}`
+  - Le risk calculator utilise l'allocation pour limiter le sizing
+  - Frontend Risk Dashboard : visualisation 80/20 + tracking exposition réelle
+
+#### Priorité basse — Affinement
+
+- [ ] 🤖 **Macro rotation signal** (BTC → ETH → altcoins → small-cap → memecoins)
+  - Détecter la phase de bull run pour adapter le scoring
+  - Phase 1 (BTC leads) → prioriser signaux BTC
+  - Phase 4 (memecoins catch fire) → alerte "Rotation vers small-cap/memecoins"
+  - Phase 5 (moonshots race) → activer red flags checklist + risk_level EXTREME
+  - Implémenter via corrélation BTC dominance + altcoin season index
+  - Source : CoinGecko global data + Fear & Greed
+
+---
+
 ### Phase 1 — Données & Engine (fondation ML)
 7. Feature Factory complète ✅ (fait)
 8. Market Concept Vector + Embedding ✅ (fait)
@@ -2135,3 +2214,142 @@ Faire des analyses long termes du genres et autres Q1, Q2, Q3, Q4; les dominance
 Fibonacci? Notion de divergence haussiere, baissiere
 
 Google trends
+
+
+## APIs Gratuites — Pistes d'intégration (juillet 2026)
+
+> Comparatif issu de l'analyse des APIs crypto disponibles. Les APIs déjà intégrées sont marquées ✅.
+
+### ✅ Déjà intégrées (gratuites, opérationnelles)
+
+| API | Usage | Limite gratuite | Fichier |
+|---|---|---|---|
+| **Binance** | Prix, funding rate, open interest | Illimité (public) | `onchain.py` |
+| **Coinalyze** | Liquidations, netflow, long/short ratio | 40 req/min | `onchain_advanced.py` |
+| **DefiLlama** | TVL, stablecoin flows | Illimité (public) | `onchain_advanced.py` |
+| **CoinGecko** | MVRV proxy, NVT proxy, BTC dominance | ~30 req/min | `onchain_advanced.py` + `onchain.py` |
+| **DexScreener** | DEX pairs, new tokens, trending, risk check | 300 req/min (no key) | `dex_discovery.py` |
+| **GeckoTerminal** | DEX pools, OHLCV, new pools, active addresses proxy | 10 req/min (no key) | `dex_discovery.py` + `onchain_advanced.py` |
+| **LunarCrush** | Sentiment social crypto | 500 req/jour | `social_sentiment.py` |
+| **GitHub** | Developer activity (commits, releases) | 60 req/h (public) | `onchain_advanced.py` |
+
+### 🔜 À intégrer (priorité par cas d'usage)
+
+#### ✅ DexScreener — Détection nouveaux tokens DEX (intégré)
+- **Rôle** : Prix DEX temps réel, nouveaux tokens, trending, risk check (red flags)
+- **Pourquoi** : Détecte les tokens avant CMC/CEX. Auto-indexe tout pair avec liquidité ajoutée sur un DEX.
+- **Gratuit** : 100% gratuit, pas de clé, 300 req/min (pairs/search), 60 req/min (discovery)
+- **Endpoints intégrés** : `/dex/search`, `/dex/new-tokens`, `/dex/trending`, `/dex/token/{chain}/{addr}`, `/dex/risk-check/{chain}/{addr}`
+- **Impact TODO** : Prod #11 (risk_level), #12 (market_cap_tier), #13 (liquidity_score), #17 (red flags)
+
+#### ✅ GeckoTerminal — DEX pools + OHLCV (intégré)
+- **Rôle** : Pools DEX, OHLCV, nouveaux pools (48h), trending pools, active addresses proxy
+- **Pourquoi** : Complète DexScreener avec données OHLCV et filtre honeypot (GT Score)
+- **Gratuit** : 100% gratuit, pas de clé, 10 req/min
+- **Endpoints intégrés** : `/dex/new-pools`, `/dex/trending-pools` + utilisé dans `onchain_advanced.py` pour smart contract activity
+
+#### Mobula — Prix DEX alternative (backup)
+- **Rôle** : Prix on-chain pour memecoins/low-cap (5s sans cache)
+- **Pourquoi** : Alternative à DexScreener si besoin de fraîcheur ultra-rapide
+- **Gratuit** : 10 000 crédits, pas de rate limit
+- **Intégration** : Backup optionnel de DexScreener
+
+#### Chainstack — Infrastructure RPC managée
+- **Rôle** : Nœuds blockchain (EVM, Solana) pour lire smart contracts et interagir avec le mempool
+- **Pourquoi** : Nécessaire pour lire la distribution des holders on-chain (red flags checklist)
+- **Gratuit** : Plan de base avec quota mensuel de requêtes RPC
+- **Impact TODO** : Prod #17 (red flags — holder concentration, locked liquidity verification)
+- **Intégration** : `engine/routers/onchain_reads.py` — via web3.py + Chainstack endpoint
+
+#### CoinAPI — Données de marché CEX normalisées
+- **Rôle** : OHLCV + carnet d'ordres normalisé across hundreds of exchanges
+- **Pourquoi** : Pourrait remplacer Twelve Data pour le forex si le plan gratuit est suffisant
+- **Gratuit** : Version gratuite avec limite quotidienne stricte
+- **Impact TODO** : Amélioration qualité data forex/indices
+- **Intégration** : Remplacement partiel de Twelve Data dans `market_data.py`
+
+#### Dune Analytics — Requêtes SQL on-chain
+- **Rôle** : Requêtes SQL personnalisées sur données on-chain complexes
+- **Pourquoi** : Analytics avancés (whale tracking, token flows, holder analysis)
+- **Gratuit** : Quota mensuel de crédits d'exécution
+- **Impact TODO** : Phase C/D — analytics avancés pour le ML
+- **Intégration** : `engine/routers/dune_queries.py` — via Dune API
+
+#### ChangeNOW — Infrastructure de swap
+- **Rôle** : Moteur d'échange crypto intégré (B2B2C, commission partagée)
+- **Pourquoi** : Futur wallet/trading réel dans l'app
+- **Gratuit** : Pas d'abonnement, commission partagée à partir de 0.4% par transaction
+- **Impact TODO** : Phase 5 SaaS — wallet intégré
+- **Intégration** : `apps/api/src/swap/` — endpoint de swap intégré
+
+#### FinFeedAPI — Marchés de prédiction
+- **Rôle** : Probabilités des plateformes de paris macro (Polymarket etc.)
+- **Pourquoi** : Sentiment macro alternatif — conviction du marché sur des événements
+- **Gratuit** : Variables (plans d'essai)
+- **Impact TODO** : Phase A — sentiment macro pour le scoring
+- **Intégration** : `engine/routers/prediction_markets.py`
+
+#### CoinStats — Agrégation tout-en-un + MCP
+- **Rôle** : Centralise prix, portefeuilles, DeFi, sécurité des tokens + protocole MCP pour agents IA
+- **Pourquoi** : Simplifierait le stack en remplaçant plusieurs APIs. MCP = connexion directe avec Claude/Cursor
+- **Gratuit** : Version gratuite à inscription, évolution par crédits
+- **Impact TODO** : Architecture — simplification + AI copilot enhancement
+- **Intégration** : Potentiellement remplacer CoinGecko + CoinAPI + partie DefiLlama
+
+#### Alchemy — Infrastructure blockchain
+- **Rôle** : RPC endpoints + API données enrichies (historique transactions)
+- **Pourquoi** : Alternative à Chainstack pour les reads on-chain
+- **Gratuit** : Plan gratuit généreux en Compute Units
+- **Impact TODO** : Prod #17 (red flags) + Phase C/D (Web3)
+- **Intégration** : Alternative à Chainstack
+
+### Stack recommandé par phase
+
+```
+Phase 0++ (Moonshot)    : ✅ DexScreener (prix DEX + risk check) + Chainstack (RPC on-chain, à intégrer)
+Phase A (On-chain)      : ✅ Coinalyze + DefiLlama + DexScreener + GeckoTerminal + CoinGecko
+Phase A+ (Options)      : 🔜 Deribit (DVOL + put/call sentiment + max pain)
+Phase C/D (Advanced)    : Dune Analytics + Alchemy/Chainstack
+Phase 5 (SaaS/Wallet)   : ChangeNOW (swap) + CoinStats (agrégation)
+```
+
+---
+
+### 🔜 Deribit — Données options crypto (gratuit, no key)
+
+**Source** : Deribit API REST/WebSocket public — `https://www.deribit.com/api/v2/`
+**Gratuit** : 100% gratuit, pas de clé, 20 req/s (public endpoints)
+**Pourquoi Deribit** : 80%+ du volume global des options crypto. Binance/OKX options ont une liquidité trop faible.
+**Pourquoi pas DEXTools** : DEXTools = données DEX spot, pas d'options. DexScreener déjà intégré pour le DEX.
+
+#### Cas d'usage et priorité
+
+| Cas d'usage | Priorité | Effort | Impact |
+|-------------|----------|--------|--------|
+| DVOL (BTC 30-day IV) → regime/risk adjustment | ⚡ Haute | ~30 lignes | Améliore `regime_risk_adjustment` dans `risk.py` avec volatilité forward-looking au lieu d'ATR backward-looking |
+| Put/Call ratio → sentiment bonus | 🟡 Moyenne | ~50 lignes | Nouveau facteur dans `onchain_bonus` (`onchain.py`). P/C ratio élevé = sentiment bearish, alimente le score du signal |
+| Max pain price → S/R magnet | 🟡 Moyenne | ~20 lignes | Prix avec forte OI = aimant de prix. À intégrer dans `sr_zones.py` comme niveau supplémentaire |
+| Greeks (Delta/Gamma) → entry timing | 🟢 Basse | ~80 lignes | Gamma exposure près des gros strikes = accélération/pinning. Complexité élevée pour gain marginal |
+| Historical options → backtest | ❌ Skip | Effort élevé | ROI faible — le backtest replay des candles, pas des options strategies |
+
+#### Endpoints Deribit à intégrer
+
+- `GET /api/v2/public/ticker?instrument_name=BTC-{expiry}-{strike}-P|C` — ticker individuel (prix, greeks, IV, OI)
+- `GET /api/v2/public/get_book_summary_by_currency?currency=BTC&kind=option` — résumé agrégé toutes les options BTC (IV, volume, OI)
+- `GET /api/v2/public/get_index_price?index_name=btc_usd` — prix spot de référence
+- DVOL : `GET /api/v2/public/ticker?instrument_name=BTC-DVOL-{date}` (index de volatilité 30j)
+
+#### Architecture proposée
+
+Nouveau router `engine/routers/options.py` (~100 lignes) :
+- `GET /options/dvol` — DVOL BTC 30-day implied volatility + percentile rank historique
+- `GET /options/sentiment/{symbol}` — Put/Call ratio, max pain price, total OI, IV skew
+- Cache 5 min (même pattern que `onchain.py`)
+- Intégration dans `scan.py` : ajouter `options_context` au pipeline `analyze_candles`, utilisé par `onchain_bonus` ou nouveau `options_bonus`
+- Intégration dans `risk.py` : `regime_risk_adjustment` prend en paramètre `iv_percentile` (0-100), réduit le risque si IV > 80th percentile (régime VOLATILE confirmé par le marché)
+
+#### Dépendances
+
+- Aucune nouvelle lib — `httpx` déjà utilisé partout
+- Aucune clé API — endpoints publics Deribit
+- Complète (ne remplace pas) l'existant : futures OI (Binance) dans `onchain.py` + OI history (Coinalyze) dans `onchain_advanced.py`

@@ -561,12 +561,8 @@ async def _ingest_scraped_to_rag(articles: list[ScrapedArticle], symbol: str):
     if not articles:
         return 0
     try:
-        import asyncpg
-        from routers.rag import _embed
-        pool = await asyncpg.create_pool(
-            DATABASE_URL.replace("postgres://", "postgresql://"),
-            min_size=1, max_size=2
-        )
+        from routers.rag import _embed, _get_pool
+        pool = await _get_pool()
         inserted = 0
         async with pool.acquire() as conn:
             for a in articles[:10]:
@@ -586,7 +582,6 @@ async def _ingest_scraped_to_rag(articles: list[ScrapedArticle], symbol: str):
                     f"news_scraped_{a.source_type}", a.title, content, emb_str
                 )
                 inserted += 1
-        await pool.close()
         return inserted
     except Exception as e:
         logger.warning("rag_ingest_failed", symbol=symbol, error=str(e))

@@ -5,8 +5,6 @@ import { Brain, FileText, RefreshCw, Zap, MessageSquare, Send, BookOpen, Search,
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 
-const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
-
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -63,12 +61,9 @@ export default function AiPage() {
     setMessages(prev => [...prev, userMsg, loadingMsg]);
 
     try {
-      const res = await fetch(`${ENGINE_URL}/rag/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q, top_k: 4, category: chatCategory || undefined, generate: true }),
+      const { data } = await api.post('/rag/query', {
+        question: q, top_k: 4, category: chatCategory || undefined, generate: true,
       });
-      const data = await res.json();
       setMessages(prev => [
         ...prev.slice(0, -1),
         {
@@ -159,18 +154,13 @@ export default function AiPage() {
 
   const addDoc = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`${ENGINE_URL}/rag/documents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: newDoc.title,
-          category: newDoc.category,
-          content: newDoc.content,
-          metadata: newDoc.metadata ? JSON.parse(newDoc.metadata) : {},
-        }),
+      const { data } = await api.post('/rag/documents', {
+        title: newDoc.title,
+        category: newDoc.category,
+        content: newDoc.content,
+        metadata: newDoc.metadata ? JSON.parse(newDoc.metadata) : {},
       });
-      if (!res.ok) throw new Error('Échec ajout document');
-      return res.json();
+      return data;
     },
     onSuccess: () => {
       setNewDoc({ title: '', category: 'general', content: '', metadata: '' });
@@ -181,9 +171,8 @@ export default function AiPage() {
   const { data: docsList, isLoading: docsLoading } = useQuery<{ documents: RagDoc[]; count: number }>({
     queryKey: ['rag-documents'],
     queryFn: async () => {
-      const res = await fetch(`${ENGINE_URL}/rag/documents?limit=100`);
-      if (!res.ok) throw new Error('Impossible de charger les documents RAG');
-      return res.json();
+      const { data } = await api.get('/rag/documents', { params: { limit: 100 } });
+      return data;
     },
     enabled: activeTab === 'knowledge',
   });

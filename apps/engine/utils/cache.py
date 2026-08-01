@@ -1,5 +1,5 @@
 """Cache Redis centralisé pour l'engine."""
-import pickle
+import json
 from typing import Any, Optional
 
 import redis.asyncio as redis
@@ -23,14 +23,14 @@ class Cache:
             raw = await r.get(key)
             if raw is None:
                 return None
-            return pickle.loads(raw)
+            return json.loads(raw)
         except Exception:
             return None
 
     async def set(self, key: str, value: Any, ttl: int = 900) -> bool:
         try:
             r = await self.client()
-            await r.setex(key, ttl, pickle.dumps(value))
+            await r.setex(key, ttl, json.dumps(value, default=str))
             return True
         except Exception:
             return False

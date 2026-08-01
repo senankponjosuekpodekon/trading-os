@@ -28,32 +28,43 @@ export function useNotifications() {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
 
-    const connect = () => {
+    const connect = async () => {
       if (stopped) return;
 
-      const es = new EventSource(`${API_URL}/notifications/stream?token=${token}`);
-      esRef.current = es;
+      try {
+        const res = await fetch(`${API_URL}/notifications/sse-token`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to get SSE token');
+        const { sseToken } = await res.json();
 
-      es.onopen = () => { retryDelay = 3000; };
+        const es = new EventSource(`${API_URL}/notifications/stream?sse_token=${sseToken}`);
+        esRef.current = es;
 
-      const handleNotif = (data: string) => {
-        try {
-          const n: AppNotification = { ...JSON.parse(data), read: false };
-          setNotifications(prev => [n, ...prev].slice(0, 50));
-          setUnread(u => u + 1);
-        } catch {}
-      };
+        es.onopen = () => { retryDelay = 3000; };
 
-      es.onmessage = (e) => handleNotif(e.data);
-      es.addEventListener('signal', (e: any) => handleNotif(e.data));
+        const handleNotif = (data: string) => {
+          try {
+            const n: AppNotification = { ...JSON.parse(data), read: false };
+            setNotifications(prev => [n, ...prev].slice(0, 50));
+            setUnread(u => u + 1);
+          } catch {}
+        };
 
-      es.onerror = () => {
-        es.close();
+        es.onmessage = (e) => handleNotif(e.data);
+        es.addEventListener('signal', (e: any) => handleNotif(e.data));
+
+        es.onerror = () => {
+          es.close();
+          if (stopped) return;
+          retryDelay = Math.min(retryDelay * 1.5, 60_000);
+          retryTimer = setTimeout(connect, retryDelay);
+        };
+      } catch {
         if (stopped) return;
-        // Backoff exponentiel — max 60s
         retryDelay = Math.min(retryDelay * 1.5, 60_000);
         retryTimer = setTimeout(connect, retryDelay);
-      };
+      }
     };
 
     connect();

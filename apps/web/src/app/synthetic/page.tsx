@@ -1,12 +1,10 @@
 'use client';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { api } from '@/lib/api';
 import { SyntheticRegimeCard, SyntheticAnalysis } from '@/components/synthetic/SyntheticRegimeCard';
 import { Activity, BarChart3 } from 'lucide-react';
-
-const ENGINE = process.env.NEXT_PUBLIC_ENGINE_URL || 'http://localhost:8000';
 
 const GROUPS: Record<string, { label: string; color: string; symbols: string[] }> = {
   volatility: {
@@ -45,7 +43,7 @@ export default function SyntheticPage() {
     queryKey: ['synthetic-analysis', allSymbols],
     queryFn: async () => {
       const res = await Promise.all(
-        allSymbols.map(sym => axios.get(`${ENGINE}/synthetic/analyze/${sym}`).then(r => r.data).catch(() => null)),
+        allSymbols.map(sym => api.get(`/synthetic/analyze/${sym}`).then(r => r.data).catch(() => null)),
       );
       return res.filter(Boolean) as SyntheticAnalysis[];
     },

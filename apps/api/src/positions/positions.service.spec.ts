@@ -8,6 +8,7 @@ import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JournalService } from '../journal/journal.service';
 import { AuditService } from '../audit/audit.service';
+import { SystemHealthService } from '../system-health/system-health.service';
 
 describe('PositionsService', () => {
   let service: PositionsService;
@@ -72,6 +73,7 @@ describe('PositionsService', () => {
         { provide: NotificationsService, useValue: mockNotifications },
         { provide: JournalService, useValue: mockJournal },
         { provide: AuditService, useValue: mockAudit },
+        { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
       ],
     }).compile();
 
@@ -314,6 +316,7 @@ describe('PositionsService', () => {
       expect(mockHttp.post).toHaveBeenCalledWith(
         expect.stringContaining('/trailing-stop/compute'),
         expect.objectContaining({ symbol: 'BTC/USDT', method: 'atr' }),
+        expect.objectContaining({ headers: expect.any(Object) }),
       );
       expect(mockPrisma.position.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -488,6 +491,7 @@ describe('PositionsService', () => {
       expect(mockHttp.post).toHaveBeenCalledWith(
         'http://localhost:8000/probability/continuation',
         expect.objectContaining({ direction: 'BUY', price: 106, adx: 35 }),
+        expect.objectContaining({ headers: expect.any(Object) }),
       );
     });
 

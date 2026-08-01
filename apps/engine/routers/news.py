@@ -16,6 +16,7 @@ import config
 from utils.cache import get_cached, set_cached
 from utils.logger import get_logger
 from utils.rate_limiter import rate_limit
+from utils.http import retry_async
 
 router = APIRouter()
 
@@ -110,11 +111,13 @@ async def _fetch_articles(symbol: str, limit: int = 10) -> list[dict]:
         "apiKey":   NEWS_API_KEY,
     }
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(f"{NEWS_BASE_URL}/everything", params=params)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("articles", [])
+        async def _do():
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(f"{NEWS_BASE_URL}/everything", params=params)
+                r.raise_for_status()
+                return r.json()
+        data = await retry_async(_do, max_retries=1, base_delay=0.5, source="newsapi")
+        return data.get("articles", [])
     except Exception as e:
         logger.warning("newsapi_fetch_failed", symbol=symbol, error=str(e))
         return []
@@ -204,6 +207,7 @@ async def _ingest_to_rag(articles: list[dict], symbol: str):
     """Insère les articles du jour dans pgvector pour enrichir le chat RAG."""
     if not articles:
         return 0
+    pool = None
     try:
         import asyncpg
         from routers.rag import _embed
@@ -231,10 +235,15 @@ async def _ingest_to_rag(articles: list[dict], symbol: str):
                     "news", title, content, emb_str
                 )
                 inserted += 1
-        await pool.close()
         return inserted
     except Exception:
         return 0
+    finally:
+        if pool is not None:
+            try:
+                await pool.close()
+            except Exception:
+                pass
 
 
 # ── Endpoint principal ─────────────────────────────────────────
@@ -324,6 +333,7 @@ async def news_health():
     configured = bool(NEWS_API_KEY)
     status = "ok" if configured else "no_key"
     docs = 0
+    pool = None
     try:
         import asyncpg
         pool = await asyncpg.create_pool(
@@ -333,9 +343,14 @@ async def news_health():
             docs = await conn.fetchval(
                 "SELECT COUNT(*) FROM rag_documents WHERE category = 'news'"
             )
-        await pool.close()
     except Exception:
         pass
+    finally:
+        if pool is not None:
+            try:
+                await pool.close()
+            except Exception:
+                pass
     return {
         "status":          status,
         "configured":      configured,

@@ -13,7 +13,11 @@ describe('ExpectedMoveService', () => {
   };
 
   const mockConfig = {
-    get: jest.fn().mockReturnValue('http://engine.local'),
+    get: jest.fn((key: string, defaultVal?: any) => {
+      if (key === 'ENGINE_URL') return 'http://engine.local';
+      if (key === 'ENGINE_API_KEY') return '';
+      return defaultVal;
+    }),
   };
 
   beforeEach(async () => {
@@ -39,7 +43,7 @@ describe('ExpectedMoveService', () => {
     expect(result).toEqual(payload);
     expect(mockHttp.get).toHaveBeenCalledWith(
       'http://engine.local/expected-move/BTC%2FUSDT',
-      { params: { timeframe: '1h', limit: 320, horizons: '5,10' } },
+      { params: { timeframe: '1h', limit: 320, horizons: '5,10' }, headers: expect.any(Object) },
     );
   });
 
