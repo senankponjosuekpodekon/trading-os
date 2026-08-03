@@ -13,6 +13,8 @@ describe('QuotaService', () => {
     signalDailyUsage: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
+      updateMany: jest.fn(),
+      create: jest.fn(),
     },
   } as any;
 
@@ -32,10 +34,10 @@ describe('QuotaService', () => {
     jest.clearAllMocks();
   });
 
-  it('allows portfolio creation without an active subscription', async () => {
+  it('enforces portfolio limit for free tier without subscription', async () => {
     mockBilling.getActiveSubscription.mockResolvedValue(null);
-    await expect(service.assertCanCreatePortfolio('u1')).resolves.toBeUndefined();
-    expect(mockPrisma.portfolio.count).not.toHaveBeenCalled();
+    mockPrisma.portfolio.count.mockResolvedValue(1);
+    await expect(service.assertCanCreatePortfolio('u1')).rejects.toThrow(ForbiddenException);
   });
 
   it('allows portfolio creation when plan has no limit', async () => {
@@ -75,24 +77,26 @@ describe('QuotaService', () => {
     expect(usage.signals).toEqual({ used: 5, limit: 50 });
   });
 
-  it('returns usage without a plan', async () => {
+  it('returns usage with free tier limits when no subscription', async () => {
     mockBilling.getActiveSubscription.mockResolvedValue(null);
     mockPrisma.portfolio.count.mockResolvedValue(0);
     mockPrisma.userStrategy.count.mockResolvedValue(0);
     mockPrisma.signalDailyUsage.findUnique.mockResolvedValue(null);
     const usage = await service.getUsage('u1');
-    expect(usage.plan).toBeNull();
-    expect(usage.portfolios.limit).toBeNull();
+    expect(usage.plan?.code).toBe('FREE');
+    expect(usage.portfolios.limit).toBe(1);
+    expect(usage.signals.limit).toBe(5);
   });
 
-  it('enforces signal quota and increments usage', async () => {
+  it('enforces signal quota and increments usage atomically', async () => {
     mockBilling.getActiveSubscription.mockResolvedValue({
       plan: { name: 'Pro', code: 'pro', maxSignals: 2 },
     });
     mockPrisma.signalDailyUsage.findUnique.mockResolvedValue({ signalsUsed: 1 });
     await expect(service.assertSignalQuota('u1')).resolves.toEqual({ limit: 2, used: 1 });
+    mockPrisma.signalDailyUsage.updateMany.mockResolvedValue({ count: 1 });
     await service.incrementSignalUsage('u1', 1);
-    expect(mockPrisma.signalDailyUsage.upsert).toHaveBeenCalled();
+    expect(mockPrisma.signalDailyUsage.updateMany).toHaveBeenCalled();
   });
 
   it('blocks signal quota when exhausted', async () => {

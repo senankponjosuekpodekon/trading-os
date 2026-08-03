@@ -69,7 +69,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: pip install -r apps/engine/requirements.txt -r apps/engine/requirements-dev.txt
+      - run: pip install -r apps/engine/requirements.txt -r apps/engine/requirements-test.txt
       - name: Syntax check
         working-directory: apps/engine
         run: |

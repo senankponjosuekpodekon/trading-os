@@ -150,7 +150,7 @@ export default function DerivPage() {
         }`}>
           <Activity className="w-4 h-4 shrink-0" />
           {health === undefined ? (
-            <span className="font-medium animate-pulse">Vérification de l'API Deriv…</span>
+            <span className="font-medium animate-pulse">Vérification de l&apos;API Deriv…</span>
           ) : (
             <span className="font-medium">{health?.api_live ? '⬤ API Deriv connectée' : '◎ Mode démo (API inaccessible)'}</span>
           )}

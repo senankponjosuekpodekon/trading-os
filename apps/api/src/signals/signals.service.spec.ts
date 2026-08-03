@@ -3,6 +3,8 @@ import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { FeatureStoreService } from './feature-store.service';
 import { SignalPredictorService } from './signal-predictor.service';
+import { PatternPredictorService } from './pattern-predictor.service';
+import { ExpectedMoveService } from '../expected-move/expected-move.service';
 import { RegimeClassifierService } from './regime-classifier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -103,6 +105,8 @@ describe('SignalsService', () => {
         { provide: MarketDataService, useValue: mockMarketData },
         { provide: QuotaService, useValue: mockQuota },
         { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
+        { provide: PatternPredictorService, useValue: { train: jest.fn().mockResolvedValue(undefined), predict: jest.fn().mockResolvedValue({ probability: NaN }) } },
+        { provide: ExpectedMoveService, useValue: { getExpectedMove: jest.fn().mockResolvedValue(null) } },
       ],
     }).compile();
 
