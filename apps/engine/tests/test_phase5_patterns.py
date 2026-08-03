@@ -16,11 +16,10 @@ from patterns.harmonic_v2 import (
 from patterns.divergence import compute_rsi, detect_rsi_divergence, check_rsi_divergence_at_d
 from patterns.liquidity import (
     detect_equal_highs, detect_equal_lows, analyze_liquidity,
-    LiquidityBehavior, LiquidityType,
+    LiquidityType,
 )
 from patterns.orderflow import (
-    confirm_breakout, BreakoutType, OrderFlowData, OrderFlowConfig,
-    orderflow_confirm_break,
+    confirm_breakout, BreakoutType, OrderFlowData, orderflow_confirm_break,
 )
 from patterns.chart_scoring import (
     score_chart_pattern, PatternContext, RiskTier, get_risk_tier,

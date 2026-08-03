@@ -13,10 +13,10 @@ import logging
 import pandas as pd
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
 from patterns.pattern import MarketPattern
 from patterns.double_top import _pattern_buffer
+
+logger = logging.getLogger(__name__)
 
 
 def _fit_slope(values: np.ndarray) -> float:

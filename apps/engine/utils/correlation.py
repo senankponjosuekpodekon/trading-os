@@ -49,7 +49,7 @@ def with_correlation_id(corr_id: Optional[str] = None):
     def decorator(func):
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
-            cid = set_correlation_id(corr_id)
+            set_correlation_id(corr_id)
             try:
                 return await func(*args, **kwargs)
             finally:
@@ -57,7 +57,7 @@ def with_correlation_id(corr_id: Optional[str] = None):
 
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
-            cid = set_correlation_id(corr_id)
+            set_correlation_id(corr_id)
             try:
                 return func(*args, **kwargs)
             finally:

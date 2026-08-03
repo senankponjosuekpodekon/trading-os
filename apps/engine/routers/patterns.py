@@ -193,7 +193,7 @@ def detect_three_white_soldiers(open_: pd.Series, high: pd.Series, low: pd.Serie
         o, c = float(open_.iloc[i]), float(close.iloc[i])
         if c <= o:
             return None
-        h, l = float(high.iloc[i]), float(low.iloc[i])
+        h = float(high.iloc[i])
         upper_wick = h - max(o, c)
         body = abs(c - o)
         if body > 0 and upper_wick > body * 0.5:
@@ -217,7 +217,7 @@ def detect_three_black_crows(open_: pd.Series, high: pd.Series, low: pd.Series, 
         o, c = float(open_.iloc[i]), float(close.iloc[i])
         if c >= o:
             return None
-        h, l = float(high.iloc[i]), float(low.iloc[i])
+        l = float(low.iloc[i])
         lower_wick = min(o, c) - l
         body = abs(c - o)
         if body > 0 and lower_wick > body * 0.5:

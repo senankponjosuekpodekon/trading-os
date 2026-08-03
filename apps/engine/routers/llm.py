@@ -619,10 +619,6 @@ async def chat(req: ChatRequest):
     system = _build_chat_system_prompt(req)
     messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
 
-    # Build a single prompt from messages for the fallback chain
-    prompt_parts = [f"[{m['role']}] {m['content']}" for m in messages]
-    combined_prompt = "\n\n".join(prompt_parts)
-
     try:
         from openai import AsyncOpenAI
 
@@ -652,7 +648,7 @@ async def chat(req: ChatRequest):
                 )
                 reply = response.choices[0].message.content.strip()
                 return {"reply": reply, "model": OPENAI_MODEL, "provider": "openai", "language": req.language}
-            except Exception as e:
+            except Exception:
                 pass
 
         reply = _mock_chat_response(req.message)

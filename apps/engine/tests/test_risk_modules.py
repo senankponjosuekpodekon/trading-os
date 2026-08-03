@@ -3,19 +3,18 @@ Tests for risk management modules.
 """
 import pytest
 import numpy as np
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from risk.position_sizer import PositionSizer, SizingConfig
-from risk.kill_switch import KillSwitch, KillSwitchConfig, KillSwitchState
-from risk.correlation_manager import CorrelationManager, CorrelationConfig
-from risk.drawdown_manager import DrawdownManager, DrawdownConfig
+from risk.position_sizer import PositionSizer
+from risk.kill_switch import KillSwitch, KillSwitchState
+from risk.correlation_manager import CorrelationManager
+from risk.drawdown_manager import DrawdownManager
 from risk.cooldown import CooldownManager, CooldownConfig
-from risk.regime_filter import RegimeFilter, RegimeFilterConfig
-from risk.performance_monitor import PerformanceMonitor, PerformanceConfig
+from risk.regime_filter import RegimeFilter
+from risk.performance_monitor import PerformanceMonitor
 from risk.tail_risk import TailRiskManager, TailRiskConfig
 from risk.discipline_controller import DisciplineController, TradeDecision
-from risk.trailing_stop import TrailingStop, TrailingConfig, TrailingMode
+from risk.trailing_stop import TrailingStop, TrailingMode
 
 
 class TestPositionSizer:

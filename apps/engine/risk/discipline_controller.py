@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Optional
 from enum import Enum
 
-from risk.position_sizer import PositionSizer, SizingConfig, SizingResult
+from risk.position_sizer import PositionSizer, SizingConfig
 from risk.kill_switch import KillSwitch, KillSwitchConfig, KillSwitchState
 from risk.correlation_manager import CorrelationManager, CorrelationConfig
 from risk.drawdown_manager import DrawdownManager, DrawdownConfig

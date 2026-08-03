@@ -47,7 +47,7 @@ from utils.metrics import inc, observe
 from utils.session import get_session_info
 from risk.engine import get_risk_engine
 from risk.discipline_controller import TradeDecision
-from utils.correlation import set_correlation_id, get_correlation_id, clear_correlation_id
+from utils.correlation import set_correlation_id, clear_correlation_id
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=8)

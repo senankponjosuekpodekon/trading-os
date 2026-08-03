@@ -10,12 +10,11 @@ Tolerance is configurable (default ±2%).
 from __future__ import annotations
 
 import logging
-import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Optional, List
 
-from patterns.swings import zigzag_with_highs_lows, extract_pivots, Pivot
+from patterns.swings import zigzag_with_highs_lows, extract_pivots
 from patterns.targets import project_harmonic_target, TargetProjection
 
 logger = logging.getLogger(__name__)

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
-import numpy as np
 import pandas as pd
 
 
@@ -115,7 +114,7 @@ class CorrelationManager:
         cluster = []
         max_corr = 0.0
 
-        for open_sym, pos in self._open_positions.items():
+        for open_sym, _pos in self._open_positions.items():
             if open_sym == symbol:
                 # Same symbol — always counts as correlated
                 correlated_open += 1

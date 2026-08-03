@@ -7,7 +7,7 @@ Jour 11 — Risk Engine
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 
 router = APIRouter()
 
@@ -303,7 +303,6 @@ class RiskEvaluateRequest(BaseModel):
 def risk_evaluate(req: RiskEvaluateRequest):
     """Evaluate a trade through the DisciplineController."""
     from risk.engine import get_risk_engine
-    from risk.discipline_controller import TradeDecision
     try:
         engine = get_risk_engine()
         assessment = engine.evaluate(
