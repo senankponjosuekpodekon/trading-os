@@ -82,7 +82,7 @@ describe('api client', () => {
 
       const result = await rejected(err);
 
-      expect(postSpy).toHaveBeenCalledWith(expect.stringContaining('/auth/refresh'), { refresh_token: 'refresh-1' });
+      expect(postSpy).toHaveBeenCalledWith(expect.stringContaining('/auth/refresh'), { refresh_token: 'refresh-1' }, { withCredentials: true });
       expect(localStorage.getItem('trading_os_token')).toBe('new-token');
       expect(localStorage.getItem('trading_os_refresh_token')).toBe('new-refresh');
       expect(originalConfig._retry).toBe(true);

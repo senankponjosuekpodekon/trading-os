@@ -4,9 +4,9 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { useNotifications } from '@/hooks/useNotifications';
-import axios from 'axios';
 import SyntheticPage from '../page';
 import { createTestQueryClient } from '@/lib/test-utils';
+import { api } from '@/lib/api';
 
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
@@ -27,7 +27,13 @@ jest.mock('@/components/layout/AppLayout', () => ({
   ),
 }));
 
-jest.mock('axios');
+jest.mock('@/lib/api', () => ({
+  api: {
+    get: jest.fn(),
+    interceptors: { request: { handlers: [] }, response: { handlers: [] } },
+    defaults: { baseURL: 'http://localhost:3001/api', headers: {} },
+  },
+}));
 
 function Wrapper({ children }: { children: React.ReactNode }) {
   return (
@@ -51,7 +57,7 @@ describe('SyntheticPage', () => {
   });
 
   it('renders synthetic indices cards', async () => {
-    (axios.get as jest.Mock).mockResolvedValue({
+    (api.get as jest.Mock).mockResolvedValue({
       data: {
         symbol: 'R_10',
         category: 'volatility',

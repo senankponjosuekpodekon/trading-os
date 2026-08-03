@@ -34,10 +34,23 @@ class MockEventSource {
 }
 
 describe('useNotifications', () => {
+  const mockFetch = jest.fn();
+
   beforeEach(() => {
     jest.useFakeTimers();
     MockEventSource.instances = [];
     (global as any).EventSource = MockEventSource;
+    (global as any).fetch = mockFetch;
+    mockFetch.mockImplementation(async () => {
+      // Extract token from Authorization header to generate unique sseToken
+      const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
+      const authHeader = lastCall?.[1]?.headers?.Authorization ?? '';
+      const token = String(authHeader).replace('Bearer ', '') || 'unknown';
+      return {
+        ok: true,
+        json: async () => ({ sseToken: `sse-${token}` }),
+      };
+    });
   });
 
   afterEach(() => {
@@ -52,18 +65,26 @@ describe('useNotifications', () => {
     expect(MockEventSource.instances).toHaveLength(0);
   });
 
-  it('opens an EventSource connection with the token in the URL once authenticated', () => {
+  it('opens an EventSource connection with the token in the URL once authenticated', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
 
-    renderHook(() => useNotifications());
+    await act(async () => {
+      renderHook(() => useNotifications());
+      await Promise.resolve();
+    });
 
     expect(MockEventSource.instances).toHaveLength(1);
-    expect(MockEventSource.instances[0].url).toContain('/notifications/stream?token=tok-1');
+    expect(MockEventSource.instances[0].url).toContain('/notifications/stream?sse_token=sse-tok-1');
   });
 
-  it('adds an incoming default-message notification and increments the unread count', () => {
+  it('adds an incoming default-message notification and increments the unread count', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    const { result } = renderHook(() => useNotifications());
+    let result: any;
+    await act(async () => {
+      const hook = renderHook(() => useNotifications());
+      result = hook.result;
+      await Promise.resolve();
+    });
     const es = MockEventSource.instances[0];
 
     act(() => es.onmessage?.({ data: JSON.stringify({ id: '1', type: 'ALERT', title: 'T', message: 'M', createdAt: 'now' }) }));
@@ -73,9 +94,14 @@ describe('useNotifications', () => {
     expect(result.current.unread).toBe(1);
   });
 
-  it('adds notifications received via the "signal" custom event', () => {
+  it('adds notifications received via the "signal" custom event', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    const { result } = renderHook(() => useNotifications());
+    let result: any;
+    await act(async () => {
+      const hook = renderHook(() => useNotifications());
+      result = hook.result;
+      await Promise.resolve();
+    });
     const es = MockEventSource.instances[0];
 
     act(() => es.emit('signal', { data: JSON.stringify({ id: '2', type: 'SIGNAL', title: 'S', message: 'M', createdAt: 'now' }) }));
@@ -84,9 +110,14 @@ describe('useNotifications', () => {
     expect(result.current.unread).toBe(1);
   });
 
-  it('ignores malformed notification payloads', () => {
+  it('ignores malformed notification payloads', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    const { result } = renderHook(() => useNotifications());
+    let result: any;
+    await act(async () => {
+      const hook = renderHook(() => useNotifications());
+      result = hook.result;
+      await Promise.resolve();
+    });
     const es = MockEventSource.instances[0];
 
     act(() => es.onmessage?.({ data: 'not-json' }));
@@ -95,9 +126,14 @@ describe('useNotifications', () => {
     expect(result.current.unread).toBe(0);
   });
 
-  it('caps stored notifications at 50', () => {
+  it('caps stored notifications at 50', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    const { result } = renderHook(() => useNotifications());
+    let result: any;
+    await act(async () => {
+      const hook = renderHook(() => useNotifications());
+      result = hook.result;
+      await Promise.resolve();
+    });
     const es = MockEventSource.instances[0];
 
     act(() => {
@@ -110,9 +146,14 @@ describe('useNotifications', () => {
     expect(result.current.unread).toBe(60);
   });
 
-  it('markAllRead marks every notification as read and resets unread to 0', () => {
+  it('markAllRead marks every notification as read and resets unread to 0', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    const { result } = renderHook(() => useNotifications());
+    let result: any;
+    await act(async () => {
+      const hook = renderHook(() => useNotifications());
+      result = hook.result;
+      await Promise.resolve();
+    });
     const es = MockEventSource.instances[0];
 
     act(() => es.onmessage?.({ data: JSON.stringify({ id: '1', type: 'SYSTEM', title: 'T', message: 'M', createdAt: 'now' }) }));
@@ -121,12 +162,15 @@ describe('useNotifications', () => {
     act(() => result.current.markAllRead());
 
     expect(result.current.unread).toBe(0);
-    expect(result.current.notifications.every((n) => n.read)).toBe(true);
+    expect(result.current.notifications.every((n: any) => n.read)).toBe(true);
   });
 
-  it('reconnects with backoff after a connection error', () => {
+  it('reconnects with backoff after a connection error', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    renderHook(() => useNotifications());
+    await act(async () => {
+      renderHook(() => useNotifications());
+      await Promise.resolve();
+    });
     const es1 = MockEventSource.instances[0];
 
     act(() => es1.onerror?.());
@@ -134,31 +178,47 @@ describe('useNotifications', () => {
     expect(MockEventSource.instances).toHaveLength(1);
 
     // La première reconnexion applique déjà le backoff x1.5 (3000 -> 4500ms).
-    act(() => jest.advanceTimersByTime(4500));
+    await act(async () => {
+      jest.advanceTimersByTime(4500);
+      await Promise.resolve();
+    });
     expect(MockEventSource.instances).toHaveLength(2);
   });
 
-  it('closes the connection and stops retrying on unmount', () => {
+  it('closes the connection and stops retrying on unmount', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    const { unmount } = renderHook(() => useNotifications());
+    let unmount: () => void;
+    await act(async () => {
+      const hook = renderHook(() => useNotifications());
+      unmount = hook.unmount;
+      await Promise.resolve();
+    });
     const es1 = MockEventSource.instances[0];
 
-    unmount();
+    unmount!();
     expect(es1.closeCalls).toBe(1);
 
     act(() => jest.advanceTimersByTime(60_000));
     expect(MockEventSource.instances).toHaveLength(1);
   });
 
-  it('re-opens a new connection when the token changes', () => {
+  it('re-opens a new connection when the token changes', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
-    const { rerender } = renderHook(() => useNotifications());
+    let rerender: () => void;
+    await act(async () => {
+      const hook = renderHook(() => useNotifications());
+      rerender = hook.rerender;
+      await Promise.resolve();
+    });
     expect(MockEventSource.instances).toHaveLength(1);
 
     (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-2');
-    rerender();
+    await act(async () => {
+      rerender!();
+      await Promise.resolve();
+    });
 
     expect(MockEventSource.instances).toHaveLength(2);
-    expect(MockEventSource.instances[1].url).toContain('token=tok-2');
+    expect(MockEventSource.instances[1].url).toContain('sse_token=sse-tok-2');
   });
 });
