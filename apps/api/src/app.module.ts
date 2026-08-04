@@ -35,6 +35,7 @@ import { PhaseCModule } from './phase-c/phase-c.module';
 import { ExpectedMoveModule } from './expected-move/expected-move.module';
 import { SystemHealthModule } from './system-health/system-health.module';
 import { EngineProxyModule } from './engine-proxy/engine-proxy.module';
+import { PricesProxyModule } from './prices-proxy/prices-proxy.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { EngineProxyModule } from './engine-proxy/engine-proxy.module';
     ExpectedMoveModule,
     SystemHealthModule,
     EngineProxyModule,
+    PricesProxyModule,
     SecurityModule,
   ],
   controllers: [AppController],

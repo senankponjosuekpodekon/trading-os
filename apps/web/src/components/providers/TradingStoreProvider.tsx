@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useTradingStore } from '@/store/trading.store';
 import { useToast } from '@/hooks/useToast';
 
-const ENGINE_WS = process.env.NEXT_PUBLIC_ENGINE_WS_URL || 'ws://localhost:8000';
+const API_WS = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
 
 /**
  * Composant racine à placer UNE SEULE FOIS dans le layout.
@@ -31,7 +31,7 @@ export function TradingStoreProvider({ children }: { children: React.ReactNode }
     function connect() {
       if (stopped) return;
       try {
-        const ws = new WebSocket(`${ENGINE_WS}/ws/prices`);
+        const ws = new WebSocket(`${API_WS}/ws/prices`);
         wsRef.current = ws;
         ws.onopen  = () => {
           setWsConnected(true);
@@ -54,7 +54,7 @@ export function TradingStoreProvider({ children }: { children: React.ReactNode }
         ws.onerror   = () => {
           if (!wsWarnedRef.current) {
             wsWarnedRef.current = true;
-            toast('Impossible de joindre le moteur. Vérifiez que l’engine tourne et que NEXT_PUBLIC_ENGINE_WS_URL est correct.', {
+            toast('Impossible de joindre le serveur temps réel. Vérifiez que l’API tourne et que NEXT_PUBLIC_WS_URL est correct.', {
               title: 'WebSocket erreur',
               type: 'error',
             });

@@ -6,6 +6,7 @@ import { auditEnv } from './common/security/env-audit';
 import { randomUUID } from 'crypto';
 import * as Sentry from '@sentry/node';
 import * as cookieParser from 'cookie-parser';
+import { PricesProxyService } from './prices-proxy/prices-proxy.service';
 
 async function bootstrap() {
   const sentryDsn = process.env.SENTRY_DSN_API;
@@ -70,6 +71,10 @@ async function bootstrap() {
 
   const port = process.env.API_PORT || 3001;
   await app.listen(port);
+
+  // ── Proxy WS /ws/prices + /ws/signals vers l'engine (interne, non exposé) ──
+  app.get(PricesProxyService).attach(app.getHttpServer());
+
   console.log(`Trading OS API running on port ${port} [${process.env.NODE_ENV ?? 'development'}]`);
 }
 

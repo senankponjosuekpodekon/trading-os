@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-const ENGINE_WS = process.env.NEXT_PUBLIC_ENGINE_WS_URL || 'ws://localhost:8000';
+const API_WS = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
 
 export type LivePrices = Record<string, number>;
 
@@ -19,7 +19,7 @@ export function useLivePrices() {
     function connect() {
       if (stopped) return;
       try {
-        ws = new WebSocket(`${ENGINE_WS}/ws/prices`);
+        ws = new WebSocket(`${API_WS}/ws/prices`);
         ws.onopen  = () => { setConnected(true); retryDelay = 3000; };
         ws.onclose = () => {
           setConnected(false);
