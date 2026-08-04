@@ -30,7 +30,7 @@ class ChannelProxy {
   ) {}
 
   attach(httpServer: HttpServer) {
-    this.wss = new WebSocketServer({ server: httpServer, path: `/ws/${this.channel}` });
+    this.wss = new WebSocketServer({ server: httpServer, path: `/ws/${this.channel}`, perMessageDeflate: false });
     this.wss.on('connection', (client, req) => {
       const origin = req.headers.origin;
       if (origin && this.allowedOrigins.length > 0 && !this.allowedOrigins.includes(origin)) {
@@ -48,7 +48,7 @@ class ChannelProxy {
   private connectUpstream() {
     if (this.stopped) return;
     try {
-      this.upstream = new WsClient(this.upstreamUrl);
+      this.upstream = new WsClient(this.upstreamUrl, { perMessageDeflate: false });
       this.upstream.on('open', () => {
         this.logger.log(`prices_proxy_upstream_connected channel=${this.channel}`);
         this.reconnectDelay = 2000;
