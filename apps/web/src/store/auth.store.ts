@@ -17,6 +17,8 @@ interface AuthState {
 function storeUser(data: { access_token: string; refresh_token: string; user: User }) {
   if (typeof window === 'undefined') return;
   localStorage.setItem('trading_os_user', JSON.stringify(data.user));
+  localStorage.setItem('trading_os_token', data.access_token);
+  localStorage.setItem('trading_os_refresh_token', data.refresh_token);
 }
 
 function clearStorage() {
@@ -35,9 +37,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   init: () => {
     if (typeof window === 'undefined') return;
     const userRaw = localStorage.getItem('trading_os_user');
+    const token = localStorage.getItem('trading_os_token');
+    const refreshToken = localStorage.getItem('trading_os_refresh_token');
     if (userRaw) {
       try {
-        set({ user: JSON.parse(userRaw) });
+        set({ user: JSON.parse(userRaw), token, refreshToken });
       } catch {}
     }
   },
