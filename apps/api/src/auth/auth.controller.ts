@@ -25,18 +25,20 @@ export class AuthController {
   ) {}
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
-    const isProd = this.config.get<string>('NODE_ENV') === 'production';
+    const cookieSecure = this.config.get<string>('COOKIE_SECURE');
+    const secure = cookieSecure ? cookieSecure === '1' : this.config.get<string>('NODE_ENV') === 'production';
+    const sameSite = secure ? 'none' : 'lax';
     res.cookie('access_token', accessToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
+      secure,
+      sameSite,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
+      secure,
+      sameSite,
       maxAge: 30 * 24 * 60 * 60 * 1000,
       path: '/',
     });
