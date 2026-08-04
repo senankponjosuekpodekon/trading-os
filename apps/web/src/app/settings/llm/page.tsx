@@ -87,11 +87,11 @@ export default function LlmConfigPage() {
             <p className="text-blue-300 font-medium">Comment ça marche ?</p>
             <p className="text-gray-400">
               Le moteur lit cette configuration toutes les 15 secondes. Si un provider est désactivé,
-              il n'est jamais contacté — aucune charge CPU/RAM correspondante sur le VPS.
+              il n&rsquo;est jamais contacté — aucune charge CPU/RAM correspondante sur le VPS.
             </p>
             <p className="text-gray-400">
               Le provider <strong className="text-gray-300">préféré</strong> est essayé en premier.
-              En cas d'échec, l'autre provider (s'il est activé) est utilisé comme fallback.
+              En cas d&rsquo;échec, l&rsquo;autre provider (s&rsquo;il est activé) est utilisé comme fallback.
             </p>
           </div>
         </div>
@@ -178,7 +178,7 @@ export default function LlmConfigPage() {
               <h3 className="text-white font-semibold">Provider préféré</h3>
             </div>
             <p className="text-xs text-gray-500">
-              Le provider préféré est essayé en premier. L'autre sert de fallback en cas d'échec.
+              Le provider préféré est essayé en premier. L&rsquo;autre sert de fallback en cas d&rsquo;échec.
             </p>
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -190,7 +190,7 @@ export default function LlmConfigPage() {
                     : 'bg-gray-800 border border-gray-700 text-gray-400 hover:text-white'
                 }`}
               >
-                <Cpu className="w-4 h-4" />Ollama d'abord
+                <Cpu className="w-4 h-4" />Ollama d&rsquo;abord
               </button>
               <button
                 onClick={() => setForm(f => ({ ...f, preferred: 'openai' }))}
@@ -201,7 +201,7 @@ export default function LlmConfigPage() {
                     : 'bg-gray-800 border border-gray-700 text-gray-400 hover:text-white'
                 }`}
               >
-                <Sparkles className="w-4 h-4" />OpenAI d'abord
+                <Sparkles className="w-4 h-4" />OpenAI d&rsquo;abord
               </button>
             </div>
           </div>

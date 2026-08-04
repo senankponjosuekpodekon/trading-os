@@ -183,7 +183,7 @@ export default function DistributionSettingsPage() {
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono focus:outline-none focus:border-violet-500"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Créez un webhook dans votre serveur Discord: Paramètres → Intégrations → Webhooks → Nouveau webhook → Copier l'URL.
+                Créez un webhook dans votre serveur Discord: Paramètres → Intégrations → Webhooks → Nouveau webhook → Copier l&rsquo;URL.
               </p>
             </div>
             <button

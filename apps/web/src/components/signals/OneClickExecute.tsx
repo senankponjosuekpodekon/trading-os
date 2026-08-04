@@ -153,7 +153,7 @@ export function OneClickExecute({ signal }: OneClickExecuteProps) {
                 </div>
 
                 <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span>⚠ Ordre réel envoyé à l'exchange. Vérifiez la quantité avant de confirmer.</span>
+                  <span>⚠ Ordre réel envoyé à l&rsquo;exchange. Vérifiez la quantité avant de confirmer.</span>
                 </div>
 
                 <div className="flex justify-end gap-2">
@@ -171,7 +171,7 @@ export function OneClickExecute({ signal }: OneClickExecuteProps) {
                     {execute.isPending ? (
                       <><RefreshCw className="w-4 h-4 animate-spin" />Exécution...</>
                     ) : (
-                      <><Zap className="w-4 h-4" />Confirmer l'ordre</>
+                      <><Zap className="w-4 h-4" />Confirmer l&rsquo;ordre</>
                     )}
                   </button>
                 </div>

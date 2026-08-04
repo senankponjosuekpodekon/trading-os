@@ -90,7 +90,7 @@ export default function ExchangeConnectionsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-white font-semibold text-lg">Connexions Exchange</h2>
-            <p className="text-gray-500 text-sm mt-0.5">Gérez vos clés API pour l'exécution d'ordres automatiques</p>
+            <p className="text-gray-500 text-sm mt-0.5">Gérez vos clés API pour l&rsquo;exécution d&rsquo;ordres automatiques</p>
           </div>
           <button
             onClick={() => setShowForm(v => !v)}
@@ -107,7 +107,7 @@ export default function ExchangeConnectionsPage() {
           <div className="text-sm">
             <p className="text-emerald-300 font-medium">Vos clés sont chiffrées (AES-256-GCM)</p>
             <p className="text-gray-400 mt-1">
-              Les clés API sont stockées chiffrées en base de données. N'utilisez que des clés <strong>sans droit de retrait</strong>.
+              Les clés API sont stockées chiffrées en base de données. N&rsquo;utilisez que des clés <strong>sans droit de retrait</strong>.
               Les permissions de retrait sont automatiquement bloquées.
             </p>
           </div>
@@ -229,7 +229,7 @@ export default function ExchangeConnectionsPage() {
               <div className="flex flex-col items-center justify-center py-16 text-gray-600 bg-gray-900 border border-gray-800 rounded-xl">
                 <Key className="w-10 h-10 mb-3" />
                 <p className="font-medium">Aucune connexion</p>
-                <p className="text-sm mt-1">Connectez votre premier exchange pour activer l'exécution d'ordres</p>
+                <p className="text-sm mt-1">Connectez votre premier exchange pour activer l&rsquo;exécution d&rsquo;ordres</p>
               </div>
             )}
             {connections?.map(c => {

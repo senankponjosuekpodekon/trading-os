@@ -270,7 +270,7 @@ export default function SignalChannelsPage() {
                         disabled={subscribe.isPending}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-400 text-white font-medium rounded-lg transition-colors"
                       >
-                        <Bell className="w-3.5 h-3.5" />S'abonner
+                        <Bell className="w-3.5 h-3.5" />S&rsquo;abonner
                       </button>
                     )}
                   </div>
