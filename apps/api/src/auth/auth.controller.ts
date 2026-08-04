@@ -32,12 +32,12 @@ export class AuthController {
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
     const cookieSecure = this.config.get<string>('COOKIE_SECURE');
     const secure = cookieSecure ? cookieSecure === '1' : this.config.get<string>('NODE_ENV') === 'production';
-    const sameSite = secure ? 'none' : 'lax';
+    const sameSite = secure ? 'strict' : 'lax';
     res.cookie('access_token', accessToken, {
       httpOnly: true,
       secure,
       sameSite,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 15 * 60 * 1000,
       path: '/',
     });
     res.cookie('refresh_token', refreshToken, {
@@ -84,7 +84,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async refresh(@Body() dto: RefreshDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     try {
-      const refreshToken = dto.refresh_token || req.cookies?.['refresh_token'];
+      const refreshToken = req.cookies?.['refresh_token'] || dto.refresh_token;
       if (!refreshToken) throw new UnauthorizedException('No refresh token');
       const data = await this.authService.refresh(refreshToken);
       this.setAuthCookies(res, data.access_token, data.refresh_token);

@@ -2,17 +2,81 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
 import os
+import time
+import hashlib
+import json
 
 from config import settings
 
 router = APIRouter()
 
-# ── Provider config ──────────────────────────────────────────
+DATABASE_URL = settings.database_url
+
+# ── Provider config (défauts .env — surchageables à chaud par l'admin,
+#    voir _get_llm_config ci-dessous) ──────────────────────────────
 LLM_PROVIDER    = (settings.llm_provider or os.getenv("LLM_PROVIDER", "openai")).lower()   # "openai" | "ollama"
 OPENAI_API_KEY  = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL    = settings.openai_model or os.getenv("OPENAI_MODEL", "gpt-4o")
 OLLAMA_BASE_URL = settings.ollama_base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = settings.ollama_model or os.getenv("OLLAMA_MODEL", "llama3.2")
+
+import asyncio
+
+# ── Pool DB (lecture system_settings + cache llm_cache) ─────────────
+_db_pool = None
+_db_pool_lock = asyncio.Lock()
+
+
+async def _get_pool():
+    global _db_pool
+    if _db_pool is None:
+        async with _db_pool_lock:
+            if _db_pool is None:
+                import asyncpg
+                url = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
+                _db_pool = await asyncpg.create_pool(url, min_size=1, max_size=5)
+    return _db_pool
+
+
+async def close_pool():
+    global _db_pool
+    if _db_pool is not None:
+        await _db_pool.close()
+        _db_pool = None
+
+
+# ── Toggle admin (system_settings, clé "llm_config") ────────────────
+# Écrit par l'admin via l'API NestJS (SystemSettingsController), lu ici
+# avec un petit cache mémoire (15s) pour ne pas taper Postgres à chaque
+# requête LLM. Si désactivé, on ne tente même pas la connexion au
+# provider correspondant — évite toute charge CPU/RAM inutile (Ollama
+# tourne à ~190% CPU / 3GB RAM par requête sur ce VPS).
+_llm_config_cache: dict = {"value": None, "ts": 0.0}
+_LLM_CONFIG_TTL_S = 15.0
+
+
+async def _get_llm_config() -> dict:
+    now = time.monotonic()
+    if _llm_config_cache["value"] is not None and (now - _llm_config_cache["ts"]) < _LLM_CONFIG_TTL_S:
+        return _llm_config_cache["value"]
+
+    config = {"ollamaEnabled": True, "openaiEnabled": True, "preferred": "ollama"}
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT value FROM system_settings WHERE key = 'llm_config'")
+            if row:
+                stored = row["value"]
+                if isinstance(stored, str):
+                    stored = json.loads(stored)
+                config.update(stored)
+    except Exception:
+        pass  # DB indisponible → défauts (tout activé, Ollama préféré)
+
+    _llm_config_cache["value"] = config
+    _llm_config_cache["ts"]    = now
+    return config
+
 
 # Auto-detect Ollama si OpenAI non configuré et provider = openai
 def _effective_provider() -> str:
@@ -480,11 +544,17 @@ async def _call_llm_with_fallback(
     max_tokens: int = 400,
     messages: list[dict] | None = None,
 ) -> tuple[str, str, str]:
-    """Appelle Ollama en priorité, puis OpenAI, puis le mock.
+    """Appelle Ollama en priorité (ou OpenAI selon préférence admin), puis
+    l'autre provider en fallback, puis le mock.
 
     Point d'entrée unique du fallback LLM — utilisé par /llm/explain,
     /llm/review-position, /llm/weekly-report ET /llm/chat pour éviter la
     duplication de la logique de bascule Ollama→OpenAI→mock.
+
+    Le choix des providers actifs et l'ordre de préférence sont contrôlés
+    par l'admin via system_settings (clé "llm_config", cf. _get_llm_config).
+    Si un provider est désactivé, il n'est jamais contacté — aucune charge
+    CPU/RAM correspondante (important pour Ollama sur ce VPS).
     """
     if messages is None:
         messages = [{"role": "user", "content": prompt or ""}]
@@ -494,36 +564,49 @@ async def _call_llm_with_fallback(
     except Exception as e:
         return _mock_response(prompt or "", error=str(e)), "mock", "mock"
 
-    # 1. Essayer Ollama (local), avec timeout court pour ne pas bloquer
-    if OLLAMA_BASE_URL:
-        try:
-            client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama", timeout=OLLAMA_TIMEOUT_S)
-            response = await client.chat.completions.create(
-                model=OLLAMA_MODEL,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=0.7,
-            )
-            return response.choices[0].message.content.strip(), "ollama", OLLAMA_MODEL
-        except Exception:
-            pass
+    cfg = await _get_llm_config()
+    ollama_enabled = bool(cfg.get("ollamaEnabled", True)) and bool(OLLAMA_BASE_URL)
+    openai_enabled = bool(cfg.get("openaiEnabled", True)) and bool(OPENAI_API_KEY)
+    preferred = cfg.get("preferred", "ollama")
 
-    # 2. Essayer OpenAI si configuré
-    if OPENAI_API_KEY:
+    async def _try_ollama():
+        client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama", timeout=OLLAMA_TIMEOUT_S)
+        response = await client.chat.completions.create(
+            model=OLLAMA_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content.strip(), "ollama", OLLAMA_MODEL
+
+    async def _try_openai():
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=30.0)
+        response = await client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content.strip(), "openai", OPENAI_MODEL
+
+    order = [
+        ("ollama", ollama_enabled, _try_ollama),
+        ("openai", openai_enabled, _try_openai),
+    ]
+    if preferred == "openai":
+        order.reverse()
+
+    last_error: Optional[str] = None
+    for name, enabled, fn in order:
+        if not enabled:
+            continue
         try:
-            client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=30.0)
-            response = await client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=0.7,
-            )
-            return response.choices[0].message.content.strip(), "openai", OPENAI_MODEL
+            return await fn()
         except Exception as e:
-            return _mock_response(prompt or "", error=str(e)), "mock", "mock"
+            last_error = str(e)
+            continue
 
-    # 3. Fallback mock
-    return _mock_response(prompt or ""), "mock", "mock"
+    return _mock_response(prompt or "", error=last_error or ""), "mock", "mock"
 
 
 def _mock_response(prompt: str, error: str = "") -> str:
@@ -541,27 +624,81 @@ def _mock_response(prompt: str, error: str = "") -> str:
         return "Analyse IA indisponible — configurez OPENAI_API_KEY dans votre .env."
 
 
+# ── Cache des réponses (explain/review sur données figées) ──────────
+# Évite de repayer les mêmes tokens quand l'utilisateur reconsulte une
+# explication de signal ou une review de position déjà clôturée — ces
+# données ne changent plus, la réponse LLM peut être réutilisée sans
+# perte de fraîcheur. Jamais utilisé pour le chat ni les positions OPEN.
+
+def _cache_key(endpoint: str, payload: dict) -> str:
+    raw = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(f"{endpoint}:{raw}".encode("utf-8")).hexdigest()
+
+
+async def _cache_get(cache_key: str) -> Optional[dict]:
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT response, provider, model FROM llm_cache WHERE cache_key = $1", cache_key
+            )
+            if row:
+                response = row["response"]
+                if isinstance(response, str):
+                    response = json.loads(response)
+                return {"response": response, "provider": row["provider"], "model": row["model"]}
+    except Exception:
+        pass
+    return None
+
+
+async def _cache_set(cache_key: str, endpoint: str, response: dict, provider: str, model: str) -> None:
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO llm_cache (cache_key, endpoint, response, provider, model)
+                   VALUES ($1, $2, $3::jsonb, $4, $5)
+                   ON CONFLICT (cache_key) DO NOTHING""",
+                cache_key, endpoint, json.dumps(response), provider, model,
+            )
+    except Exception:
+        pass
+
+
 @router.post("/llm/explain")
 async def explain_signal(req: ExplainRequest):
+    cache_key = _cache_key("explain", req.model_dump())
+    cached = await _cache_get(cache_key)
+    if cached:
+        return {**cached["response"], "provider": cached["provider"], "model": cached["model"], "cached": True}
+
     prompt = _build_signal_prompt(req)
     explanation, provider, model = await _call_llm_with_fallback(prompt, max_tokens=350)
-    return {
+    result = {
         "symbol":      req.symbol,
         "signal":      req.signal,
         "confidence":  req.confidence,
         "ai_explanation": explanation,
-        "model":       model,
-        "provider":    provider,
         "language":    req.language,
     }
+    if provider != "mock":
+        await _cache_set(cache_key, "explain", result, provider, model)
+    return {**result, "model": model, "provider": provider, "cached": False}
 
 
 @router.post("/llm/review-position")
 async def review_position(req: ReviewPositionRequest):
+    is_closed = req.status != "OPEN"
+    cache_key = _cache_key("review", req.model_dump()) if is_closed else None
+    if cache_key:
+        cached = await _cache_get(cache_key)
+        if cached:
+            return {**cached["response"], "provider": cached["provider"], "model": cached["model"], "cached": True}
+
     prompt = _build_review_prompt(req)
-    review = await _call_llm_with_fallback(prompt, max_tokens=900)
-    text, provider, model = review
-    return {
+    text, provider, model = await _call_llm_with_fallback(prompt, max_tokens=900)
+    result = {
         "symbol":     req.symbol,
         "direction":  req.direction,
         "status":     req.status,
@@ -569,9 +706,12 @@ async def review_position(req: ReviewPositionRequest):
         "pnl_pct":    req.pnl_pct,
         "candles_analyzed": len(req.candles_before) + len(req.candles_during),
         "ai_review":  text,
-        "model":      model,
-        "provider":   provider,
     }
+
+    if is_closed and provider != "mock":
+        await _cache_set(cache_key, "review", result, provider, model)
+
+    return {**result, "model": model, "provider": provider, "cached": False}
 
 
 @router.post("/llm/weekly-report")

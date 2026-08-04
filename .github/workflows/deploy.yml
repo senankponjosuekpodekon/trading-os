@@ -14,5 +14,6 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
+          ssh-keyscan -H "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
             "cd /root/projects/trading-os && ./scripts/deploy.sh"

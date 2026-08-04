@@ -18,11 +18,11 @@ const API_URL  = `${API_BASE}/api`;
 export function useNotifications() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unread, setUnread]               = useState(0);
-  const token                             = useAuthStore(s => s.token);
+  const user                              = useAuthStore(s => s.user);
   const esRef                             = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!user) return;
 
     let retryDelay = 3000;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -33,7 +33,7 @@ export function useNotifications() {
 
       try {
         const res = await fetch(`${API_URL}/notifications/sse-token`, {
-          headers: { Authorization: `Bearer ${token}` },
+          credentials: 'include',
         });
         if (!res.ok) throw new Error('Failed to get SSE token');
         const { sseToken } = await res.json();
@@ -76,7 +76,7 @@ export function useNotifications() {
       if (retryTimer) clearTimeout(retryTimer);
       esRef.current?.close();
     };
-  }, [token]);
+  }, [user]);
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));

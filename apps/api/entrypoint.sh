@@ -22,16 +22,16 @@ async function main() {
   for (const m of markets) {
     await prisma.market.upsert({ where: { name: m.name }, update: {}, create: m });
   }
-  const crypto = await prisma.market.findUnique({ where: { name: 'Crypto' } });
+  const cryptoMarket = await prisma.market.findUnique({ where: { name: 'Crypto' } });
   const forex  = await prisma.market.findUnique({ where: { name: 'Forex' } });
   const synth  = await prisma.market.findUnique({ where: { name: 'Synthetic' } });
   const commo  = await prisma.market.findUnique({ where: { name: 'Commodities' } });
   const brvm   = await prisma.market.findUnique({ where: { name: 'BRVM' } });
   const assets = [
-    { symbol: 'BTC/USDT',  name: 'Bitcoin',           marketId: crypto.id, baseCurrency: 'USDT' },
-    { symbol: 'ETH/USDT',  name: 'Ethereum',           marketId: crypto.id, baseCurrency: 'USDT' },
-    { symbol: 'SOL/USDT',  name: 'Solana',             marketId: crypto.id, baseCurrency: 'USDT' },
-    { symbol: 'BNB/USDT',  name: 'BNB',                marketId: crypto.id, baseCurrency: 'USDT' },
+    { symbol: 'BTC/USDT',  name: 'Bitcoin',           marketId: cryptoMarket.id, baseCurrency: 'USDT' },
+    { symbol: 'ETH/USDT',  name: 'Ethereum',           marketId: cryptoMarket.id, baseCurrency: 'USDT' },
+    { symbol: 'SOL/USDT',  name: 'Solana',             marketId: cryptoMarket.id, baseCurrency: 'USDT' },
+    { symbol: 'BNB/USDT',  name: 'BNB',                marketId: cryptoMarket.id, baseCurrency: 'USDT' },
     { symbol: 'EUR/USD',   name: 'Euro / US Dollar',   marketId: forex.id,  baseCurrency: 'USD' },
     { symbol: 'GBP/USD',   name: 'Pound / US Dollar',  marketId: forex.id,  baseCurrency: 'USD' },
     { symbol: 'USD/JPY',   name: 'Dollar / Yen',       marketId: forex.id,  baseCurrency: 'JPY' },

@@ -47,7 +47,7 @@ export class AuthService {
       }),
     );
 
-    const tokens = await this.generateTokenPair(user.id, user.email);
+    const tokens = await this.generateTokenPair(user.id, user.email, user.role);
     const { password: _password, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, ...tokens };
   }
@@ -67,7 +67,7 @@ export class AuthService {
       if (!verified) throw new UnauthorizedException('Invalid 2FA token');
     }
 
-    const tokens = await this.generateTokenPair(user.id, user.email);
+    const tokens = await this.generateTokenPair(user.id, user.email, user.role);
     const { password: _password, ...userWithoutPassword } = user;
     // Same reasoning as register(): no request-scoped RLS context exists
     // during login itself, audit_logs is RLS-protected.
@@ -96,7 +96,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid user');
     }
 
-    const tokens = await this.generateTokenPair(user.id, user.email, stored.id);
+    const tokens = await this.generateTokenPair(user.id, user.email, user.role, stored.id);
     return { user: { id: user.id, email: user.email, name: user.name, role: user.role }, ...tokens };
   }
 
@@ -121,8 +121,8 @@ export class AuthService {
     });
   }
 
-  private async generateTokenPair(userId: string, email: string, replaceTokenId?: string) {
-    const accessToken = this.jwt.sign({ sub: userId, email });
+  private async generateTokenPair(userId: string, email: string, role: string, replaceTokenId?: string) {
+    const accessToken = this.jwt.sign({ sub: userId, email, role });
     const rawRefresh = crypto.randomBytes(64).toString('hex');
     const refreshHash = this.hashToken(rawRefresh);
 

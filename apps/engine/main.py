@@ -72,6 +72,10 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        await llm.close_pool()
+    except Exception:
+        pass
+    try:
         from ml.signal_scorer import signal_scorer
         await signal_scorer.close_pool()
     except Exception:

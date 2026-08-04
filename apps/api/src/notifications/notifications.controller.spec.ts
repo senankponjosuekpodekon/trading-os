@@ -3,13 +3,33 @@ import { INestApplication, CanActivate, ExecutionContext } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config';
 import * as request from 'supertest';
 import { NotificationsModule } from './notifications.module';
+import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
+import { AlertService } from './alert.service';
+import { NotificationPreferenceService } from './notification-preference.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PrismaService } from '../prisma/prisma.service';
 
 const fakeGuard: CanActivate = {
   canActivate: (context: ExecutionContext) => {
     context.switchToHttp().getRequest().user = { id: 'user-1' };
     return true;
+  },
+};
+
+const mockPrismaService = {
+  notificationPreference: {
+    findUnique: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockResolvedValue({ id: '1', userId: 'user-1' }),
+    upsert: jest.fn().mockResolvedValue({ id: '1', userId: 'user-1' }),
+  },
+  notification: {
+    create: jest.fn(),
+    findMany: jest.fn(),
+  },
+  priceAlert: {
+    findMany: jest.fn(),
+    update: jest.fn(),
   },
 };
 
@@ -19,7 +39,14 @@ describe('NotificationsController', () => {
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true }), NotificationsModule],
+      imports: [ConfigModule.forRoot({ isGlobal: true })],
+      controllers: [NotificationsController],
+      providers: [
+        NotificationsService,
+        AlertService,
+        NotificationPreferenceService,
+        { provide: PrismaService, useValue: mockPrismaService },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue(fakeGuard)

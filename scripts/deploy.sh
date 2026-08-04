@@ -21,6 +21,9 @@ docker compose -f docker-compose.prod.yml up -d
 echo "==> Running database migrations"
 docker compose -f docker-compose.prod.yml exec -T api npx prisma migrate deploy --schema=./prisma/schema.prisma
 
+echo "==> Running engine migrations (llm_cache)"
+docker compose -f docker-compose.prod.yml exec -T api npx prisma db execute --schema=./prisma/schema.prisma --stdin < apps/engine/scripts/migrations/20260804220000_add_llm_cache_table.sql || echo "[deploy] llm_cache migration skipped (may already exist)"
+
 echo "==> Cleanup"
 docker image prune -f
 

@@ -79,8 +79,8 @@ describe('AppLayout', () => {
     expect(replace).toHaveBeenCalledWith('/auth/login');
   });
 
-  it('does not redirect when a token is present, even without a user yet', () => {
-    localStorage.setItem('trading_os_token', 'tok');
+  it('does not redirect when a user is stored, even without a user object yet', () => {
+    localStorage.setItem('trading_os_user', JSON.stringify({ id: '1' }));
     (useAuthStore as unknown as jest.Mock).mockReturnValue({ user: null, init });
 
     renderLayout();

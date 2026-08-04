@@ -5,6 +5,7 @@ import {
   LayoutDashboard, TrendingUp, Briefcase, BookOpen, Layers,
   Settings, LogOut, Zap, FlaskConical, LineChart, Brain, Globe, Activity, Beaker, MessageSquare,
   ShieldAlert, Trophy, Search, Cpu, Calendar, Database, SlidersHorizontal, DatabaseBackup, BarChart3, Eye,
+  Radio, Key, Send,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { clsx } from 'clsx';
@@ -31,7 +32,10 @@ const nav = [
   { href: '/onchain',    label: 'On-chain',    icon: Database },
   { href: '/observability', label: 'Observability', icon: Eye },
   { href: '/economic-calendar', label: 'Calendrier', icon: Calendar },
+  { href: '/channels',  label: 'Canaux',      icon: Radio },
   { href: '/journal',    label: 'Journal',     icon: BookOpen },
+  { href: '/settings/exchanges', label: 'Exchanges', icon: Key },
+  { href: '/settings/distribution', label: 'Distribution', icon: Send },
   { href: '/settings',   label: 'Paramètres',  icon: Settings },
 ];
 

@@ -81,6 +81,10 @@ model User {
   auditLogs    AuditLog[]
   feedbacks    SignalFeedback[]
   signalUsage  SignalDailyUsage[]
+  exchangeConnections ExchangeConnection[]
+  ownedChannels       SignalChannel[]
+  channelSubscriptions SignalChannelSubscription[]
+  notificationPreference NotificationPreference?
 
   @@map("users")
 }
@@ -318,6 +322,7 @@ enum PositionStatus {
   PARTIAL
   CLOSED
   CANCELLED
+  PENDING
 }
 
 model Position {
@@ -555,4 +560,118 @@ model AuditLog {
   @@index([userId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+// ─── SYSTEM SETTINGS (admin) ─────────────────────────────────
+// Config runtime éditable par un SUPER_ADMIN sans redéploiement.
+// Utilisé notamment pour activer/désactiver les providers LLM
+// (Ollama surcharge le VPS — l'admin doit pouvoir le couper à la volée).
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("system_settings")
+}
+
+// Note : le cache des réponses LLM (llm_cache) est géré directement par
+// l'engine Python via SQL brut (asyncpg), comme rag_cache — pas de modèle
+// Prisma ici pour rester cohérent avec ce pattern déjà en place.
+
+// ─── EXCHANGE CONNECTIONS ────────────────────────────────────
+// Stocke les clés API des utilisateurs pour les exchanges (Binance, etc.).
+// Les clés sont chiffrées avec AES-256-GCM via EncryptionService.
+// Important : on stocke uniquement les clés SANS droit de retrait —
+// le service valide que les permissions sont limitées au trading.
+
+enum ExchangeName {
+  BINANCE
+  BYBIT
+  OKX
+  DERIV
+  BRVM
+  OANDA
+  MT5
+}
+
+model ExchangeConnection {
+  id           String        @id @default(cuid())
+  userId       String        @map("user_id")
+  exchange     ExchangeName
+  label        String        // nom personnalisé donné par l'utilisateur
+  apiKey       String        @map("api_key")    // chiffré AES-256-GCM (enc:...)
+  apiSecret    String        @map("api_secret") // chiffré AES-256-GCM (enc:...)
+  permissions  String[]      @default([])       // ["spot_trading", "futures_trading"]
+  isActive     Boolean       @default(true)     @map("is_active")
+  lastValidAt  DateTime?     @map("last_valid_at")
+  lastError    String?       @map("last_error")
+  createdAt    DateTime      @default(now())    @map("created_at")
+  updatedAt    DateTime      @updatedAt         @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, exchange])
+  @@map("exchange_connections")
+}
+
+// ─── SIGNAL CHANNELS (Copy-Trading / Mentor) ─────────────────
+// Un mentor (TRADER/INVESTOR) crée un canal de signaux.
+// Les abonnés s'inscrivent et reçoivent les signaux du canal automatiquement.
+
+enum ChannelVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+model SignalChannel {
+  id          String             @id @default(cuid())
+  ownerId     String             @map("owner_id")
+  name        String
+  description String?
+  visibility  ChannelVisibility  @default(PUBLIC)
+  isActive    Boolean            @default(true) @map("is_active")
+  subscriberCount Int            @default(0)    @map("subscriber_count")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt      @map("updated_at")
+
+  owner       User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  subscribers SignalChannelSubscription[]
+
+  @@index([ownerId])
+  @@index([visibility, isActive])
+  @@map("signal_channels")
+}
+
+model SignalChannelSubscription {
+  id        String   @id @default(cuid())
+  channelId String   @map("channel_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  channel   SignalChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@map("signal_channel_subscriptions")
+}
+
+model NotificationPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique @map("user_id")
+  telegramChatId  String?  @map("telegram_chat_id")
+  telegramEnabled Boolean  @default(false) @map("telegram_enabled")
+  discordWebhookUrl String? @map("discord_webhook_url")
+  discordEnabled  Boolean  @default(false) @map("discord_enabled")
+  emailEnabled    Boolean  @default(true) @map("email_enabled")
+  minConfidence   Int      @default(60) @map("min_confidence")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
 }

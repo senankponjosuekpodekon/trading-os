@@ -1,8 +1,10 @@
-import { Controller, Get, Query, Sse, UseGuards, Request, MessageEvent, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Query, Sse, UseGuards, Request, MessageEvent, UnauthorizedException } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { NotificationsService } from './notifications.service';
+import { NotificationPreferenceService } from './notification-preference.service';
+import { UpdateNotificationPreferenceDto } from './dto/notification-preference.dto';
 import { Observable } from 'rxjs';
 import * as jwt from 'jsonwebtoken';
 
@@ -10,6 +12,7 @@ import * as jwt from 'jsonwebtoken';
 export class NotificationsController {
   constructor(
     private notificationsService: NotificationsService,
+    private prefService: NotificationPreferenceService,
     private config: ConfigService,
   ) {}
 
@@ -53,5 +56,29 @@ export class NotificationsController {
   @Get()
   getRecent(@Request() req: any) {
     return this.notificationsService.getRecent(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('preferences')
+  getPreferences(@Request() req: any) {
+    return this.prefService.getOrCreate(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('preferences')
+  updatePreferences(@Request() req: any, @Body() dto: UpdateNotificationPreferenceDto) {
+    return this.prefService.update(req.user.id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('preferences/test-telegram')
+  testTelegram(@Request() req: any) {
+    return this.prefService.sendTestTelegram(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('preferences/test-discord')
+  testDiscord(@Request() req: any) {
+    return this.prefService.sendTestDiscord(req.user.id);
   }
 }

@@ -36,6 +36,11 @@ import { ExpectedMoveModule } from './expected-move/expected-move.module';
 import { SystemHealthModule } from './system-health/system-health.module';
 import { EngineProxyModule } from './engine-proxy/engine-proxy.module';
 import { PricesProxyModule } from './prices-proxy/prices-proxy.module';
+import { SystemSettingsModule } from './system-settings/system-settings.module';
+import { ExchangeConnectionsModule } from './exchange-connections/exchange-connections.module';
+import { ExecutionModule } from './execution/execution.module';
+import { SignalChannelsModule } from './signal-channels/signal-channels.module';
+import { SignalDistributionModule } from './signal-distribution/signal-distribution.module';
 
 @Module({
   imports: [
@@ -72,6 +77,11 @@ import { PricesProxyModule } from './prices-proxy/prices-proxy.module';
     SystemHealthModule,
     EngineProxyModule,
     PricesProxyModule,
+    SystemSettingsModule,
+    ExchangeConnectionsModule,
+    ExecutionModule,
+    SignalChannelsModule,
+    SignalDistributionModule,
     SecurityModule,
   ],
   controllers: [AppController],

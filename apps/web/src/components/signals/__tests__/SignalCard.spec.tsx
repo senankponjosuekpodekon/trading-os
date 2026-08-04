@@ -1,7 +1,10 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SignalCard, SignalCardProps } from '../SignalCard';
 import { useModeStore } from '@/store/mode.store';
+import { ToastProvider } from '@/components/ui/ToastProvider';
+import { api } from '@/lib/api';
 
 jest.mock('next/link', () => {
   const MockLink = ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -63,17 +66,29 @@ function buildSignal(): SignalCardProps['signal'] {
   } as any;
 }
 
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <ToastProvider>
+      <QueryClientProvider client={new QueryClient()}>
+        {children}
+      </QueryClientProvider>
+    </ToastProvider>
+  );
+}
+
 function renderCard(props: Partial<SignalCardProps> = {}) {
   const signal = buildSignal();
   const onExplain = jest.fn();
   return {
     ...render(
-      <SignalCard
-        signal={signal}
-        prices={{ BTCUSDT: 50200 }}
-        onExplain={onExplain}
-        {...props}
-      />,
+      <Wrapper>
+        <SignalCard
+          signal={signal}
+          prices={{ BTCUSDT: 50200 }}
+          onExplain={onExplain}
+          {...props}
+        />
+      </Wrapper>,
     ),
     onExplain,
   };

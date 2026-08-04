@@ -9,48 +9,25 @@ export const api = axios.create({
 });
 
 let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
+let refreshSubscribers: Array<() => void> = [];
 
-function onRefreshed(token: string) {
-  refreshSubscribers.forEach((cb) => cb(token));
+function onRefreshed() {
+  refreshSubscribers.forEach((cb) => cb());
   refreshSubscribers = [];
 }
 
-function addRefreshSubscriber(cb: (token: string) => void) {
+function addRefreshSubscriber(cb: () => void) {
   refreshSubscribers.push(cb);
 }
 
-function getAccessToken() {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('trading_os_token');
-}
-
-function setTokens(accessToken: string, refreshToken: string) {
+function clearUserStorage() {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('trading_os_token', accessToken);
-  localStorage.setItem('trading_os_refresh_token', refreshToken);
-}
-
-function clearTokens() {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem('trading_os_token');
-  localStorage.removeItem('trading_os_refresh_token');
   localStorage.removeItem('trading_os_user');
 }
 
 async function doRefresh() {
-  const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('trading_os_refresh_token') : null;
-  const body = refreshToken ? { refresh_token: refreshToken } : {};
-  const { data } = await axios.post(`${API_URL}/api/auth/refresh`, body, { withCredentials: true });
-  if (data.access_token) setTokens(data.access_token, data.refresh_token);
-  return data.access_token as string;
+  await axios.post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true });
 }
-
-api.interceptors.request.use((config) => {
-  const token = getAccessToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
 
 api.interceptors.response.use(
   (res) => res,
@@ -62,22 +39,20 @@ api.interceptors.response.use(
       if (!isRefreshing) {
         isRefreshing = true;
         try {
-          const newToken = await doRefresh();
+          await doRefresh();
           isRefreshing = false;
-          onRefreshed(newToken);
-          original.headers.Authorization = `Bearer ${newToken}`;
+          onRefreshed();
           return api(original);
         } catch {
           isRefreshing = false;
-          clearTokens();
-          window.location.href = '/auth/login';
+          clearUserStorage();
+          try { window.location.href = '/auth/login'; } catch {}
           return Promise.reject(err);
         }
       }
 
       return new Promise((resolve) => {
-        addRefreshSubscriber((token) => {
-          original.headers.Authorization = `Bearer ${token}`;
+        addRefreshSubscriber(() => {
           resolve(api(original));
         });
       });

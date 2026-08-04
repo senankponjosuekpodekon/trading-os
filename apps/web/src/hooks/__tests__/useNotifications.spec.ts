@@ -42,13 +42,10 @@ describe('useNotifications', () => {
     (global as any).EventSource = MockEventSource;
     (global as any).fetch = mockFetch;
     mockFetch.mockImplementation(async () => {
-      // Extract token from Authorization header to generate unique sseToken
-      const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
-      const authHeader = lastCall?.[1]?.headers?.Authorization ?? '';
-      const token = String(authHeader).replace('Bearer ', '') || 'unknown';
+      // Cookie-based auth: no Authorization header. Return a fixed sseToken.
       return {
         ok: true,
-        json: async () => ({ sseToken: `sse-${token}` }),
+        json: async () => ({ sseToken: 'sse-tok-1' }),
       };
     });
   });
@@ -57,7 +54,7 @@ describe('useNotifications', () => {
     jest.useRealTimers();
   });
 
-  it('does not open an EventSource connection when there is no auth token', () => {
+  it('does not open an EventSource connection when there is no user', () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue(null);
 
     renderHook(() => useNotifications());
@@ -66,7 +63,7 @@ describe('useNotifications', () => {
   });
 
   it('opens an EventSource connection with the token in the URL once authenticated', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
 
     await act(async () => {
       renderHook(() => useNotifications());
@@ -78,7 +75,7 @@ describe('useNotifications', () => {
   });
 
   it('adds an incoming default-message notification and increments the unread count', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let result: any;
     await act(async () => {
       const hook = renderHook(() => useNotifications());
@@ -95,7 +92,7 @@ describe('useNotifications', () => {
   });
 
   it('adds notifications received via the "signal" custom event', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let result: any;
     await act(async () => {
       const hook = renderHook(() => useNotifications());
@@ -111,7 +108,7 @@ describe('useNotifications', () => {
   });
 
   it('ignores malformed notification payloads', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let result: any;
     await act(async () => {
       const hook = renderHook(() => useNotifications());
@@ -127,7 +124,7 @@ describe('useNotifications', () => {
   });
 
   it('caps stored notifications at 50', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let result: any;
     await act(async () => {
       const hook = renderHook(() => useNotifications());
@@ -147,7 +144,7 @@ describe('useNotifications', () => {
   });
 
   it('markAllRead marks every notification as read and resets unread to 0', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let result: any;
     await act(async () => {
       const hook = renderHook(() => useNotifications());
@@ -166,7 +163,7 @@ describe('useNotifications', () => {
   });
 
   it('reconnects with backoff after a connection error', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     await act(async () => {
       renderHook(() => useNotifications());
       await Promise.resolve();
@@ -186,7 +183,7 @@ describe('useNotifications', () => {
   });
 
   it('closes the connection and stops retrying on unmount', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let unmount: () => void;
     await act(async () => {
       const hook = renderHook(() => useNotifications());
@@ -202,8 +199,8 @@ describe('useNotifications', () => {
     expect(MockEventSource.instances).toHaveLength(1);
   });
 
-  it('re-opens a new connection when the token changes', async () => {
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-1');
+  it('re-opens a new connection when the user changes', async () => {
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let rerender: () => void;
     await act(async () => {
       const hook = renderHook(() => useNotifications());
@@ -212,13 +209,13 @@ describe('useNotifications', () => {
     });
     expect(MockEventSource.instances).toHaveLength(1);
 
-    (useAuthStore as unknown as jest.Mock).mockReturnValue('tok-2');
+    (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '2' });
     await act(async () => {
       rerender!();
       await Promise.resolve();
     });
 
     expect(MockEventSource.instances).toHaveLength(2);
-    expect(MockEventSource.instances[1].url).toContain('sse_token=sse-tok-2');
+    expect(MockEventSource.instances[1].url).toContain('sse_token=sse-tok-1');
   });
 });

@@ -18,6 +18,7 @@ import { TimeAgo } from '@/components/ui/TimeAgo';
 import { formatDateTime, getTradingSession } from '@/lib/timezone';
 import { useAuthStore } from '@/store/auth.store';
 import { Clock, Zap, Crosshair } from 'lucide-react';
+import { OneClickExecute } from './OneClickExecute';
 
 const SYMBOL_TO_PRICE_KEY: Record<string, string> = {
   'BTC/USDT': 'BTCUSDT', 'ETH/USDT': 'ETHUSDT', 'SOL/USDT': 'SOLUSDT',
@@ -491,6 +492,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
             >
               <BarChart2 className="w-3 h-3" />Voir chart
             </Link>
+            <OneClickExecute signal={signal} />
             {onExplain && (
               <button
                 onClick={() => onExplain(signal.id)}

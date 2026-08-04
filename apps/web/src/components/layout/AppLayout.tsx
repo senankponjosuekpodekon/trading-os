@@ -84,7 +84,7 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
 
   useEffect(() => {
     if (!ready) return;
-    const stored = typeof window !== 'undefined' ? localStorage.getItem('trading_os_token') : null;
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('trading_os_user') : null;
     if (!stored) router.replace('/auth/login');
   }, [ready, router]);
 
