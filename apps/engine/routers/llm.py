@@ -468,20 +468,39 @@ async def _call_llm(prompt: str, max_tokens: int = 400) -> str:
     return text
 
 
-async def _call_llm_with_fallback(prompt: str, max_tokens: int = 400) -> tuple[str, str, str]:
-    """Appelle Ollama en priorité, puis OpenAI, puis le mock."""
+# Timeout court sur Ollama : si le VPS est sous charge et ne répond pas en
+# temps utile, on bascule vers OpenAI plutôt que d'attendre le timeout par
+# défaut du client (600s), qui provoquait les 500 observés sur /ai/chat et
+# /ai/review (timeout NestJS à 30-120s dépassé avant qu'Ollama ne réponde).
+OLLAMA_TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "20"))
+
+
+async def _call_llm_with_fallback(
+    prompt: str | None = None,
+    max_tokens: int = 400,
+    messages: list[dict] | None = None,
+) -> tuple[str, str, str]:
+    """Appelle Ollama en priorité, puis OpenAI, puis le mock.
+
+    Point d'entrée unique du fallback LLM — utilisé par /llm/explain,
+    /llm/review-position, /llm/weekly-report ET /llm/chat pour éviter la
+    duplication de la logique de bascule Ollama→OpenAI→mock.
+    """
+    if messages is None:
+        messages = [{"role": "user", "content": prompt or ""}]
+
     try:
         from openai import AsyncOpenAI
     except Exception as e:
-        return _mock_response(prompt, error=str(e)), "mock", "mock"
+        return _mock_response(prompt or "", error=str(e)), "mock", "mock"
 
-    # 1. Essayer Ollama (local) si configuré
+    # 1. Essayer Ollama (local), avec timeout court pour ne pas bloquer
     if OLLAMA_BASE_URL:
         try:
-            client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama")
+            client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama", timeout=OLLAMA_TIMEOUT_S)
             response = await client.chat.completions.create(
                 model=OLLAMA_MODEL,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 max_tokens=max_tokens,
                 temperature=0.7,
             )
@@ -492,19 +511,19 @@ async def _call_llm_with_fallback(prompt: str, max_tokens: int = 400) -> tuple[s
     # 2. Essayer OpenAI si configuré
     if OPENAI_API_KEY:
         try:
-            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=30.0)
             response = await client.chat.completions.create(
                 model=OPENAI_MODEL,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 max_tokens=max_tokens,
                 temperature=0.7,
             )
             return response.choices[0].message.content.strip(), "openai", OPENAI_MODEL
         except Exception as e:
-            return _mock_response(prompt, error=str(e)), "mock", "mock"
+            return _mock_response(prompt or "", error=str(e)), "mock", "mock"
 
     # 3. Fallback mock
-    return _mock_response(prompt), "mock", "mock"
+    return _mock_response(prompt or ""), "mock", "mock"
 
 
 def _mock_response(prompt: str, error: str = "") -> str:
@@ -619,44 +638,10 @@ async def chat(req: ChatRequest):
     system = _build_chat_system_prompt(req)
     messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
 
-    try:
-        from openai import AsyncOpenAI
-
-        # Try Ollama first, then OpenAI, then mock — same fallback chain as everywhere
-        if OLLAMA_BASE_URL:
-            try:
-                client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama")
-                response = await client.chat.completions.create(
-                    model=OLLAMA_MODEL,
-                    messages=messages,
-                    max_tokens=500,
-                    temperature=0.7,
-                )
-                reply = response.choices[0].message.content.strip()
-                return {"reply": reply, "model": OLLAMA_MODEL, "provider": "ollama", "language": req.language}
-            except Exception:
-                pass
-
-        if OPENAI_API_KEY:
-            try:
-                client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-                response = await client.chat.completions.create(
-                    model=OPENAI_MODEL,
-                    messages=messages,
-                    max_tokens=500,
-                    temperature=0.7,
-                )
-                reply = response.choices[0].message.content.strip()
-                return {"reply": reply, "model": OPENAI_MODEL, "provider": "openai", "language": req.language}
-            except Exception:
-                pass
-
-        reply = _mock_chat_response(req.message)
-        return {"reply": reply, "model": "mock", "provider": "mock", "language": req.language}
-
-    except Exception as e:
-        reply = _mock_chat_response(req.message, error=str(e))
-        return {"reply": reply, "model": "mock", "provider": "mock", "language": req.language}
+    reply, provider, model = await _call_llm_with_fallback(messages=messages, max_tokens=500)
+    if provider == "mock":
+        reply = _mock_chat_response(req.message, error="ollama_openai_unavailable")
+    return {"reply": reply, "model": model, "provider": provider, "language": req.language}
 
 
 def _mock_chat_response(message: str, error: str = "") -> str:
