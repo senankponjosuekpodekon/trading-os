@@ -8,5 +8,4 @@
 -- ExchangeName is stored as TEXT, so BRVM is automatically supported.
 -- No schema changes needed for BRVM.
 
--- Update existing positions that were created from manual BRVM orders
-UPDATE "positions" SET status = 'PENDING' WHERE status = 'OPEN' AND "metadata"->>'exchange' = 'BRVM';
+-- No data migration needed: the metadata column may not exist yet on all deployments.
