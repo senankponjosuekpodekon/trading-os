@@ -130,7 +130,6 @@ def place_order(req: OrderRequest):
                 detail=f"Order failed: retcode={result.retcode}, comment={result.comment}",
             )
 
-        account = mt5.account_info()
         broker = server or "unknown"
 
         return {
