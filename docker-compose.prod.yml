@@ -21,6 +21,9 @@ services:
       ENGINE_API_KEY: ${ENGINE_API_KEY:?ENGINE_API_KEY is required}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - ollama_net
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     ports:
       - "${ENGINE_PORT:-8000}:8000"
@@ -50,6 +53,9 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - ollama_net
     ports:
       - "${API_PORT_HOST:-3002}:3001"
     depends_on:
@@ -93,3 +99,6 @@ networks:
   default:
     external:
       name: postgres_default
+  ollama_net:
+    external:
+      name: ollama_default
