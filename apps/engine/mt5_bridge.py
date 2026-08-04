@@ -144,7 +144,7 @@ def place_order(req: OrderRequest):
         raise
     except Exception as e:
         logger.error(f"Order error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         disconnect_mt5()
 
@@ -169,7 +169,7 @@ def get_balance(req: BalanceRequest):
         raise
     except Exception as e:
         logger.error(f"Balance error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         disconnect_mt5()
 

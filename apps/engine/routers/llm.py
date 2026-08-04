@@ -5,6 +5,7 @@ import os
 import time
 import hashlib
 import json
+import asyncio
 
 from config import settings
 
@@ -19,8 +20,6 @@ OPENAI_API_KEY  = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL    = settings.openai_model or os.getenv("OPENAI_MODEL", "gpt-4o")
 OLLAMA_BASE_URL = settings.ollama_base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = settings.ollama_model or os.getenv("OLLAMA_MODEL", "llama3.2")
-
-import asyncio
 
 # ── Pool DB (lecture system_settings + cache llm_cache) ─────────────
 _db_pool = None
@@ -597,7 +596,7 @@ async def _call_llm_with_fallback(
         order.reverse()
 
     last_error: Optional[str] = None
-    for name, enabled, fn in order:
+    for _name, enabled, fn in order:
         if not enabled:
             continue
         try:
