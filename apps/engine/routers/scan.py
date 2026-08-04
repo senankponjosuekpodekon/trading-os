@@ -51,6 +51,8 @@ from utils.correlation import set_correlation_id, clear_correlation_id
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=8)
+import atexit
+atexit.register(lambda: _executor.shutdown(wait=False))
 
 # ── Default strategy ──────────────────────────────────────────
 # Used when no strategy is provided (no UserStrategy active, fresh install,

@@ -21,7 +21,7 @@ services:
       ENGINE_API_KEY: ${ENGINE_API_KEY:?ENGINE_API_KEY is required}
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     ports:
       - "${ENGINE_PORT:-8000}:8000"
     healthcheck:

@@ -217,7 +217,7 @@ class SignalScorer:
         max_ml_confidence: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         if self._pool is None:
-            db_url = settings.database_url.replace("postgres://", "postgresql://")
+            db_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
             self._pool = await asyncpg.create_pool(db_url, min_size=1, max_size=2)
 
         clauses = [
@@ -363,7 +363,7 @@ class SignalScorer:
             return
         try:
             if self._pool is None:
-                db_url = settings.database_url.replace("postgres://", "postgresql://")
+                db_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
                 self._pool = await asyncpg.create_pool(db_url, min_size=1, max_size=2)
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(

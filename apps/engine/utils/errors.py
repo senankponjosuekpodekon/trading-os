@@ -72,7 +72,7 @@ def format_error_response(request: Request, exc: Exception) -> JSONResponse:
         if exc.details:
             payload["details"] = exc.details
     else:
-        is_prod = __import__("os").getenv("ENV", "dev").lower() == "production"
+        is_prod = __import__("os").getenv("NODE_ENV", "dev").lower() == "production"
         payload = {
             "statusCode": status.HTTP_500_INTERNAL_SERVER_ERROR,
             "code": ErrorCode.INTERNAL_ERROR,
