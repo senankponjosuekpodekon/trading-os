@@ -31,6 +31,7 @@ export function withRls(prisma: PrismaClient): PrismaClient {
     get(target, prop, receiver) {
       const orig = (target as any)[prop];
       if (typeof prop !== 'string' || typeof orig !== 'object' || orig === null || prop.startsWith('$')) {
+        if (typeof orig === 'function') return orig.bind(target);
         return Reflect.get(target, prop, receiver);
       }
       const userId = rlsContext.getStore();
