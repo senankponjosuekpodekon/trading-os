@@ -1,17 +1,22 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
+import { IsString, IsOptional } from 'class-validator';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ConfigService } from '@nestjs/config';
 
 class RefreshDto {
-  refresh_token: string;
+  @IsString()
+  @IsOptional()
+  refresh_token?: string;
 }
 
 class LogoutDto {
-  refresh_token: string;
+  @IsString()
+  @IsOptional()
+  refresh_token?: string;
 }
 
 @Controller('auth')
