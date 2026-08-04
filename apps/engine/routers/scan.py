@@ -518,6 +518,11 @@ async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) ->
                 .reset_index(drop=True))
         if len(df) < 2:
             return None
+        # Proxy volume: si yfinance retourne volume=0 (forex/commodities),
+        # utiliser le range de bougie (high - low) comme proxy de volatilité intrabar.
+        # Cohérent avec l'approche Deriv (indices synthétiques sans volume).
+        if df["volume"].sum() == 0:
+            df["volume"] = (df["high"] - df["low"]).astype(float)
         _klines_cache[cache_key] = (time.monotonic(), df)
         return df
     except Exception as exc:
@@ -1842,7 +1847,7 @@ async def scan_multi(req: ScanRequest):
                 missing_symbols.append(sym)
 
     async def _fetch(sym: str) -> Optional[pd.DataFrame]:
-        # Essai Binance en premier
+        # Essai Binance en premier (crypto)
         df = await fetch_binance_klines(sym, tf)
         if df is not None:
             provider_failures.pop(sym, None)
@@ -1854,18 +1859,18 @@ async def scan_multi(req: ScanRequest):
             provider_failures.pop(sym, None)
             return df
         provider_failures[sym].append("deriv")
-        # Fallback Twelve Data pour Forex/métaux (si clé configurée)
-        df = await fetch_twelvedata_klines(sym, tf)
-        if df is not None:
-            provider_failures.pop(sym, None)
-            return df
-        provider_failures[sym].append("twelvedata")
-        # Fallback yfinance (gratuit, sans clé API)
+        # Fallback yfinance pour forex/commodities (gratuit, illimité, proxy volume)
         df = await fetch_yfinance_klines(sym, tf)
         if df is not None:
             provider_failures.pop(sym, None)
             return df
         provider_failures[sym].append("yfinance")
+        # Fallback Twelve Data (quota free: 8 req/min, 800/jour) — dernier recours
+        df = await fetch_twelvedata_klines(sym, tf)
+        if df is not None:
+            provider_failures.pop(sym, None)
+            return df
+        provider_failures[sym].append("twelvedata")
         return None
 
     # 1a. Fetch régimes MTF + HTF en parallèle selon la hiérarchie 3-TF
@@ -1892,13 +1897,13 @@ async def scan_multi(req: ScanRequest):
                     )
                 if df_htf is None:
                     df_htf = await asyncio.wait_for(
-                        fetch_twelvedata_klines(sym, interval, limit=100),
-                        timeout=3.0,
+                        fetch_yfinance_klines(sym, interval, limit=100),
+                        timeout=6.0,
                     )
                 if df_htf is None:
                     df_htf = await asyncio.wait_for(
-                        fetch_yfinance_klines(sym, interval, limit=100),
-                        timeout=6.0,
+                        fetch_twelvedata_klines(sym, interval, limit=100),
+                        timeout=3.0,
                     )
                 if df_htf is not None and len(df_htf) >= 50:
                     r = detect_regime(df_htf["high"], df_htf["low"], df_htf["close"])
@@ -2042,9 +2047,9 @@ async def scan_multi(req: ScanRequest):
                 if df_e is None:
                     df_e = await fetch_deriv_klines(sym, etf_mapped, limit=5)
                 if df_e is None:
-                    df_e = await fetch_twelvedata_klines(sym, etf_mapped, limit=5)
-                if df_e is None:
                     df_e = await fetch_yfinance_klines(sym, etf_mapped, limit=5)
+                if df_e is None:
+                    df_e = await fetch_twelvedata_klines(sym, etf_mapped, limit=5)
                 if df_e is not None and len(df_e) > 0:
                     return sym, etf, {"close": float(df_e["close"].iloc[-1])}
             except Exception as exc:
