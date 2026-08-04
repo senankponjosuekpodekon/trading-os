@@ -5,7 +5,7 @@ Permet à l'assistant IA de répondre à des questions sur le trading
 en s'appuyant sur des documents contextuels indexés.
 """
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import hashlib
 
@@ -24,7 +24,7 @@ def _get_embed_model():
     global _embed_model
     if _embed_model is None:
         from fastembed import TextEmbedding
-        _embed_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        _embed_model = TextEmbedding(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     return _embed_model
 
 
@@ -56,12 +56,12 @@ class DocumentIn(BaseModel):
     title:    str
     content:  str
     category: str = "general"
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
 
 class QueryIn(BaseModel):
     question:  str
-    top_k:     int = 5
+    top_k:     int = Field(default=5, ge=1, le=50)
     category:  Optional[str] = None
     generate:  bool = True            # False = recherche seule, True = LLM answer
 
@@ -124,12 +124,12 @@ SEED_DOCUMENTS = [
     {
         "category": "brvm",
         "title": "BRVM — Bourse Régionale des Valeurs Mobilières",
-        "content": "La BRVM est la bourse de l'UEMOA (8 pays d'Afrique de l'Ouest). Les cotations sont en XOF (Franc CFA). Les titres les plus liquides sont ONTBF, SGBF, BOABF, ETIT, SIVC, PALC. La séance se tient du lundi au vendredi. Les signaux momentum basés sur la variation quotidienne et le volume sont efficaces sur ce marché.",
+        "content": "La BRVM est la bourse de l'UEMOA (8 pays d'Afrique de l'Ouest). Les cotations sont en XOF (Franc CFA). Les titres les plus liquides sont ONTBF, SGBF, BOABF, ETIT, SIVC, PALC. La séance se tient du lundi au vendredi. Le système utilise des signaux momentum basés sur la variation quotidienne et le volume pour ce marché, selon la stratégie configurée dans Trading OS.",
     },
     {
         "category": "deriv",
         "title": "Volatility 75 Index (V75) — Stratégie Scalp",
-        "content": "Le V75 (R_75) est un indice synthétique Deriv simulant 75% de volatilité annualisée. Stratégie scalp 1 minute : EMA8/EMA21 crossover + RSI 14 + Bollinger Bands. Signal CALL si EMA8 > EMA21 + RSI < 50 en hausse + prix sur BB Lower. Signal PUT si EMA8 < EMA21 + RSI > 50 en baisse + prix sur BB Upper. Durée recommandée : 1-5 minutes.",
+        "content": "Le V75 (R_75) est un indice synthétique Deriv simulant 75% de volatilité annualisée. La stratégie scalp 1 minute du système utilise EMA8/EMA21 crossover + RSI 14 + Bollinger Bands. Signal CALL si EMA8 > EMA21 + RSI < 50 en hausse + prix sur BB Lower. Signal PUT si EMA8 < EMA21 + RSI > 50 en baisse + prix sur BB Upper. Attention : les indices synthétiques sont très volatils et nécessitent une gestion stricte du risque. Durée recommandée : 1-5 minutes.",
     },
     {
         "category": "trading",
@@ -145,20 +145,19 @@ SEED_DOCUMENTS = [
 
 
 async def _seed_if_empty():
-    """Insère les documents de base si la table est vide."""
+    """Insère les documents de base si la table est vide (idempotent)."""
     pool = await _get_pool()
+    model = _get_embed_model()
     async with pool.acquire() as conn:
-        count = await conn.fetchval("SELECT COUNT(*) FROM rag_documents")
-        if count == 0:
-            model = _get_embed_model()
-            for doc in SEED_DOCUMENTS:
-                emb = list(model.embed([doc["content"]]))[0].tolist()
-                emb_str = "[" + ",".join(str(x) for x in emb) + "]"
-                await conn.execute(
-                    """INSERT INTO rag_documents (category, title, content, embedding)
-                       VALUES ($1, $2, $3, $4::vector)""",
-                    doc["category"], doc["title"], doc["content"], emb_str
-                )
+        for doc in SEED_DOCUMENTS:
+            emb = list(model.embed([doc["content"]]))[0].tolist()
+            emb_str = "[" + ",".join(str(x) for x in emb) + "]"
+            await conn.execute(
+                """INSERT INTO rag_documents (category, title, content, embedding)
+                   VALUES ($1, $2, $3, $4::vector)
+                   ON CONFLICT DO NOTHING""",
+                doc["category"], doc["title"], doc["content"], emb_str
+            )
 
 
 # ── Endpoints ─────────────────────────────────────────────────
@@ -168,7 +167,7 @@ async def rag_health():
         pool = await _get_pool()
         async with pool.acquire() as conn:
             count = await conn.fetchval("SELECT COUNT(*) FROM rag_documents")
-        return {"status": "ok", "documents": count, "embedding_model": "BAAI/bge-small-en-v1.5", "dim": 384}
+        return {"status": "ok", "documents": count, "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2", "dim": 384}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
@@ -262,8 +261,9 @@ async def query_rag(req: QueryIn):
         if not req.generate:
             return {"question": req.question, "documents": docs, "answer": None}
 
-        # 3. Vérifier le cache de réponses
-        q_hash = hashlib.sha256(req.question.encode("utf-8")).hexdigest()
+        # 3. Vérifier le cache de réponses (inclut category+top_k pour cohérence)
+        cache_key = f"{req.question}|{req.category or ''}|{req.top_k}"
+        q_hash = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
         async with pool.acquire() as conn:
             cached = await conn.fetchrow(
                 "SELECT answer, provider, model FROM rag_cache WHERE question_hash = $1", q_hash
