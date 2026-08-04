@@ -297,7 +297,7 @@ export class SignalsService {
           },
         }));
       }
-      const data = await this.engineHttp.post('/scan/multi', payload, { timeout: 30_000 });
+      const data = await this.engineHttp.post('/scan/multi', payload, { timeout: 90_000, maxRetries: 0 });
       const dataGaps = Array.isArray((data as any)?.data_gaps) ? (data as any).data_gaps : [];
       if (dataGaps.length) {
         this.logger.warn('engine_scan_data_gaps', {

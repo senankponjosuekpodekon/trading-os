@@ -46,7 +46,7 @@ export class EngineHttpService {
     );
   }
 
-  async post<T = any>(path: string, body?: any, opts?: { params?: Record<string, any>; timeout?: number }): Promise<T> {
+  async post<T = any>(path: string, body?: any, opts?: { params?: Record<string, any>; timeout?: number; maxRetries?: number }): Promise<T> {
     const timeout = opts?.timeout ?? this.defaultTimeout;
     return retryWithBackoff(
       async () => {
@@ -56,7 +56,7 @@ export class EngineHttpService {
         return data;
       },
       {
-        maxRetries: 2,
+        maxRetries: opts?.maxRetries ?? 2,
         baseDelayMs: 500,
         onRetry: (attempt, err) =>
           this.logger.warn(`Engine POST ${path} retry ${attempt} — ${err.message}`),

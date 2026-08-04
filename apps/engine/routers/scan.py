@@ -51,7 +51,7 @@ from risk.discipline_controller import TradeDecision
 from utils.correlation import set_correlation_id, clear_correlation_id
 
 logger = get_logger(__name__)
-_executor = ThreadPoolExecutor(max_workers=8)
+_executor = ThreadPoolExecutor(max_workers=16)
 atexit.register(lambda: _executor.shutdown(wait=False))
 
 # ── Default strategy ──────────────────────────────────────────
