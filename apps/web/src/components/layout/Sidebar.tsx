@@ -36,6 +36,7 @@ const nav = [
   { href: '/journal',    label: 'Journal',     icon: BookOpen },
   { href: '/settings/exchanges', label: 'Exchanges', icon: Key },
   { href: '/settings/distribution', label: 'Distribution', icon: Send },
+  { href: '/settings/llm', label: 'LLM Config', icon: Cpu },
   { href: '/settings',   label: 'Paramètres',  icon: Settings },
 ];
 
