@@ -7,6 +7,7 @@ import asyncio
 import time
 import pandas as pd
 import pandas_ta as ta
+import atexit
 from concurrent.futures import ThreadPoolExecutor
 
 from routers.price_action import detect_market_structure, price_action_bonus
@@ -51,7 +52,6 @@ from utils.correlation import set_correlation_id, clear_correlation_id
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=8)
-import atexit
 atexit.register(lambda: _executor.shutdown(wait=False))
 
 # ── Default strategy ──────────────────────────────────────────
