@@ -26,7 +26,7 @@ export class NotificationsController {
     const token = jwt.sign(
       { sub: req.user.id, purpose: 'sse' },
       secret,
-      { expiresIn: '60s' },
+      { expiresIn: '5m' },
     );
     return { sseToken: token };
   }

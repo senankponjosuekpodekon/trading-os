@@ -1,5 +1,5 @@
 import { Injectable, MessageEvent } from '@nestjs/common';
-import { Subject, Observable, filter, map } from 'rxjs';
+import { Subject, Observable, filter, map, merge, interval, startWith } from 'rxjs';
 
 export interface Notification {
   id:        string;
@@ -17,7 +17,7 @@ export class NotificationsService {
   private readonly store   = new Map<string, Notification[]>(); // userId -> notifications[]
 
   subscribe(userId: string): Observable<MessageEvent> {
-    return this.subject.asObservable().pipe(
+    const notifications$ = this.subject.asObservable().pipe(
       filter(n => n.userId === userId || n.userId === '*'),
       map(n => ({
         data: n,
@@ -25,6 +25,11 @@ export class NotificationsService {
         id:   n.id,
       }) as MessageEvent),
     );
+    const heartbeat$ = interval(15_000).pipe(
+      startWith(0),
+      map(() => ({ data: { type: 'heartbeat' } }) as MessageEvent),
+    );
+    return merge(notifications$, heartbeat$);
   }
 
   push(notification: Omit<Notification, 'id' | 'createdAt'>) {

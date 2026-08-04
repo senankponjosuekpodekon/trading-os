@@ -45,7 +45,9 @@ export function useNotifications() {
 
         const handleNotif = (data: string) => {
           try {
-            const n: AppNotification = { ...JSON.parse(data), read: false };
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'heartbeat') return;
+            const n: AppNotification = { ...parsed, read: false };
             setNotifications(prev => [n, ...prev].slice(0, 50));
             setUnread(u => u + 1);
           } catch {}
