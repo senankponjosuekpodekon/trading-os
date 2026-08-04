@@ -29,8 +29,16 @@ class ChannelProxy {
     private readonly logger: Logger,
   ) {}
 
-  attach(httpServer: HttpServer) {
-    this.wss = new WebSocketServer({ server: httpServer, path: `/ws/${this.channel}`, perMessageDeflate: false });
+  get channelName(): Channel {
+    return this.channel;
+  }
+
+  /** Crée le WebSocketServer en mode noServer — le routage de l'upgrade HTTP
+   *  est géré par PricesProxyService via un unique listener partagé (voir
+   *  pourquoi : attacher plusieurs WebSocketServer au même http.Server avec
+   *  {server, path} corrompt les frames — bug confirmé par reproduction). */
+  init(): WebSocketServer {
+    this.wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
     this.wss.on('connection', (client, req) => {
       const origin = req.headers.origin;
       if (origin && this.allowedOrigins.length > 0 && !this.allowedOrigins.includes(origin)) {
@@ -43,6 +51,7 @@ class ChannelProxy {
       client.on('error', () => client.terminate());
     });
     this.connectUpstream();
+    return this.wss;
   }
 
   private connectUpstream() {
@@ -112,7 +121,21 @@ export class PricesProxyService implements OnModuleDestroy {
       new ChannelProxy('prices', `${wsBase}/ws/prices`, allowedOrigins, this.logger),
       new ChannelProxy('signals', `${wsBase}/ws/signals`, allowedOrigins, this.logger),
     ];
-    for (const channel of this.channels) channel.attach(httpServer);
+
+    const wssByPath = new Map<string, WebSocketServer>();
+    for (const channel of this.channels) {
+      wssByPath.set(`/ws/${channel.channelName}`, channel.init());
+    }
+
+    httpServer.on('upgrade', (req: any, socket: any, head: Buffer) => {
+      const url = req.url?.split('?')[0];
+      const wss = url ? wssByPath.get(url) : undefined;
+      if (!wss) {
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    });
   }
 
   onModuleDestroy() {
