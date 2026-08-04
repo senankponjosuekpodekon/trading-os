@@ -7,7 +7,6 @@ import { Observable } from 'rxjs';
 import * as jwt from 'jsonwebtoken';
 
 @Controller('notifications')
-@UseGuards(JwtAuthGuard)
 export class NotificationsController {
   constructor(
     private notificationsService: NotificationsService,
@@ -20,6 +19,7 @@ export class NotificationsController {
    * token as a query param for the SSE stream — avoiding long-lived
    * JWT exposure in URLs.
    */
+  @UseGuards(JwtAuthGuard)
   @Get('sse-token')
   getSseToken(@Request() req: any) {
     const secret = this.config.get<string>('JWT_SECRET')!;
@@ -49,6 +49,7 @@ export class NotificationsController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get()
   getRecent(@Request() req: any) {
     return this.notificationsService.getRecent(req.user.id);
