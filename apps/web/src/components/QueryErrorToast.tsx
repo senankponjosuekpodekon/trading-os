@@ -3,6 +3,20 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/useToast';
 
+function isCancelledError(err: any): boolean {
+  if (!err) return false;
+  const code = err?.code ?? '';
+  const msg = (err?.message ?? '').toLowerCase();
+  return (
+    code === 'ERR_CANCELED' ||
+    code === 'CanceledError' ||
+    err?.name === 'CanceledError' ||
+    err?.name === 'AbortError' ||
+    msg.includes('cancel') ||
+    msg.includes('aborted')
+  );
+}
+
 export function QueryErrorToast() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -10,8 +24,8 @@ export function QueryErrorToast() {
   useEffect(() => {
     const unsubscribe = qc.getQueryCache().subscribe((event) => {
       if (event.type === 'updated' && event.action.type === 'error') {
-        const query = event.query;
         const err = event.action.error as any;
+        if (isCancelledError(err)) return;
         const msg = err?.response?.data?.message || err?.message || 'Erreur de chargement';
         toast(msg, { type: 'error', title: 'Erreur' });
       }
@@ -20,6 +34,7 @@ export function QueryErrorToast() {
     const unsubscribeMutations = qc.getMutationCache().subscribe((event) => {
       if (event.type === 'updated' && event.action.type === 'error') {
         const err = event.action.error as any;
+        if (isCancelledError(err)) return;
         const msg = err?.response?.data?.message || err?.message || 'Erreur lors de l\'opération';
         toast(msg, { type: 'error', title: 'Erreur' });
       }

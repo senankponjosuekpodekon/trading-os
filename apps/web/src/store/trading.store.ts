@@ -52,7 +52,8 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       const list: Signal[] = data?.data ?? data ?? [];
       set({ signals: list, signalsLoading: false, signalsFetchedAt: Date.now() });
     } catch (err: any) {
-      set({ signalsLoading: false, signalsError: err?.message ?? 'Erreur fetch signaux' });
+      const isCancelled = err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError' || (err?.message ?? '').toLowerCase().includes('cancel');
+      set({ signalsLoading: false, signalsError: isCancelled ? null : (err?.message ?? 'Erreur fetch signaux') });
     }
   },
 
