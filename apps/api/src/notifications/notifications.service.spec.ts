@@ -1,5 +1,5 @@
 import { firstValueFrom } from 'rxjs';
-import { take, toArray } from 'rxjs/operators';
+import { take, toArray, filter } from 'rxjs/operators';
 import { NotificationsService, Notification } from './notifications.service';
 
 describe('NotificationsService', () => {
@@ -34,7 +34,7 @@ describe('NotificationsService', () => {
     });
 
     it('emits the notification to subscribers', async () => {
-      const promise = firstValueFrom(service.subscribe('u1'));
+      const promise = firstValueFrom(service.subscribe('u1').pipe(filter(e => e.id !== undefined)));
       const pushed = service.push({ userId: 'u1', type: 'SIGNAL', title: 'S', message: 'M' });
 
       const event = await promise;
@@ -47,7 +47,7 @@ describe('NotificationsService', () => {
   describe('subscribe', () => {
     it('filters notifications by userId', async () => {
       const eventsPromise = firstValueFrom(
-        service.subscribe('u1').pipe(take(2), toArray()),
+        service.subscribe('u1').pipe(filter(e => e.id !== undefined), take(2), toArray()),
       );
 
       service.push({ userId: 'u2', type: 'ALERT', title: 'other-user', message: '' });
@@ -60,7 +60,7 @@ describe('NotificationsService', () => {
     });
 
     it('delivers global (*) notifications to every subscriber', async () => {
-      const promise = firstValueFrom(service.subscribe('u1'));
+      const promise = firstValueFrom(service.subscribe('u1').pipe(filter(e => e.id !== undefined)));
 
       service.pushGlobal('SYSTEM', 'Maintenance', 'à 22h');
 
@@ -70,7 +70,7 @@ describe('NotificationsService', () => {
     });
 
     it('emits mlRegime inside SIGNAL SSE payloads', async () => {
-      const promise = firstValueFrom(service.subscribe('u1'));
+      const promise = firstValueFrom(service.subscribe('u1').pipe(filter(e => e.id !== undefined)));
 
       service.pushSignal('u1', { symbol: 'ETH/USDT', signal: 'SELL', confidence: 66, mlRegime: 'LOW' });
 
