@@ -382,7 +382,7 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
         return None
 
 
-@rate_limit(max_concurrent=3, min_delay=0.2)
+@rate_limit(max_concurrent=8, min_delay=0.1)
 async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV depuis l'API Deriv WebSocket — pour les indices synthétiques (V75, Boom/Crash, Jump)."""
     import websockets
@@ -1934,8 +1934,8 @@ async def scan_multi(req: ScanRequest):
         if htf_tf == mtf_tf:
             htf_regimes = dict(mtf_regimes)
 
-    # 1b. Fetch toutes les klines LTF en parallèle — Binance + Twelve Data + yfinance fallback, timeout 7s
-    fetch_coros = [asyncio.wait_for(_fetch(sym), timeout=7.0) for sym in missing_symbols]
+    # 1b. Fetch toutes les klines LTF en parallèle — Binance + Deriv + yfinance + TwelveData fallback, timeout 15s
+    fetch_coros = [asyncio.wait_for(_fetch(sym), timeout=15.0) for sym in missing_symbols]
     dfs_raw = await asyncio.gather(*fetch_coros, return_exceptions=True)
     dfs = [None if isinstance(d, Exception) else d for d in dfs_raw]
 
