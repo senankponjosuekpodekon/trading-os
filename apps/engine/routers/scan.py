@@ -2047,6 +2047,7 @@ def _is_brvm_open() -> bool:
 async def warmup_brvm():
     """Boucle BRVM — actions BRVM, cycle 5 min, uniquement pendant les heures de marché.
     BRVM: Lundi-Vendredi 10:00-14:30 UTC.
+    Les données BRVM proviennent du scraper brvm.org (pas yfinance/Binance).
     """
     logger.info("warmup_brvm_start", symbols=len(BRVM_SYMBOLS), interval=WARMUP_INTERVAL_BRVM)
     await asyncio.sleep(30)
@@ -2057,19 +2058,22 @@ async def warmup_brvm():
             continue
         t0 = time.monotonic()
         strategies = await _load_active_strategies()
-        for timeframe in WARMUP_TIMEFRAMES_BRVM:
-            for sym in BRVM_SYMBOLS:
-                for strat in strategies or [None]:
-                    try:
-                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
-                        if res:
-                            suffix = f":{strat['id']}" if strat else ""
-                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_BRVM)
-                            await _persist_scan(res, timeframe)
-                    except Exception as e:
-                        logger.warning("warmup_brvm_failed", symbol=sym, tf=timeframe, error=str(e))
-                await asyncio.sleep(0.5)
-            logger.info("warmup_brvm_done", timeframe=timeframe, symbols=len(BRVM_SYMBOLS), strategies=len(strategies))
+        try:
+            brvm_results = await analyze_brvm_symbols(BRVM_SYMBOLS)
+        except Exception as e:
+            logger.warning("warmup_brvm_fetch_failed", error=str(e))
+            brvm_results = []
+        for res in brvm_results:
+            sym = res.get("symbol", "")
+            timeframe = res.get("timeframe", "1d")
+            res["asset_type"] = "BRVM"
+            if not res.get("strategy_id"):
+                res["strategy_id"] = None
+                res["strategy_name"] = "BRVM Value Swing"
+            await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_BRVM)
+            await _persist_scan(res, timeframe)
+        logger.info("warmup_brvm_done", symbols=len(BRVM_SYMBOLS), results=len(brvm_results),
+                    strategies=len(strategies), elapsed_ms=round((time.monotonic() - t0) * 1000))
         elapsed = time.monotonic() - t0
         wait = max(0, WARMUP_INTERVAL_BRVM - elapsed)
         await asyncio.sleep(wait)
