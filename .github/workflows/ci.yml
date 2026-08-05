@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci --legacy-peer-deps
+      - run: npm install --legacy-peer-deps
       - run: npx prisma generate --schema=apps/api/prisma/schema.prisma
       - run: npm run lint --workspace=apps/api
       - run: npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma
@@ -55,7 +55,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci --legacy-peer-deps
+      - run: npm install --legacy-peer-deps
       - run: npm run lint --workspace=apps/web
       - run: npx tsc --noEmit
         working-directory: apps/web
