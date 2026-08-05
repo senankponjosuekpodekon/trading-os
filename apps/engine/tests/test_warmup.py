@@ -34,8 +34,12 @@ class TestWarmupFast:
         async def fake_sleep(_seconds):
             raise _StopLoop()
 
+        async def fake_persist_scan(result, timeframe):
+            pass
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
+             patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
              patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", ["BTC/USDT", "ETH/USDT"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_FAST", ["15m", "1h"]), \
              patch.object(scan_module, "WARMUP_TTL_FAST", 90), \
@@ -64,8 +68,12 @@ class TestWarmupFast:
         async def fake_sleep(_seconds):
             raise _StopLoop()
 
+        async def fake_persist_scan(result, timeframe):
+            pass
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
+             patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
              patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", ["BTC/USDT", "ETH/USDT"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_FAST", ["1h"]), \
              patch("asyncio.sleep", side_effect=fake_sleep):
@@ -89,8 +97,12 @@ class TestWarmupFast:
         async def fake_sleep(_seconds):
             raise _StopLoop()
 
+        async def fake_persist_scan(result, timeframe):
+            pass
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
+             patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
              patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", ["BTC/USDT"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_FAST", ["1h"]), \
              patch("asyncio.sleep", side_effect=fake_sleep):
@@ -101,7 +113,7 @@ class TestWarmupFast:
 
 
 class TestWarmupSlow:
-    def _run_one_cycle(self, active_symbols, binance_priority, timeframes, ttl=360):
+    def _run_one_cycle(self, forex_symbols, timeframes, ttl=360):
         calls = []
         sleep_calls = []
 
@@ -111,17 +123,18 @@ class TestWarmupSlow:
         async def fake_set_cached(key, value, ttl=None):
             calls.append((key, ttl))
 
+        async def fake_persist_scan(result, timeframe):
+            pass
+
         async def fake_sleep(seconds):
             sleep_calls.append(seconds)
-            # Laisse passer le délai initial (15s) + les pauses de rate-limit (0.5s)
-            # entre chaque symbole, et ne stoppe qu'au sleep de fin de cycle.
             if seconds not in (15, 0.5):
                 raise _StopLoop()
 
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
-             patch.object(scan_module, "ACTIVE_SYMBOLS", active_symbols), \
-             patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", binance_priority), \
+             patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
+             patch.object(scan_module, "FOREX_COMMODITY_SYMBOLS", forex_symbols), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_SLOW", timeframes), \
              patch.object(scan_module, "WARMUP_TTL_SLOW", ttl), \
              patch("asyncio.sleep", side_effect=fake_sleep):
@@ -130,10 +143,9 @@ class TestWarmupSlow:
 
         return calls, sleep_calls
 
-    def test_only_non_binance_symbols_are_scanned(self):
+    def test_only_forex_commodity_symbols_are_scanned(self):
         calls, _ = self._run_one_cycle(
-            active_symbols=["BTC/USDT", "EUR/USD", "XAU/USD"],
-            binance_priority=["BTC/USDT"],
+            forex_symbols=["EUR/USD", "XAU/USD"],
             timeframes=["1h"],
         )
         keys = {k for k, _ in calls}
@@ -141,8 +153,7 @@ class TestWarmupSlow:
 
     def test_waits_15s_before_starting_and_paces_requests_by_500ms(self):
         _, sleep_calls = self._run_one_cycle(
-            active_symbols=["BTC/USDT", "EUR/USD"],
-            binance_priority=["BTC/USDT"],
+            forex_symbols=["EUR/USD"],
             timeframes=["1h"],
         )
         assert sleep_calls[0] == 15
@@ -150,8 +161,7 @@ class TestWarmupSlow:
 
     def test_caches_across_multiple_timeframes(self):
         calls, _ = self._run_one_cycle(
-            active_symbols=["BTC/USDT", "EUR/USD"],
-            binance_priority=["BTC/USDT"],
+            forex_symbols=["EUR/USD"],
             timeframes=["1h", "4h"],
             ttl=360,
         )
@@ -174,10 +184,13 @@ class TestWarmupSlow:
             if seconds not in (15, 0.5):
                 raise _StopLoop()
 
+        async def fake_persist_scan(result, timeframe):
+            pass
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
-             patch.object(scan_module, "ACTIVE_SYMBOLS", ["BTC/USDT", "EUR/USD", "XAU/USD"]), \
-             patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", ["BTC/USDT"]), \
+             patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
+             patch.object(scan_module, "FOREX_COMMODITY_SYMBOLS", ["EUR/USD", "XAU/USD"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_SLOW", ["1h"]), \
              patch("asyncio.sleep", side_effect=fake_sleep):
             with pytest.raises(_StopLoop):
@@ -187,20 +200,35 @@ class TestWarmupSlow:
         assert calls == ["scan:XAU/USD:1h"]
 
 
-def test_warmup_features_runs_both_loops_concurrently():
+def test_warmup_features_runs_all_loops_concurrently():
     started = []
 
     async def fake_warmup_fast():
         started.append("fast")
         raise _StopLoop("fast")
 
+    async def fake_warmup_medium():
+        started.append("medium")
+        raise _StopLoop("medium")
+
     async def fake_warmup_slow():
         started.append("slow")
         raise _StopLoop("slow")
 
+    async def fake_warmup_brvm():
+        started.append("brvm")
+        raise _StopLoop("brvm")
+
+    async def fake_scan_batch_flusher():
+        started.append("flusher")
+        raise _StopLoop("flusher")
+
     with patch.object(scan_module, "warmup_fast", side_effect=fake_warmup_fast), \
-         patch.object(scan_module, "warmup_slow", side_effect=fake_warmup_slow):
+         patch.object(scan_module, "warmup_medium", side_effect=fake_warmup_medium), \
+         patch.object(scan_module, "warmup_slow", side_effect=fake_warmup_slow), \
+         patch.object(scan_module, "warmup_brvm", side_effect=fake_warmup_brvm), \
+         patch.object(scan_module, "_scan_batch_flusher", side_effect=fake_scan_batch_flusher):
         with pytest.raises(_StopLoop):
             asyncio.run(scan_module.warmup_features())
 
-    assert set(started) == {"fast", "slow"}
+    assert set(started) == {"fast", "medium", "slow", "brvm", "flusher"}
