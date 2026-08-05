@@ -25,7 +25,7 @@ class TestWarmupFast:
     def test_caches_one_result_per_symbol_and_timeframe(self):
         calls = []
 
-        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None):
+        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None, strategy=None):
             return {"symbol": symbol, "timeframe": timeframe, "signal": "BUY", "confidence": 80}
 
         async def fake_set_cached(key, value, ttl=None):
@@ -37,9 +37,13 @@ class TestWarmupFast:
         async def fake_persist_scan(result, timeframe):
             pass
 
+        async def fake_load_strategies():
+            return []
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
              patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
+             patch.object(scan_module, "_load_active_strategies", side_effect=fake_load_strategies), \
              patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", ["BTC/USDT", "ETH/USDT"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_FAST", ["15m", "1h"]), \
              patch.object(scan_module, "WARMUP_TTL_FAST", 90), \
@@ -57,7 +61,7 @@ class TestWarmupFast:
     def test_a_symbol_failure_does_not_block_the_others(self):
         calls = []
 
-        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None):
+        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None, strategy=None):
             if symbol == "ETH/USDT":
                 raise RuntimeError("binance timeout")
             return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0}
@@ -71,9 +75,13 @@ class TestWarmupFast:
         async def fake_persist_scan(result, timeframe):
             pass
 
+        async def fake_load_strategies():
+            return []
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
              patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
+             patch.object(scan_module, "_load_active_strategies", side_effect=fake_load_strategies), \
              patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", ["BTC/USDT", "ETH/USDT"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_FAST", ["1h"]), \
              patch("asyncio.sleep", side_effect=fake_sleep):
@@ -88,7 +96,7 @@ class TestWarmupFast:
         est bien alimenté même quand tout est NEUTRAL (pas de court-circuit)."""
         calls = []
 
-        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None):
+        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None, strategy=None):
             return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0}
 
         async def fake_set_cached(key, value, ttl=None):
@@ -100,9 +108,13 @@ class TestWarmupFast:
         async def fake_persist_scan(result, timeframe):
             pass
 
+        async def fake_load_strategies():
+            return []
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
              patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
+             patch.object(scan_module, "_load_active_strategies", side_effect=fake_load_strategies), \
              patch.object(scan_module, "BINANCE_PRIORITY_SYMBOLS", ["BTC/USDT"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_FAST", ["1h"]), \
              patch("asyncio.sleep", side_effect=fake_sleep):
@@ -117,7 +129,7 @@ class TestWarmupSlow:
         calls = []
         sleep_calls = []
 
-        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None):
+        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None, strategy=None):
             return {"symbol": symbol, "timeframe": timeframe, "signal": "SELL", "confidence": 55}
 
         async def fake_set_cached(key, value, ttl=None):
@@ -125,6 +137,9 @@ class TestWarmupSlow:
 
         async def fake_persist_scan(result, timeframe):
             pass
+
+        async def fake_load_strategies():
+            return []
 
         async def fake_sleep(seconds):
             sleep_calls.append(seconds)
@@ -134,6 +149,7 @@ class TestWarmupSlow:
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
              patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
+             patch.object(scan_module, "_load_active_strategies", side_effect=fake_load_strategies), \
              patch.object(scan_module, "FOREX_COMMODITY_SYMBOLS", forex_symbols), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_SLOW", timeframes), \
              patch.object(scan_module, "WARMUP_TTL_SLOW", ttl), \
@@ -172,7 +188,7 @@ class TestWarmupSlow:
     def test_a_symbol_failure_does_not_block_the_cycle(self):
         calls = []
 
-        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None):
+        async def fake_fetch_and_analyze(symbol, timeframe, htf_regime=None, strategy=None):
             if symbol == "EUR/USD":
                 raise RuntimeError("twelvedata down")
             return {"symbol": symbol, "signal": "BUY", "confidence": 60}
@@ -187,9 +203,13 @@ class TestWarmupSlow:
         async def fake_persist_scan(result, timeframe):
             pass
 
+        async def fake_load_strategies():
+            return []
+
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
              patch.object(scan_module, "_persist_scan", side_effect=fake_persist_scan), \
+             patch.object(scan_module, "_load_active_strategies", side_effect=fake_load_strategies), \
              patch.object(scan_module, "FOREX_COMMODITY_SYMBOLS", ["EUR/USD", "XAU/USD"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_SLOW", ["1h"]), \
              patch("asyncio.sleep", side_effect=fake_sleep):

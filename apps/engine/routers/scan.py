@@ -161,6 +161,43 @@ async def _persist_scan(result: dict, timeframe: str) -> None:
     await _persist_scan_redis(result, timeframe)
     await _queue_scan_for_batch(result, timeframe)
 
+
+# ── Active strategies loader ─────────────────────────────────
+_active_strategies_cache: list[dict] = []
+_active_strategies_ts: float = 0
+_active_strategies_lock = asyncio.Lock()
+
+
+async def _load_active_strategies() -> list[dict]:
+    """Charge les stratégies actives depuis la DB (cache 60s)."""
+    global _active_strategies_cache, _active_strategies_ts
+    now = time.monotonic()
+    if _active_strategies_cache and (now - _active_strategies_ts) < 60:
+        return _active_strategies_cache
+    async with _active_strategies_lock:
+        if _active_strategies_cache and (now - _active_strategies_ts) < 60:
+            return _active_strategies_cache
+        try:
+            pool = await _get_scan_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT id, name, rules::text FROM strategies WHERE "isActive" = true"""
+                )
+            strategies = []
+            for r in rows:
+                try:
+                    rules = json.loads(r["rules"]) if r["rules"] else {}
+                except Exception:
+                    rules = {}
+                strategies.append({"id": r["id"], "name": r["name"], "rules": rules})
+            _active_strategies_cache = strategies
+            _active_strategies_ts = time.monotonic()
+            logger.info("active_strategies_loaded", count=len(strategies))
+            return strategies
+        except Exception as e:
+            logger.warning("active_strategies_load_failed", error=str(e))
+            return _active_strategies_cache if _active_strategies_cache else []
+
 # ── Default strategy ──────────────────────────────────────────
 # Used when no strategy is provided (no UserStrategy active, fresh install,
 # manual scan without strategy). Ensures all signals go through
@@ -1859,7 +1896,7 @@ def analyze_candles(
     return result
 
 
-async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None) -> dict:
+async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None, strategy: Optional[dict] = None) -> dict:
     """Fetch klines et analyse un actif — utilisé par warmup et fallback."""
     tf = TF_MAP.get(timeframe, "1h")
     df = await fetch_binance_klines(symbol, tf)
@@ -1897,6 +1934,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
         lambda: analyze_candles(
             symbol, timeframe, df,
             htf_regime=htf_regime,
+            strategy=strategy,
             forex_context=forex_context,
             tokenomics_context=tokenomics_context,
             social_context=social_context,
@@ -1912,20 +1950,20 @@ async def warmup_fast():
     logger.info("warmup_fast_start", symbols=len(BINANCE_PRIORITY_SYMBOLS), interval=WARMUP_INTERVAL_FAST)
     while True:
         t0 = time.monotonic()
+        strategies = await _load_active_strategies()
         for timeframe in WARMUP_TIMEFRAMES_FAST:
-            tasks = [fetch_and_analyze(sym, timeframe) for sym in BINANCE_PRIORITY_SYMBOLS]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            signals_found = 0
-            for sym, res in zip(BINANCE_PRIORITY_SYMBOLS, results):
-                if isinstance(res, Exception):
-                    logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(res))
-                    continue
-                await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_FAST)
-                await _persist_scan(res, timeframe)
-                if res.get("signal") not in (None, "NEUTRAL"):
-                    signals_found += 1
+            for sym in BINANCE_PRIORITY_SYMBOLS:
+                for strat in strategies or [None]:
+                    try:
+                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                        if res and not isinstance(res, Exception):
+                            suffix = f":{strat['id']}" if strat else ""
+                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_FAST)
+                            await _persist_scan(res, timeframe)
+                    except Exception as e:
+                        logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(e))
             logger.info("warmup_fast_done", timeframe=timeframe,
-                        symbols=len(BINANCE_PRIORITY_SYMBOLS), signals=signals_found,
+                        symbols=len(BINANCE_PRIORITY_SYMBOLS), strategies=len(strategies),
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
         # Attendre le reste du cycle (60s - temps du scan)
         elapsed = time.monotonic() - t0
@@ -1941,17 +1979,20 @@ async def warmup_medium():
     await asyncio.sleep(5)
     while True:
         t0 = time.monotonic()
+        strategies = await _load_active_strategies()
         for timeframe in WARMUP_TIMEFRAMES_MEDIUM:
             for sym in DERIV_SYMBOLS:
-                try:
-                    res = await fetch_and_analyze(sym, timeframe)
-                    if res:
-                        await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_MEDIUM)
-                        await _persist_scan(res, timeframe)
-                except Exception as e:
-                    logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe, error=str(e))
+                for strat in strategies or [None]:
+                    try:
+                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                        if res:
+                            suffix = f":{strat['id']}" if strat else ""
+                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_MEDIUM)
+                            await _persist_scan(res, timeframe)
+                    except Exception as e:
+                        logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe, error=str(e))
                 await asyncio.sleep(0.3)
-            logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS))
+            logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(0, WARMUP_INTERVAL_MEDIUM - elapsed)
         await asyncio.sleep(wait)
@@ -1966,17 +2007,20 @@ async def warmup_slow():
     await asyncio.sleep(15)
     while True:
         t0 = time.monotonic()
+        strategies = await _load_active_strategies()
         for timeframe in WARMUP_TIMEFRAMES_SLOW:
             for sym in FOREX_COMMODITY_SYMBOLS:
-                try:
-                    res = await fetch_and_analyze(sym, timeframe)
-                    if res:
-                        await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_SLOW)
-                        await _persist_scan(res, timeframe)
-                except Exception as e:
-                    logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
+                for strat in strategies or [None]:
+                    try:
+                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                        if res:
+                            suffix = f":{strat['id']}" if strat else ""
+                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_SLOW)
+                            await _persist_scan(res, timeframe)
+                    except Exception as e:
+                        logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
                 await asyncio.sleep(0.5)  # respecter rate limits Twelve Data / yfinance
-            logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS))
+            logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(0, WARMUP_INTERVAL_SLOW - elapsed)
         await asyncio.sleep(wait)
@@ -2008,17 +2052,20 @@ async def warmup_brvm():
             await asyncio.sleep(60)
             continue
         t0 = time.monotonic()
+        strategies = await _load_active_strategies()
         for timeframe in WARMUP_TIMEFRAMES_BRVM:
             for sym in BRVM_SYMBOLS:
-                try:
-                    res = await fetch_and_analyze(sym, timeframe)
-                    if res:
-                        await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_BRVM)
-                        await _persist_scan(res, timeframe)
-                except Exception as e:
-                    logger.warning("warmup_brvm_failed", symbol=sym, tf=timeframe, error=str(e))
+                for strat in strategies or [None]:
+                    try:
+                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                        if res:
+                            suffix = f":{strat['id']}" if strat else ""
+                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_BRVM)
+                            await _persist_scan(res, timeframe)
+                    except Exception as e:
+                        logger.warning("warmup_brvm_failed", symbol=sym, tf=timeframe, error=str(e))
                 await asyncio.sleep(0.5)
-            logger.info("warmup_brvm_done", timeframe=timeframe, symbols=len(BRVM_SYMBOLS))
+            logger.info("warmup_brvm_done", timeframe=timeframe, symbols=len(BRVM_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(0, WARMUP_INTERVAL_BRVM - elapsed)
         await asyncio.sleep(wait)
