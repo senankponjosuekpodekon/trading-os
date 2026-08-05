@@ -675,3 +675,23 @@ model NotificationPreference {
 
   @@map("notification_preferences")
 }
+
+model ScanHistory {
+  id              String   @id @default(cuid())
+  strategyId      String?  @map("strategy_id")
+  strategyName    String   @default("Default") @map("strategy_name")
+  symbol          String
+  timeframe       String
+  signal          String   @default("NEUTRAL")
+  confidence      Int      @default(0)
+  explanation     String   @default("")
+  signalPending   Boolean  @default(false) @map("signal_pending")
+  persistenceScore Float   @default(0) @map("persistence_score")
+  assetType       String?  @map("asset_type")
+  scannedAt       DateTime @default(now()) @map("scanned_at")
+
+  @@index([strategyId, scannedAt])
+  @@index([symbol, timeframe])
+  @@index([scannedAt])
+  @@map("scan_history")
+}

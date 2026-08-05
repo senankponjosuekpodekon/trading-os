@@ -711,4 +711,39 @@ export class SignalsService {
     }
     return null;
   }
+
+  async findScanHistory(opts: {
+    page: number;
+    limit: number;
+    strategyId?: string;
+    strategyName?: string;
+    symbol?: string;
+    signal?: string;
+    timeframe?: string;
+  }) {
+    const where: any = {};
+    if (opts.strategyId) where.strategyId = opts.strategyId;
+    if (opts.strategyName) where.strategyName = opts.strategyName;
+    if (opts.symbol) where.symbol = opts.symbol;
+    if (opts.signal) where.signal = opts.signal;
+    if (opts.timeframe) where.timeframe = opts.timeframe;
+
+    const [items, total] = await Promise.all([
+      this.prisma.scanHistory.findMany({
+        where,
+        orderBy: { scannedAt: 'desc' },
+        skip: (opts.page - 1) * opts.limit,
+        take: opts.limit,
+      }),
+      this.prisma.scanHistory.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page: opts.page,
+      limit: opts.limit,
+      totalPages: Math.ceil(total / opts.limit),
+    };
+  }
 }

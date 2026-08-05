@@ -1,7 +1,7 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, RefreshCw, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Scale, Brain, UserCircle, AlertTriangle } from 'lucide-react';
+import { TrendingUp, RefreshCw, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Scale, Brain, UserCircle, AlertTriangle, Activity, Radar } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { SignalCard } from '@/components/signals/SignalCard';
 import { SkeletonSignalCard } from '@/components/ui/Skeleton';
@@ -81,6 +81,7 @@ export default function SignalsPage() {
     } catch { return ALL_SYMBOLS; }
   });
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
+  const [activeTab, setActiveTab] = useState<'signals' | 'scanner'>('signals');
 
   // Persister sélection dans localStorage
   useEffect(() => { localStorage.setItem(LS_SYMBOLS, JSON.stringify(selectedSymbols)); }, [selectedSymbols]);
@@ -145,6 +146,13 @@ export default function SignalsPage() {
     staleTime: 60_000,
   });
 
+  const { data: scanHistoryData, isFetching: scanHistoryLoading } = useQuery({
+    queryKey: ['scan-history-realtime'],
+    queryFn: async () => (await api.get('/signals/scan-history', { params: { limit: 100 } })).data,
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+  });
+
   const trainPredictor = useMutation({
     mutationFn: async () => {
       const params: Record<string, string> = {};
@@ -169,6 +177,27 @@ export default function SignalsPage() {
   return (
     <AppLayout title="Signaux">
       <div className="space-y-5">
+        {/* Tab navigation */}
+        <div className="flex bg-gray-800 rounded-lg p-1 gap-0.5 w-fit">
+          <button onClick={() => setActiveTab('signals')}
+            className={`flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-colors ${activeTab === 'signals' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}>
+            <TrendingUp className="w-4 h-4" />Signaux
+          </button>
+          <button onClick={() => setActiveTab('scanner')}
+            className={`flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-colors ${activeTab === 'scanner' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}>
+            <Radar className="w-4 h-4" />Scanner
+            {scanHistoryData?.entries?.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                {scanHistoryData.entries.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'scanner' ? (
+          <ScannerView entries={scanHistoryData?.entries ?? []} loading={scanHistoryLoading} />
+        ) : (
+        <>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -423,7 +452,104 @@ export default function SignalsPage() {
             />
           ))}
         </div>
+        </>
+        )}
       </div>
     </AppLayout>
+  );
+}
+
+function ScannerView({ entries, loading }: { entries: any[]; loading: boolean }) {
+  const signalColors: Record<string, string> = {
+    BUY: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+    SELL: 'text-red-400 bg-red-500/10 border-red-500/30',
+    NEUTRAL: 'text-gray-400 bg-gray-700/30 border-gray-700',
+  };
+
+  const sorted = useMemo(() => {
+    return [...entries].sort((a, b) => {
+      const ta = new Date(a.scanned_at || 0).getTime();
+      const tb = new Date(b.scanned_at || 0).getTime();
+      return tb - ta;
+    });
+  }, [entries]);
+
+  const activeSignals = sorted.filter(e => e.signal === 'BUY' || e.signal === 'SELL');
+  const pendingSignals = sorted.filter(e => e.signal_pending);
+  const neutralScans = sorted.filter(e => e.signal === 'NEUTRAL' && !e.signal_pending);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Activity className="w-4 h-4 text-emerald-400" />
+          <span className="text-sm text-gray-400">Temps réel — polling 5s</span>
+          {loading && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <span className="flex items-center gap-1 text-emerald-400">
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />{activeSignals.length} signaux
+          </span>
+          <span className="flex items-center gap-1 text-yellow-400">
+            <span className="w-2 h-2 rounded-full bg-yellow-500" />{pendingSignals.length} en confirmation
+          </span>
+          <span className="flex items-center gap-1 text-gray-500">
+            <span className="w-2 h-2 rounded-full bg-gray-600" />{neutralScans.length} neutres
+          </span>
+        </div>
+      </div>
+
+      {sorted.length === 0 && !loading && (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-600 bg-gray-900 border border-gray-800 rounded-xl">
+          <Radar className="w-10 h-10 mb-3" />
+          <p className="font-medium">Aucun scan récent</p>
+          <p className="text-sm mt-1">Les scans apparaîtront ici en temps réel</p>
+        </div>
+      )}
+
+      {sorted.length > 0 && (
+        <div className="space-y-2">
+          {sorted.map((entry, i) => {
+            const signalColor = signalColors[entry.signal] || signalColors.NEUTRAL;
+            const time = entry.scanned_at ? new Date(entry.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+            return (
+              <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${entry.signal !== 'NEUTRAL' ? 'bg-gray-900' : 'bg-gray-900/50'} border-gray-800`}>
+                <div className={`px-2 py-1 rounded text-xs font-bold border ${signalColor} min-w-[60px] text-center`}>
+                  {entry.signal}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-white">{entry.symbol}</span>
+                    <span className="text-xs text-gray-500">{entry.timeframe}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                      {entry.strategy_name || 'Default'}
+                    </span>
+                    {entry.signal_pending && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 animate-pulse">
+                        EN CONFIRMATION
+                      </span>
+                    )}
+                    {entry.confidence > 0 && (
+                      <span className={`text-xs font-medium ${entry.confidence >= 70 ? 'text-emerald-400' : entry.confidence >= 50 ? 'text-yellow-400' : 'text-gray-400'}`}>
+                        {entry.confidence}%
+                      </span>
+                    )}
+                    {entry.persistence_score > 0 && (
+                      <span className="text-xs text-gray-500" title="Persistence score">
+                        ⟳ {Math.round(entry.persistence_score)}%
+                      </span>
+                    )}
+                  </div>
+                  {entry.explanation && (
+                    <p className="text-xs text-gray-400 mt-1 truncate" title={entry.explanation}>{entry.explanation}</p>
+                  )}
+                </div>
+                <span className="text-xs text-gray-600 whitespace-nowrap">{time}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

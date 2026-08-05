@@ -4,6 +4,7 @@ import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { SignalFeatures } from './signal-predictor.service';
 import { PatternPredictorService, PatternFeaturesInput } from './pattern-predictor.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('signals')
@@ -13,6 +14,7 @@ export class SignalsController {
     private signalsService: SignalsService,
     private outcomeService: SignalOutcomeService,
     private patternPredictorService: PatternPredictorService,
+    private engine: EngineHttpService,
   ) {}
 
   @Get()
@@ -161,5 +163,40 @@ export class SignalsController {
   @Get('pattern-predictor/status')
   patternPredictorStatus() {
     return this.patternPredictorService.getStatus();
+  }
+
+  @Get('scan-history')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async scanHistory(
+    @Query('limit') limit?: string,
+    @Query('strategy') strategy?: string,
+    @Query('signal') signal?: string,
+  ) {
+    const lim = limit ? Math.min(200, Math.max(1, parseInt(limit, 10))) : 50;
+    const params: Record<string, any> = { limit: lim };
+    if (strategy) params.strategy = strategy;
+    if (signal) params.signal = signal;
+    return this.engine.get('/scan/history', { params });
+  }
+
+  @Get('scan-history/db')
+  async scanHistoryDb(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('strategyId') strategyId?: string,
+    @Query('strategyName') strategyName?: string,
+    @Query('symbol') symbol?: string,
+    @Query('signal') signal?: string,
+    @Query('timeframe') timeframe?: string,
+  ) {
+    return this.signalsService.findScanHistory({
+      page: page ? Math.max(1, parseInt(page, 10)) : 1,
+      limit: limit ? Math.min(100, Math.max(1, parseInt(limit, 10))) : 20,
+      strategyId,
+      strategyName,
+      symbol,
+      signal,
+      timeframe,
+    });
   }
 }

@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 from collections import defaultdict
+import json
 import httpx
 import asyncio
 import time
@@ -39,7 +40,7 @@ from features.market_concept_layer import compute_market_concept_vector
 from features.market_embedding import build_market_embedding
 from ml.feature_factory import build_feature_vector
 import config
-from utils.cache import get_cached, set_cached
+from utils.cache import get_cached, set_cached, cache
 from utils.logger import get_logger
 from utils.http import retry_async
 from utils.rate_limiter import rate_limit
@@ -53,6 +54,112 @@ from utils.correlation import set_correlation_id, clear_correlation_id
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=16)
 atexit.register(lambda: _executor.shutdown(wait=False))
+
+# ── Scan history persistence ──────────────────────────────────
+_scan_db_pool = None
+_scan_db_lock = asyncio.Lock()
+_scan_batch: list[dict] = []
+_scan_batch_lock = asyncio.Lock()
+
+
+async def _get_scan_pool():
+    global _scan_db_pool
+    if _scan_db_pool is None:
+        async with _scan_db_lock:
+            if _scan_db_pool is None:
+                import asyncpg
+                url = config.settings.database_url.replace(
+                    "postgresql+asyncpg://", "postgresql://"
+                ).replace("postgres://", "postgresql://")
+                _scan_db_pool = await asyncpg.create_pool(url, min_size=1, max_size=3)
+    return _scan_db_pool
+
+
+async def _persist_scan_redis(result: dict, timeframe: str) -> None:
+    """Push scan result to Redis list for real-time frontend access (TTL 1h)."""
+    try:
+        entry = {
+            "strategy_id": result.get("strategy_id"),
+            "strategy_name": result.get("strategy_name") or "Default",
+            "symbol": result.get("symbol"),
+            "timeframe": timeframe,
+            "signal": result.get("signal", "NEUTRAL"),
+            "confidence": result.get("confidence", 0),
+            "explanation": result.get("explanation", ""),
+            "signal_pending": result.get("signal_pending", False),
+            "persistence_score": result.get("persistence_score", 0),
+            "asset_type": result.get("asset_type"),
+            "scanned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        key = "scan_history:recent"
+        r = await cache.client()
+        await r.lpush(key, json.dumps(entry, default=str))
+        await r.ltrim(key, 0, 499)  # keep last 500 entries
+        await r.expire(key, SCAN_HISTORY_REDIS_TTL)
+    except Exception:
+        pass
+
+
+async def _queue_scan_for_batch(result: dict, timeframe: str) -> None:
+    """Queue scan result for batch DB insertion (every 5 min)."""
+    entry = {
+        "strategy_id": result.get("strategy_id"),
+        "strategy_name": result.get("strategy_name") or "Default",
+        "symbol": result.get("symbol"),
+        "timeframe": timeframe,
+        "signal": result.get("signal", "NEUTRAL"),
+        "confidence": int(result.get("confidence", 0)),
+        "explanation": result.get("explanation", "")[:2000],
+        "signal_pending": bool(result.get("signal_pending", False)),
+        "persistence_score": float(result.get("persistence_score", 0)),
+        "asset_type": result.get("asset_type"),
+    }
+    async with _scan_batch_lock:
+        _scan_batch.append(entry)
+        if len(_scan_batch) > 2000:
+            _scan_batch[:] = _scan_batch[-2000:]
+
+
+async def _flush_scan_batch() -> None:
+    """Batch insert queued scans into scan_history table."""
+    async with _scan_batch_lock:
+        if not _scan_batch:
+            return
+        batch = _scan_batch.copy()
+        _scan_batch.clear()
+    try:
+        pool = await _get_scan_pool()
+        async with pool.acquire() as conn:
+            rows = [
+                (e["strategy_id"], e["strategy_name"], e["symbol"], e["timeframe"],
+                 e["signal"], e["confidence"], e["explanation"], e["signal_pending"],
+                 e["persistence_score"], e["asset_type"])
+                for e in batch
+            ]
+            await conn.executemany(
+                """INSERT INTO scan_history
+                   (id, strategy_id, strategy_name, symbol, timeframe, signal,
+                    confidence, explanation, signal_pending, persistence_score,
+                    asset_type, scanned_at)
+                   VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())""",
+                rows,
+            )
+        logger.info("scan_history_batch_inserted", count=len(rows))
+    except Exception as e:
+        logger.warning("scan_history_batch_failed", error=str(e), count=len(batch))
+
+
+async def _scan_batch_flusher():
+    """Flush scan batch to DB every 5 minutes."""
+    while True:
+        await asyncio.sleep(300)
+        await _flush_scan_batch()
+
+
+async def _persist_scan(result: dict, timeframe: str) -> None:
+    """Persist scan result to Redis (real-time) + queue for DB batch."""
+    await _persist_scan_redis(result, timeframe)
+    await _queue_scan_for_batch(result, timeframe)
 
 # ── Default strategy ──────────────────────────────────────────
 # Used when no strategy is provided (no UserStrategy active, fresh install,
@@ -103,14 +210,48 @@ BINANCE_PRIORITY_SYMBOLS = [
     "DOT/USDT", "MATIC/USDT",
 ]
 
+# Actifs Deriv (synthétiques) → scan medium (2 min)
+DERIV_SYMBOLS = [
+    "V75", "V25", "V10", "V50", "V100",
+    "BOOM1000", "CRASH1000", "BOOM500", "CRASH500",
+    "JUMP25", "JUMP50", "JUMP75",
+]
+
+# Actifs BRVM → scan pendant heures de marché uniquement
+BRVM_SYMBOLS = [
+    "ONTBF", "SGBF", "BOABF", "ETIT", "SIVC",
+    "PALC", "SOGC", "SNTS", "CIEC", "NSIC",
+    "ORGT", "BICC", "CBIBF", "ABJC", "STAC",
+]
+
+# Actifs Forex/Commodités → scan lent (5 min)
+FOREX_COMMODITY_SYMBOLS = [
+    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD",
+    "XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD",
+]
+
 # Timeframes par catégorie
-WARMUP_TIMEFRAMES_FAST  = ["15m", "1h"]       # Binance prioritaire — cycle 60s
-WARMUP_TIMEFRAMES_SLOW  = ["1h", "4h"]        # non-Binance — cycle 5 min
+WARMUP_TIMEFRAMES_FAST   = ["15m", "1h"]       # Binance prioritaire — cycle 60s
+WARMUP_TIMEFRAMES_MEDIUM = ["1h", "15m"]       # Deriv synthétiques — cycle 2 min
+WARMUP_TIMEFRAMES_SLOW   = ["1h", "4h"]        # Forex/Commodités — cycle 5 min
+WARMUP_TIMEFRAMES_BRVM   = ["1h"]               # BRVM — cycle 5 min pendant heures de marché
 
 WARMUP_INTERVAL_FAST    = 60                   # secondes — Binance prioritaire
-WARMUP_INTERVAL_SLOW    = 300                  # secondes — Forex/Deriv/Commodités
+WARMUP_INTERVAL_MEDIUM  = 120                  # secondes — Deriv synthétiques
+WARMUP_INTERVAL_SLOW    = 300                  # secondes — Forex/Commodités
+WARMUP_INTERVAL_BRVM    = 300                  # secondes — BRVM (heures de marché uniquement)
 WARMUP_TTL_FAST         = 90                   # TTL cache pour actifs rapides
+WARMUP_TTL_MEDIUM       = 180                  # TTL cache pour actifs medium
 WARMUP_TTL_SLOW         = 360                  # TTL cache pour actifs lents
+WARMUP_TTL_BRVM         = 360                  # TTL cache pour BRVM
+
+# BRVM market hours: Mon-Fri 10:00-14:30 UTC
+BRVM_OPEN_HOUR   = 10
+BRVM_CLOSE_HOUR   = 14
+BRVM_CLOSE_MIN    = 30
+
+# Redis TTL for scan history feed (1 hour)
+SCAN_HISTORY_REDIS_TTL = 3600
 
 # Compat legacy
 WARMUP_TIMEFRAMES        = WARMUP_TIMEFRAMES_SLOW
@@ -1780,6 +1921,7 @@ async def warmup_fast():
                     logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(res))
                     continue
                 await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_FAST)
+                await _persist_scan(res, timeframe)
                 if res.get("signal") not in (None, "NEUTRAL"):
                     signals_found += 1
             logger.info("warmup_fast_done", timeframe=timeframe,
@@ -1791,34 +1933,106 @@ async def warmup_fast():
         await asyncio.sleep(wait)
 
 
+async def warmup_medium():
+    """Boucle medium — actifs Deriv (synthétiques), cycle 2 min.
+    Les indices de volatilité bougent vite et nécessitent un scan plus fréquent.
+    """
+    logger.info("warmup_medium_start", symbols=len(DERIV_SYMBOLS), interval=WARMUP_INTERVAL_MEDIUM)
+    await asyncio.sleep(5)
+    while True:
+        t0 = time.monotonic()
+        for timeframe in WARMUP_TIMEFRAMES_MEDIUM:
+            for sym in DERIV_SYMBOLS:
+                try:
+                    res = await fetch_and_analyze(sym, timeframe)
+                    if res:
+                        await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_MEDIUM)
+                        await _persist_scan(res, timeframe)
+                except Exception as e:
+                    logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe, error=str(e))
+                await asyncio.sleep(0.3)
+            logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS))
+        elapsed = time.monotonic() - t0
+        wait = max(0, WARMUP_INTERVAL_MEDIUM - elapsed)
+        await asyncio.sleep(wait)
+
+
 async def warmup_slow():
-    """Boucle lente — Forex, Deriv, Commodités, cycle 5 min.
+    """Boucle lente — Forex et Commodités, cycle 5 min.
     Séquentiel avec pause pour respecter les limites yfinance/TwelveData.
     """
-    non_binance_syms = [s for s in ACTIVE_SYMBOLS if s not in BINANCE_PRIORITY_SYMBOLS]
-    logger.info("warmup_slow_start", symbols=len(non_binance_syms), interval=WARMUP_INTERVAL_SLOW)
+    logger.info("warmup_slow_start", symbols=len(FOREX_COMMODITY_SYMBOLS), interval=WARMUP_INTERVAL_SLOW)
     # Décalage initial pour ne pas surcharger au démarrage
     await asyncio.sleep(15)
     while True:
         t0 = time.monotonic()
         for timeframe in WARMUP_TIMEFRAMES_SLOW:
-            for sym in non_binance_syms:
+            for sym in FOREX_COMMODITY_SYMBOLS:
                 try:
                     res = await fetch_and_analyze(sym, timeframe)
                     if res:
                         await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_SLOW)
+                        await _persist_scan(res, timeframe)
                 except Exception as e:
                     logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
                 await asyncio.sleep(0.5)  # respecter rate limits Twelve Data / yfinance
-            logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(non_binance_syms))
+            logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS))
         elapsed = time.monotonic() - t0
         wait = max(0, WARMUP_INTERVAL_SLOW - elapsed)
         await asyncio.sleep(wait)
 
 
+def _is_brvm_open() -> bool:
+    """Check if BRVM market is currently open (Mon-Fri 10:00-14:30 UTC)."""
+    now = time.gmtime()
+    if now.tm_wday >= 5:  # Saturday=5, Sunday=6
+        return False
+    hour = now.tm_hour
+    minute = now.tm_min
+    if hour < BRVM_OPEN_HOUR or hour > BRVM_CLOSE_HOUR:
+        return False
+    if hour == BRVM_CLOSE_HOUR and minute > BRVM_CLOSE_MIN:
+        return False
+    return True
+
+
+async def warmup_brvm():
+    """Boucle BRVM — actions BRVM, cycle 5 min, uniquement pendant les heures de marché.
+    BRVM: Lundi-Vendredi 10:00-14:30 UTC.
+    """
+    logger.info("warmup_brvm_start", symbols=len(BRVM_SYMBOLS), interval=WARMUP_INTERVAL_BRVM)
+    await asyncio.sleep(30)
+    while True:
+        if not _is_brvm_open():
+            logger.info("warmup_brvm_skipped", reason="market_closed")
+            await asyncio.sleep(60)
+            continue
+        t0 = time.monotonic()
+        for timeframe in WARMUP_TIMEFRAMES_BRVM:
+            for sym in BRVM_SYMBOLS:
+                try:
+                    res = await fetch_and_analyze(sym, timeframe)
+                    if res:
+                        await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_BRVM)
+                        await _persist_scan(res, timeframe)
+                except Exception as e:
+                    logger.warning("warmup_brvm_failed", symbol=sym, tf=timeframe, error=str(e))
+                await asyncio.sleep(0.5)
+            logger.info("warmup_brvm_done", timeframe=timeframe, symbols=len(BRVM_SYMBOLS))
+        elapsed = time.monotonic() - t0
+        wait = max(0, WARMUP_INTERVAL_BRVM - elapsed)
+        await asyncio.sleep(wait)
+
+
 async def warmup_features():
-    """Point d'entrée legacy — lance les deux boucles en parallèle."""
-    await asyncio.gather(warmup_fast(), warmup_slow())
+    """Point d'entrée — lance les 4 boucles de scan + le batch flusher en parallèle."""
+    await asyncio.gather(
+        warmup_fast(),
+        warmup_medium(),
+        warmup_slow(),
+        warmup_brvm(),
+        _scan_batch_flusher(),
+    )
 
 
 @router.post("/multi")
@@ -2218,6 +2432,10 @@ async def scan_multi(req: ScanRequest):
     for r in results:
         r["cluster"] = get_cluster(r["symbol"])
 
+    # Persist scan results to Redis + DB batch queue
+    for r in results:
+        await _persist_scan(r, req.timeframe)
+
     ws_module.set_latest_signals(results)
 
     elapsed_ms = (time.monotonic() - t0) * 1000
@@ -2240,4 +2458,28 @@ async def scan_multi(req: ScanRequest):
         "portfolio_risk": portfolio_risk,
         "data_gaps":      data_gaps,
     }
+
+
+@router.get("/scan/history")
+async def scan_history(limit: int = 50, strategy: str | None = None, signal: str | None = None):
+    """Retourne les derniers scans depuis Redis (temps réel, TTL 1h)."""
+    try:
+        r = await cache.client()
+        raw_entries = await r.lrange("scan_history:recent", 0, min(limit * 4, 499))
+        entries = []
+        for raw in raw_entries:
+            try:
+                entry = json.loads(raw)
+            except Exception:
+                continue
+            if strategy and entry.get("strategy_name") != strategy:
+                continue
+            if signal and entry.get("signal") != signal:
+                continue
+            entries.append(entry)
+            if len(entries) >= limit:
+                break
+        return {"count": len(entries), "entries": entries}
+    except Exception as e:
+        return {"count": 0, "entries": [], "error": str(e)}
 
