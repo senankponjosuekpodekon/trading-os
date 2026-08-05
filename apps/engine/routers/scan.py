@@ -141,7 +141,7 @@ async def _flush_scan_batch() -> None:
                    (id, strategy_id, strategy_name, symbol, timeframe, signal,
                     confidence, explanation, signal_pending, persistence_score,
                     asset_type, scanned_at)
-                   VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())""",
+                   VALUES (md5(random()::text || clock_timestamp()::text || random()::text), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())""",
                 rows,
             )
         logger.info("scan_history_batch_inserted", count=len(rows))

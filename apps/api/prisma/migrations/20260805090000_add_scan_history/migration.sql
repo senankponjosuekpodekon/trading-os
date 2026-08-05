@@ -20,15 +20,16 @@ CREATE INDEX "scan_history_symbol_timeframe_idx" ON "scan_history"("symbol", "ti
 CREATE INDEX "scan_history_scanned_at_idx" ON "scan_history"("scanned_at" DESC);
 
 -- Convert to TimescaleDB hypertable (if extension available)
-SELECT create_hypertable('scan_history', 'scanned_at', if_not_exists => TRUE);
-
--- Compression policy: compress chunks older than 1 day
-ALTER TABLE "scan_history" SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'strategy_id, symbol',
-    timescaledb.compress_orderby = 'scanned_at DESC'
-);
-SELECT add_compression_policy('scan_history', INTERVAL '1 day', if_not_exists => TRUE);
-
--- Retention policy: drop chunks older than 14 days
-SELECT add_retention_policy('scan_history', INTERVAL '14 days', if_not_exists => TRUE);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable('scan_history', 'scanned_at', if_not_exists => TRUE);
+        ALTER TABLE "scan_history" SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'strategy_id, symbol',
+            timescaledb.compress_orderby = 'scanned_at DESC'
+        );
+        PERFORM add_compression_policy('scan_history', INTERVAL '1 day', if_not_exists => TRUE);
+        PERFORM add_retention_policy('scan_history', INTERVAL '14 days', if_not_exists => TRUE);
+    END IF;
+END $$;
