@@ -72,7 +72,7 @@ describe('SignalsPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/aucun signal/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /scanner/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /scanner.*actif/i })).toBeInTheDocument();
   });
 
   it('renders list of signals', async () => {
@@ -176,10 +176,10 @@ describe('SignalsPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /scanner/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /scanner.*actif/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /scanner/i }));
+    fireEvent.click(screen.getByRole('button', { name: /scanner.*actif/i }));
 
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith('/signals/scan', expect.any(Object));
