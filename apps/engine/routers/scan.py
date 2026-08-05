@@ -1901,6 +1901,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     tf = TF_MAP.get(timeframe, "1h")
     df = await fetch_binance_klines(symbol, tf)
     if df is None:
+        df = await fetch_deriv_klines(symbol, tf)
+    if df is None:
+        df = await fetch_yfinance_klines(symbol, tf)
+    if df is None:
         df = await fetch_twelvedata_klines(symbol, tf)
     if df is None or len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
