@@ -2460,7 +2460,7 @@ async def scan_multi(req: ScanRequest):
     }
 
 
-@router.get("/scan/history")
+@router.get("/history")
 async def scan_history(limit: int = 50, strategy: str | None = None, signal: str | None = None):
     """Retourne les derniers scans depuis Redis (temps réel, TTL 1h)."""
     try:
