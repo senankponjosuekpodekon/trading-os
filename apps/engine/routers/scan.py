@@ -25,7 +25,9 @@ from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
 from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
-from routers.forex_context import should_suspend_forex
+from routers.forex_context import should_suspend_forex, get_dxy_momentum
+from routers.gold_specialist import is_gold_symbol, gold_specialist_bonus, gold_atr_adjustment, get_session_info as gold_session_info
+from routers.news_filter import should_suspend_signal
 from routers.portfolio_risk import analyze_portfolio_risk, get_cluster
 from routers.strategy_eval import parse_rules, evaluate_strategy, derive_profile_suitability
 from routers.onchain import is_crypto_symbol, onchain_context, onchain_bonus
@@ -771,8 +773,13 @@ _TF_HIERARCHY: dict[str, tuple[str, str]] = {
     "5m":  ("1h",  "4h"),
     "15m": ("1h",  "4h"),
     "1h":  ("4h",  "1d"),
-    "4h":  ("1d",  "1d"),   # fallback si 4h est lui-même LTF
+    "4h":  ("1d",  "1w"),   # HTF = Weekly pour le 4h
+    "1d":  ("1w",  "1w"),   # Pour le daily, MTF=Weekly, HTF=Weekly (fallback)
 }
+
+# Bias TF : toujours calculer la tendance générale D1 + Weekly, quel que soit le TF d'exécution.
+# Ces regimes sont utilisés comme couche de bias (bonus/malus léger) et non comme filtre bloquant.
+_BIAS_TF: tuple[str, str] = ("1d", "1w")
 
 
 def apply_hysteresis_and_persistence(
@@ -935,6 +942,7 @@ def analyze_candles(
     forex_context: Optional[dict] = None,  # macro calendrier + DXY momentum
     tokenomics_context: Optional[dict] = None,  # token unlocks / concentration risk
     social_context: Optional[dict] = None,  # LunarCrush social sentiment
+    bias_regimes: Optional[dict[str, dict]] = None,  # D1/Weekly bias regimes
 ) -> dict:
     # ── Correlation ID for end-to-end tracing ──
     corr_id = set_correlation_id()
@@ -1033,6 +1041,7 @@ def analyze_candles(
     _sub_smc = 0
     _sub_mtf = 0
     _sub_sentiment = 0
+    _sub_bias = 0
 
     # ── Couche 1 : Momentum/Trend (EMA + RSI + MACD groupés, plafond ±50) ──
     # Les trois mesurent la même dimension (momentum directionnel).
@@ -1334,6 +1343,72 @@ def analyze_candles(
             _sub_mtf -= 10
             reasons.append(f"HTF({htf_label}): VOLATILE — réduction score")
 
+    # ── D1/Weekly Bias (couche générale, non bloquante) ──
+    # Le bias D1/Weekly apporte un bonus/malus léger sur le score.
+    # Contrairement au MTF/HTF, cette couche ne filtre jamais — elle ajuste seulement.
+    # D1 aligné = +10, D1 opposé = -5, Weekly aligné = +8, Weekly opposé = -4.
+    # Si D1 et Weekly sont opposés entre eux → pas de bonus (indécision macro).
+    if bias_regimes:
+        provisional_dir = "BUY" if score >= 0 else "SELL"
+        d1_regime = bias_regimes.get("1d")
+        w1_regime = bias_regimes.get("1w")
+
+        d1_aligned = False
+        w1_aligned = False
+        d1_opposed = False
+        w1_opposed = False
+
+        if d1_regime and d1_regime.get("regime") not in ("UNKNOWN", None):
+            d1_r = d1_regime["regime"]
+            if d1_r == "TRENDING_BULL" and provisional_dir == "BUY":
+                score += 10; _sub_bias += 10
+                reasons.append("Bias(D1): TRENDING_BULL aligné (+10)")
+                d1_aligned = True
+            elif d1_r == "TRENDING_BEAR" and provisional_dir == "SELL":
+                score += 10; _sub_bias += 10
+                reasons.append("Bias(D1): TRENDING_BEAR aligné (+10)")
+                d1_aligned = True
+            elif d1_r == "TRENDING_BULL" and provisional_dir == "SELL":
+                score -= 5; _sub_bias -= 5
+                reasons.append("Bias(D1): contre-tendance TRENDING_BULL (-5)")
+                d1_opposed = True
+            elif d1_r == "TRENDING_BEAR" and provisional_dir == "BUY":
+                score -= 5; _sub_bias -= 5
+                reasons.append("Bias(D1): contre-tendance TRENDING_BEAR (-5)")
+                d1_opposed = True
+
+        if w1_regime and w1_regime.get("regime") not in ("UNKNOWN", None):
+            w1_r = w1_regime["regime"]
+            # Si D1 et Weekly sont opposés, skip le Weekly (indécision macro)
+            if d1_aligned and w1_r in ("TRENDING_BULL", "TRENDING_BEAR"):
+                if (w1_r == "TRENDING_BULL" and provisional_dir == "BUY") or \
+                   (w1_r == "TRENDING_BEAR" and provisional_dir == "SELL"):
+                    score += 8; _sub_bias += 8
+                    reasons.append("Bias(1W): aligné avec D1 (+8)")
+                    w1_aligned = True
+                else:
+                    score -= 4; _sub_bias -= 4
+                    reasons.append("Bias(1W): opposé au signal (-4)")
+                    w1_opposed = True
+            elif d1_opposed and w1_r in ("TRENDING_BULL", "TRENDING_BEAR"):
+                # D1 déjà opposé — Weekly dans le sens du signal = renforcement du doute
+                if (w1_r == "TRENDING_BULL" and provisional_dir == "BUY") or \
+                   (w1_r == "TRENDING_BEAR" and provisional_dir == "SELL"):
+                    score += 4; _sub_bias += 4
+                    reasons.append("Bias(1W): aligné avec signal mais D1 opposé (+4)")
+                else:
+                    score -= 8; _sub_bias -= 8
+                    reasons.append("Bias(1W): opposé au signal, D1 aussi opposé (-8)")
+            elif not d1_aligned and not d1_opposed:
+                # D1 inconnu ou ranging — Weekly seul
+                if (w1_r == "TRENDING_BULL" and provisional_dir == "BUY") or \
+                   (w1_r == "TRENDING_BEAR" and provisional_dir == "SELL"):
+                    score += 5; _sub_bias += 5
+                    reasons.append("Bias(1W): aligné (+5)")
+                else:
+                    score -= 3; _sub_bias -= 3
+                    reasons.append("Bias(1W): opposé (-3)")
+
     # ── Forex macro context : DXY momentum adjustment ──
     if asset_type == "FOREX" and forex_context:
         dxy_adj = forex_context.get("score_adjustment", 0)
@@ -1358,6 +1433,14 @@ def analyze_candles(
         signal = "NEUTRAL"
         confidence = 0
         reasons.append("Macro risk: événement HIGH dans <2h — scan forex suspendu")
+
+    # ── Phase F — News filter for COMMODITY and CRYPTO (pre-strategy) ──
+    if asset_type in ("COMMODITY", "CRYPTO") and news_context and news_context.get("macro_risk"):
+        signal = "NEUTRAL"
+        confidence = 0
+        _next_ev = news_context.get("next_event", {})
+        _ev_title = _next_ev.get("title", "unknown") if isinstance(_next_ev, dict) else "unknown"
+        reasons.append(f"Macro risk: événement HIGH dans <2h ({_ev_title}) — signal suspendu")
 
     # Tokenomics danger : gros unlock imminent → signal désactivé
     if asset_type == "CRYPTO" and tokenomics_flags.get("danger_flag"):
@@ -1509,6 +1592,14 @@ def analyze_candles(
             confidence = 0
             reasons.append("Macro risk: événement HIGH dans <2h — scan forex suspendu")
 
+        # Phase F — News filter for COMMODITY and CRYPTO
+        if signal != "NEUTRAL" and news_context and news_context.get("macro_risk"):
+            signal = "NEUTRAL"
+            confidence = 0
+            _next_ev = news_context.get("next_event", {})
+            _ev_title = _next_ev.get("title", "unknown") if isinstance(_next_ev, dict) else "unknown"
+            reasons.append(f"Macro risk: événement HIGH dans <2h ({_ev_title}) — signal suspendu")
+
         # Tokenomics danger: big unlock imminent → signal disabled
         if signal != "NEUTRAL" and asset_type == "CRYPTO" and tokenomics_flags.get("danger_flag"):
             signal = "NEUTRAL"
@@ -1521,6 +1612,40 @@ def analyze_candles(
             if dxy_adj:
                 score += dxy_adj
                 reasons.extend(forex_context.get("reasons", []))
+
+        # Gold specialist bonus (DXY correlation + session + safe haven)
+        if signal != "NEUTRAL" and is_gold_symbol(symbol):
+            import time as _time
+            _utc_hour = _time.gmtime().tm_hour
+            _dxy_data = None
+            if gold_dxy:
+                _dxy_data = {
+                    "trend": "bullish" if gold_dxy.get("momentum_5d", 0) > 0 else "bearish" if gold_dxy.get("momentum_5d", 0) < 0 else "neutral",
+                    "change_pct": gold_dxy.get("momentum_5d", 0) * 100,
+                }
+            _gold_bonus, _gold_reasons = gold_specialist_bonus(signal, score, regime, _dxy_data, _utc_hour)
+            if _gold_bonus:
+                score += _gold_bonus
+                reasons.extend(_gold_reasons)
+                confidence = min(abs(score), 95) if signal != "NEUTRAL" else 0
+
+            # Gold-adapted ATR multipliers for SL/TP
+            if atr_v and entry:
+                _session_info = gold_session_info(_utc_hour)
+                _sl_m, _tp1_m, _tp2_m = gold_atr_adjustment(atr_v, entry, _session_info)
+                if signal == "BUY":
+                    sl = round(entry - atr_v * _sl_m, 6)
+                    tp1 = round(entry + atr_v * _tp1_m, 6)
+                    tp2 = round(entry + atr_v * _tp2_m, 6)
+                elif signal == "SELL":
+                    sl = round(entry + atr_v * _sl_m, 6)
+                    tp1 = round(entry - atr_v * _tp1_m, 6)
+                    tp2 = round(entry - atr_v * _tp2_m, 6)
+                rr_val = None
+                from utils.risk_reward import compute_rr as _compute_rr
+                if sl and tp1 and abs(entry - sl) > 0:
+                    rr_val = _compute_rr(entry, sl, tp1)
+                rr = rr_val if rr_val is not None else rr
 
         # Social sentiment bonus for Crypto
         if signal != "NEUTRAL" and asset_type == "CRYPTO" and social_context:
@@ -1556,6 +1681,24 @@ def analyze_candles(
                     score -= 15; reasons.append(f"HTF({_htf_tf}): contre-tendance TRENDING_BEAR")
                 elif _htf_r == "VOLATILE":
                     score -= 10; reasons.append(f"HTF({_htf_tf}): VOLATILE — réduction score")
+
+        # Re-apply D1/Weekly bias after strategy merge
+        if signal != "NEUTRAL" and bias_regimes:
+            _bias_dir = "BUY" if score >= 0 else "SELL"
+            _d1 = bias_regimes.get("1d")
+            _w1 = bias_regimes.get("1w")
+            if _d1 and _d1.get("regime") in ("TRENDING_BULL", "TRENDING_BEAR"):
+                _d1r = _d1["regime"]
+                if (_d1r == "TRENDING_BULL" and _bias_dir == "BUY") or (_d1r == "TRENDING_BEAR" and _bias_dir == "SELL"):
+                    score += 10; _sub_bias += 10; reasons.append("Bias(D1): aligné (+10)")
+                else:
+                    score -= 5; _sub_bias -= 5; reasons.append("Bias(D1): opposé (-5)")
+            if _w1 and _w1.get("regime") in ("TRENDING_BULL", "TRENDING_BEAR"):
+                _w1r = _w1["regime"]
+                if (_w1r == "TRENDING_BULL" and _bias_dir == "BUY") or (_w1r == "TRENDING_BEAR" and _bias_dir == "SELL"):
+                    score += 8; _sub_bias += 8; reasons.append("Bias(1W): aligné (+8)")
+                else:
+                    score -= 4; _sub_bias -= 4; reasons.append("Bias(1W): opposé (-4)")
 
         # ── Re-apply liquidity-aware SL/TP after strategy merge ──
         # evaluate_strategy returns ATR-based SL/TP which overwrites the
@@ -1787,6 +1930,7 @@ def analyze_candles(
             "score_smc": _sub_smc,
             "score_mtf": _sub_mtf,
             "score_sentiment": _sub_sentiment,
+            "score_bias": _sub_bias,
         },
         "session": {
             "session": session_info.get("session"),
@@ -1896,7 +2040,7 @@ def analyze_candles(
     return result
 
 
-async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None, strategy: Optional[dict] = None) -> dict:
+async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None, strategy: Optional[dict] = None, bias_regimes: Optional[dict[str, dict]] = None) -> dict:
     """Fetch klines et analyse un actif — utilisé par warmup et fallback."""
     tf = TF_MAP.get(timeframe, "1h")
     df = await fetch_binance_klines(symbol, tf)
@@ -1909,10 +2053,46 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     if df is None or len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
 
-    # Forex macro context (DXY momentum + economic calendar) — computed async before sync analysis
+    # Fetch D1/Weekly bias regimes if not provided
+    if bias_regimes is None:
+        bias_regimes = {}
+        for bias_tf in _BIAS_TF:
+            try:
+                df_bias = await asyncio.wait_for(fetch_binance_klines(symbol, bias_tf, limit=100), timeout=3.0)
+                if df_bias is None:
+                    df_bias = await asyncio.wait_for(fetch_yfinance_klines(symbol, bias_tf, limit=100), timeout=5.0)
+                if df_bias is not None and len(df_bias) >= 50:
+                    bias_regimes[bias_tf] = detect_regime(df_bias["high"], df_bias["low"], df_bias["close"])
+            except Exception:
+                pass
+
+    # Macro context (economic calendar + DXY) — computed async before sync analysis
+    # Phase F: now applies to FOREX, COMMODITY, and CRYPTO (not just FOREX)
     forex_context = None
-    if get_asset_type(symbol) == "FOREX":
-        _, forex_context = await should_suspend_forex(symbol)
+    news_context = None
+    _asset_type_for_news = get_asset_type(symbol)
+    if _asset_type_for_news in ("FOREX", "COMMODITY", "CRYPTO"):
+        try:
+            _suspend, _news_ctx = await asyncio.wait_for(
+                should_suspend_signal(symbol, _asset_type_for_news),
+                timeout=10.0,
+            )
+            if _asset_type_for_news == "FOREX":
+                forex_context = _news_ctx
+            else:
+                news_context = _news_ctx
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            pass
+
+    # Gold specialist: fetch DXY for gold symbols (inverse correlation)
+    gold_dxy = None
+    if is_gold_symbol(symbol):
+        try:
+            gold_dxy = await asyncio.wait_for(get_dxy_momentum(days=5), timeout=5.0)
+        except Exception:
+            gold_dxy = None
 
     # Tokenomics risk (crypto) — computed async before sync analysis
     tokenomics_context = None
@@ -1942,6 +2122,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             forex_context=forex_context,
             tokenomics_context=tokenomics_context,
             social_context=social_context,
+            bias_regimes=bias_regimes if bias_regimes else None,
         ),
     )
 
@@ -2203,6 +2384,63 @@ async def scan_multi(req: ScanRequest):
         if htf_tf == mtf_tf:
             htf_regimes = dict(mtf_regimes)
 
+    # 1a-bis. Fetch régimes D1 + Weekly pour le bias général (toujours, quel que soit le TF)
+    # Ces regimes sont utilisés comme couche de bias non bloquante dans analyze_candles.
+    bias_regimes_by_sym: dict[str, dict[str, dict]] = {}  # sym -> {"1d": regime, "1w": regime}
+    if missing_symbols:
+        d1_tf, w1_tf = _BIAS_TF
+
+        async def _fetch_bias_regime(sym: str, interval: str) -> tuple[str, str, Optional[dict]]:
+            try:
+                df_b = await asyncio.wait_for(
+                    fetch_binance_klines(sym, interval, limit=100),
+                    timeout=3.0,
+                )
+                if df_b is None:
+                    df_b = await asyncio.wait_for(
+                        fetch_deriv_klines(sym, interval, limit=100),
+                        timeout=5.0,
+                    )
+                if df_b is None:
+                    df_b = await asyncio.wait_for(
+                        fetch_yfinance_klines(sym, interval, limit=100),
+                        timeout=6.0,
+                    )
+                if df_b is None:
+                    df_b = await asyncio.wait_for(
+                        fetch_twelvedata_klines(sym, interval, limit=100),
+                        timeout=3.0,
+                    )
+                if df_b is not None and len(df_b) >= 50:
+                    r = detect_regime(df_b["high"], df_b["low"], df_b["close"])
+                    return sym, interval, r
+            except Exception as exc:
+                logger.warning("bias_regime_fetch_failed", symbol=sym, interval=interval, error=str(exc))
+            return sym, interval, None
+
+        # Ne pas re-fetch D1 si c'est déjà le HTF (évite les appels dupliqués)
+        bias_tfs_to_fetch = []
+        if d1_tf != htf_tf or not missing_symbols:
+            bias_tfs_to_fetch.append(d1_tf)
+        if w1_tf != htf_tf and w1_tf != d1_tf:
+            bias_tfs_to_fetch.append(w1_tf)
+
+        if bias_tfs_to_fetch:
+            bias_tasks = []
+            for interval in bias_tfs_to_fetch:
+                for sym in missing_symbols:
+                    bias_tasks.append(_fetch_bias_regime(sym, interval))
+            # Si D1 est déjà le HTF, réutiliser les regimes déjà fetchés
+            bias_results = await asyncio.gather(*bias_tasks, return_exceptions=True)
+            for item in bias_results:
+                if not isinstance(item, Exception):
+                    sym, interval, reg = item
+                    bias_regimes_by_sym.setdefault(sym, {})[interval] = reg
+            # Réutiliser D1 du HTF si applicable
+            if d1_tf == htf_tf and htf_regimes:
+                for sym, reg in htf_regimes.items():
+                    bias_regimes_by_sym.setdefault(sym, {})[d1_tf] = reg
+
     # 1b. Fetch toutes les klines LTF en parallèle — Binance + Deriv + yfinance + TwelveData fallback, timeout 15s
     fetch_coros = [asyncio.wait_for(_fetch(sym), timeout=15.0) for sym in missing_symbols]
     dfs_raw = await asyncio.gather(*fetch_coros, return_exceptions=True)
@@ -2345,21 +2583,28 @@ async def scan_multi(req: ScanRequest):
             onchain_ctx = onchain_contexts.get(sym)
             tokenomics_ctx = tokenomics_contexts.get(sym)
             social_ctx = social_contexts.get(sym)
+            bias_r = bias_regimes_by_sym.get(sym)
             if req.strategies:
                 for strat in req.strategies:
                     etf = strat.get("entryTimeframe") or strat.get("entry_timeframe")
                     entry_ctx = entry_contexts.get((sym, etf)) if etf else None
                     analyze_tasks.append(
                         loop.run_in_executor(
-                            _executor, analyze_candles, sym, req.timeframe, df,
-                            htf_r, mtf_r, strat, onchain_ctx, entry_ctx, None, tokenomics_ctx, social_ctx,
+                            _executor,
+                            lambda s=sym, tf=req.timeframe, d=df, h=htf_r, m=mtf_r, st=strat,
+                                   oc=onchain_ctx, ec=entry_ctx, fc=None, tc=tokenomics_ctx,
+                                   sc=social_ctx, br=bias_r:
+                                analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc, bias_regimes=br),
                         )
                     )
             else:
                 analyze_tasks.append(
                     loop.run_in_executor(
-                        _executor, analyze_candles, sym, req.timeframe, df,
-                        htf_r, mtf_r, None, onchain_ctx, None, None, tokenomics_ctx, social_ctx,
+                        _executor,
+                        lambda s=sym, tf=req.timeframe, d=df, h=htf_r, m=mtf_r, st=None,
+                               oc=onchain_ctx, ec=None, fc=None, tc=tokenomics_ctx,
+                               sc=social_ctx, br=bias_r:
+                            analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc, bias_regimes=br),
                     )
                 )
 

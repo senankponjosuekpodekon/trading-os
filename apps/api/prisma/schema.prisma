@@ -271,6 +271,7 @@ model Signal {
   stopLoss     Decimal?
   takeProfit1  Decimal?
   takeProfit2  Decimal?
+  takeProfit3  Decimal?
   riskReward        Float?
   profileSuitability String[] @default([])
   qualityScore     Float?        @map("quality_score")
@@ -320,6 +321,7 @@ model SignalFeedback {
 enum PositionStatus {
   OPEN
   PARTIAL
+  PARTIAL_2
   CLOSED
   CANCELLED
   PENDING
@@ -330,6 +332,7 @@ model Position {
   portfolioId  String
   assetId      String
   signalId     String?
+  parentPositionId String?    @map("parent_position_id") // Phase B — pyramiding: link to original position
   status       PositionStatus @default(OPEN)
   direction    SignalType
   entryPrice   Decimal
@@ -339,12 +342,16 @@ model Position {
   stopLoss     Decimal?
   takeProfit   Decimal?       // TP1
   takeProfit2  Decimal?       // Sprint 5 — second palier, déclenche le partial close
+  takeProfit3  Decimal?       // Phase B — third tier for 50/30/20 scaling out
   trailingStop Decimal?
   trailingMethod String?       @default("atr") // atr | swing | ema | chandelier
   trailingActive Boolean     @default(true)
   partialExitPrice Decimal?   // prix de clôture de la première moitié
   partialExitAt    DateTime?
   partialPnl       Decimal?   // PnL réalisé sur la moitié clôturée au TP1
+  secondPartialExitPrice Decimal?  // Phase B — prix de clôture 2e tranche (30%)
+  secondPartialExitAt    DateTime?
+  secondPartialPnl       Decimal?  // PnL réalisé sur la 2e tranche
   pnl          Decimal?
   pnlPercent   Float?
   openedAt     DateTime       @default(now())
@@ -360,6 +367,7 @@ model Position {
   @@index([assetId])
   @@index([assetId, status])
   @@index([signalId])
+  @@index([parentPositionId])
   @@index([status])
   @@index([openedAt(sort: Desc)])
   @@map("positions")
@@ -371,6 +379,7 @@ model Position {
 
 enum SignalOutcome {
   PENDING
+  STILL_OPEN
   WIN_TP1
   WIN_TP2
   LOSS_SL
@@ -399,6 +408,7 @@ model SignalLog {
   scoreSMC        Float?        @map("score_smc")
   scoreMTF        Float?        @map("score_mtf")
   scoreSentiment  Float?        @map("score_sentiment")
+  scoreBias       Float?        @map("score_bias")
   scoreTotal      Float         @map("score_total")
   regime          String?
   adx             Float?

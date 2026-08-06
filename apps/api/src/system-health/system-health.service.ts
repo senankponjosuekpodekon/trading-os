@@ -233,4 +233,41 @@ export class SystemHealthService {
     }
     return result;
   }
+
+  async getDataFlow() {
+    const [assets, strategies, signals24h, signals7d, positions, signalLogs, features] = await Promise.all([
+      this.prismaSystem.asset.count({ where: { isActive: true } }),
+      this.prismaSystem.strategy.count({ where: { isActive: true } }),
+      this.prismaSystem.signal.count({ where: { createdAt: { gte: new Date(Date.now() - 86400000) } } }),
+      this.prismaSystem.signal.count({ where: { createdAt: { gte: new Date(Date.now() - 7 * 86400000) } } }),
+      this.prismaSystem.position.count({ where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } } }),
+      this.prismaSystem.signalLog.count(),
+      this.prismaSystem.signalFeature.count(),
+    ]);
+
+    const outcomeBreakdown = await this.prismaSystem.signalLog.groupBy({
+      by: ['outcome'],
+      _count: true,
+    });
+
+    const cronStatus = this.getCronStatus();
+
+    return {
+      pipeline: {
+        assets,
+        strategies,
+        signals24h,
+        signals7d,
+        openPositions: positions,
+        signalLogs,
+        features,
+      },
+      outcomes: outcomeBreakdown.reduce((acc, o) => {
+        acc[o.outcome] = o._count;
+        return acc;
+      }, {} as Record<string, number>),
+      crons: cronStatus,
+      timestamp: new Date().toISOString(),
+    };
+  }
 }

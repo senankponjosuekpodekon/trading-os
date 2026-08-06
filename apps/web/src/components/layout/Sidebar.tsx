@@ -31,6 +31,7 @@ const nav = [
   { href: '/deriv',      label: 'Deriv V75',    icon: Activity },
   { href: '/onchain',    label: 'On-chain',    icon: Database },
   { href: '/observability', label: 'Observability', icon: Eye },
+  { href: '/admin',        label: 'Admin',         icon: ShieldAlert },
   { href: '/economic-calendar', label: 'Calendrier', icon: Calendar },
   { href: '/channels',  label: 'Canaux',      icon: Radio },
   { href: '/journal',    label: 'Journal',     icon: BookOpen },

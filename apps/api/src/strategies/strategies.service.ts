@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotaService } from '../billing/quota.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 import { CreateStrategyDto, UpdateStrategyDto, ToggleUserStrategyDto } from './dto/create-strategy.dto';
 import { validateStrategyRules } from './rules-validator';
 
@@ -9,6 +10,7 @@ export class StrategiesService {
   constructor(
     private prisma: PrismaService,
     private quota: QuotaService,
+    private engine: EngineHttpService,
   ) {}
 
   async findAll() {
@@ -100,11 +102,146 @@ export class StrategiesService {
     });
   }
 
+  async fromText(description: string, save = false, userId?: string) {
+    if (!description || description.trim().length < 10) {
+      throw new BadRequestException('Description trop courte (min 10 caractères)');
+    }
+
+    const result = await this.engine.post('/llm/strategy-from-text', {
+      description: description.trim(),
+      language: 'fr',
+    }, { timeout: 120_000, maxRetries: 0 });
+
+    if (result.error) {
+      throw new BadRequestException(`LLM n'a pas pu générer une stratégie valide: ${result.error}`);
+    }
+
+    const rules = result.rules;
+    const name = result.name || 'Generated Strategy';
+    const desc = result.description || description.slice(0, 200);
+
+    // Validate the generated rules
+    try {
+      validateStrategyRules(rules);
+    } catch (e: any) {
+      // Return the raw rules with validation errors so the user can adjust
+      return {
+        saved: false,
+        name,
+        description: desc,
+        rules,
+        validationErrors: e.response?.errors ?? [e.message],
+        provider: result.provider,
+        model: result.model,
+      };
+    }
+
+    if (!save) {
+      return {
+        saved: false,
+        name,
+        description: desc,
+        rules,
+        provider: result.provider,
+        model: result.model,
+      };
+    }
+
+    // Save to DB
+    const strategy = await this.prisma.strategy.create({
+      data: {
+        name,
+        description: desc,
+        rules,
+        analysisTimeframe: rules.analysis_timeframe ?? null,
+        entryTimeframe: rules.entry_timeframe ?? null,
+        isActive: false, // Admin must activate manually
+      },
+    });
+
+    return {
+      saved: true,
+      strategy,
+      provider: result.provider,
+      model: result.model,
+    };
+  }
+
   async getStats() {
     const [total, active] = await Promise.all([
       this.prisma.strategy.count(),
       this.prisma.strategy.count({ where: { isActive: true } }),
     ]);
     return { total, active };
+  }
+
+  async getStrategyPerformance() {
+    const strategies = await this.prisma.strategy.findMany({
+      include: {
+        signals: {
+          where: { isActive: false },
+          select: {
+            id: true,
+            signal: true,
+            confidence: true,
+            createdAt: true,
+            asset: { select: { symbol: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 500,
+        },
+      },
+    });
+
+    const result = await Promise.all(
+      strategies.map(async (s) => {
+        const positions = await this.prisma.position.findMany({
+          where: { signal: { strategyId: s.id }, status: 'CLOSED' },
+          select: {
+            pnl: true,
+            pnlPercent: true,
+            direction: true,
+            openedAt: true,
+            closedAt: true,
+          },
+        });
+
+        const totalPnl = positions.reduce(
+          (sum, p) => sum + parseFloat((p.pnl ?? 0).toString()),
+          0,
+        );
+        const wins = positions.filter(p => parseFloat((p.pnl ?? 0).toString()) > 0).length;
+        const losses = positions.filter(p => parseFloat((p.pnl ?? 0).toString()) <= 0).length;
+        const winRate = positions.length > 0 ? (wins / positions.length) * 100 : 0;
+        const avgPnlPct = positions.length > 0
+          ? positions.reduce((sum, p) => sum + parseFloat((p.pnlPercent ?? 0).toString()), 0) / positions.length
+          : 0;
+
+        const signalCount = s.signals.length;
+        const buyCount = s.signals.filter(sig => sig.signal === 'BUY').length;
+        const sellCount = s.signals.filter(sig => sig.signal === 'SELL').length;
+        const avgConfidence = signalCount > 0
+          ? s.signals.reduce((sum, sig) => sum + parseFloat(sig.confidence.toString()), 0) / signalCount
+          : 0;
+
+        return {
+          strategyId: s.id,
+          name: s.name,
+          isActive: s.isActive,
+          signalsGenerated: signalCount,
+          buyCount,
+          sellCount,
+          avgConfidence: parseFloat(avgConfidence.toFixed(1)),
+          tradesClosed: positions.length,
+          wins,
+          losses,
+          winRate: parseFloat(winRate.toFixed(1)),
+          totalPnl: parseFloat(totalPnl.toFixed(2)),
+          avgPnlPct: parseFloat(avgPnlPct.toFixed(2)),
+        };
+      }),
+    );
+
+    return result.sort((a, b) => b.totalPnl - a.totalPnl);
   }
 }

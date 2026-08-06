@@ -59,6 +59,7 @@ export class SignalOutcomeService {
           scoreSMC:      indicators.score_smc      ?? null,
           scoreMTF:      indicators.score_mtf      ?? null,
           scoreSentiment:indicators.score_sentiment?? null,
+          scoreBias:      indicators.score_bias      ?? null,
           scoreTotal:    indicators.score_total    ?? r.score ?? r.confidence,
           regime:        r.regime?.regime           ?? null,
           adx:           r.regime?.adx              ?? null,
@@ -104,25 +105,35 @@ export class SignalOutcomeService {
 
       const pending = await this.prisma.signalLog.findMany({
         where: { outcome: 'PENDING' },
-        take: 200,
+        take: 500,
+        orderBy: { createdAt: 'asc' },
       });
+
+      let resolved = 0;
+      let stillOpen = 0;
+      let expired = 0;
 
       for (const log of pending) {
         try {
-          await this._resolveOne(log);
+          const result = await this._resolveOne(log);
+          if (result === 'RESOLVED') resolved++;
+          else if (result === 'STILL_OPEN') stillOpen++;
+          else if (result === 'EXPIRED') expired++;
         } catch (e: any) {
           this.logger.warn(`resolveOne failed ${log.symbol}: ${e?.message}`);
         }
       }
 
-      this.logger.log(`OUTCOME: ${pending.length} signaux vérifiés`);
+      this.logger.log(
+        `OUTCOME: ${pending.length} vérifiés — ${resolved} résolus, ${stillOpen} encore ouverts, ${expired} expirés`,
+      );
       this.health.recordCronRun('resolve-outcomes', 'ok');
     } catch (e: any) {
       this.health.recordCronRun('resolve-outcomes', 'error', e?.message);
     }
   }
 
-  private async _resolveOne(log: any) {
+  private async _resolveOne(log: any): Promise<'RESOLVED' | 'STILL_OPEN' | 'EXPIRED' | 'SKIP'> {
     const tf = log.timeframe;
     const bars = TF_TO_BARS_LOOKBACK[tf] ?? 24;
     const interval = TF_TO_BINANCE_INTERVAL[tf] ?? '1h';
@@ -138,16 +149,25 @@ export class SignalOutcomeService {
     // For non-Binance symbols, try resolving via the engine (which has all providers)
     if (!binanceSym) {
       const resolved = await this._resolveViaEngine(log).catch(() => null);
-      if (resolved) return;
-      // Engine resolution failed — expire after 5 days
+      if (resolved) return 'RESOLVED';
+      // Engine resolution failed — check age
       const age = (Date.now() - new Date(log.createdAt).getTime()) / 86_400_000;
       if (age > 5) {
         await this.prisma.signalLog.update({
           where: { id: log.id },
           data: { outcome: 'EXPIRED', outcomeAt: new Date() },
         });
+        return 'EXPIRED';
       }
-      return;
+      // Still within window — mark as STILL_OPEN
+      if (age > 0.5) {
+        await this.prisma.signalLog.update({
+          where: { id: log.id },
+          data: { outcome: 'STILL_OPEN' },
+        });
+        return 'STILL_OPEN';
+      }
+      return 'SKIP';
     }
 
     const url = `https://api.binance.com/api/v3/klines?symbol=${binanceSym}&interval=${interval}&limit=${bars}`;
@@ -189,15 +209,26 @@ export class SignalOutcomeService {
       }
     }
 
-    // Expiré si plus de N bougies sans résultat
+    // Pas d'outcome sur les bougies récentes — vérifier l'âge
     if (!outcome) {
       const age = (Date.now() - created) / 1000;
       const tfSecs: Record<string, number> = {
         '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400,
       };
-      if (age > (tfSecs[tf] ?? 3600) * bars) {
+      const maxAgeSec = (tfSecs[tf] ?? 3600) * bars;
+      if (age > maxAgeSec) {
         outcome = 'EXPIRED';
         outcomeAt = new Date();
+      } else if (age > tfSecs[tf] * 2) {
+        // Signal a au moins 2 bougies d'âge mais pas encore expiré → STILL_OPEN
+        await this.prisma.signalLog.update({
+          where: { id: log.id },
+          data: { outcome: 'STILL_OPEN' },
+        });
+        return 'STILL_OPEN';
+      } else {
+        // Trop récent — attendre plus de bougies
+        return 'SKIP';
       }
     }
 
@@ -223,7 +254,9 @@ export class SignalOutcomeService {
         const pnlPct = realizedPnlPct ?? null;
         await this.featureStore.attachOutcome(log.signalId, outcome, pnlPct);
       }
+      return outcome === 'EXPIRED' ? 'EXPIRED' : 'RESOLVED';
     }
+    return 'SKIP';
   }
 
   /**
@@ -496,6 +529,7 @@ export class SignalOutcomeService {
     scoreSMC?: number;
     scoreMTF?: number;
     scoreSentiment?: number;
+    scoreBias?: number;
     scoreTotal?: number;
     riskReward?: number;
     adx?: number;
@@ -503,7 +537,7 @@ export class SignalOutcomeService {
   }) {
     const FEATURE_KEYS: (keyof typeof input)[] = [
       'confidence', 'scoreTrend', 'scorePA', 'scoreSR', 'scorePatterns',
-      'scoreRegime', 'scoreSMC', 'scoreMTF', 'scoreSentiment', 'scoreTotal',
+      'scoreRegime', 'scoreSMC', 'scoreMTF', 'scoreSentiment', 'scoreBias', 'scoreTotal',
       'riskReward', 'adx',
     ];
 
@@ -540,7 +574,7 @@ export class SignalOutcomeService {
     const maxs: Record<string, number> = {
       confidence: 100, scoreTrend: 100, scorePA: 100, scoreSR: 100,
       scorePatterns: 100, scoreRegime: 100, scoreSMC: 100, scoreMTF: 100,
-      scoreSentiment: 100, scoreTotal: 100, riskReward: 10, adx: 100,
+      scoreSentiment: 100, scoreBias: 100, scoreTotal: 100, riskReward: 10, adx: 100,
     };
     return keys.map(k => {
       const v = typeof obj[k] === 'number' && !Number.isNaN(obj[k]) ? (obj[k] as number) : 0;

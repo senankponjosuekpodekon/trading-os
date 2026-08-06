@@ -1,13 +1,17 @@
 import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PositionsService } from './positions.service';
+import { CrossPositionRiskService } from './cross-position-risk.service';
 import { CreatePositionDto } from './dto/create-position.dto';
 import { UpdateTrailingStopDto } from './dto/update-trailing-stop.dto';
 
 @Controller('positions')
 @UseGuards(JwtAuthGuard)
 export class PositionsController {
-  constructor(private positionsService: PositionsService) {}
+  constructor(
+    private positionsService: PositionsService,
+    private crossRisk: CrossPositionRiskService,
+  ) {}
 
   @Post()
   create(@Request() req: any, @Body() dto: CreatePositionDto) {
@@ -50,6 +54,11 @@ export class PositionsController {
     return this.positionsService.getSummary(req.user.id, portfolioId);
   }
 
+  @Get('correlation-report')
+  getCorrelationReport(@Request() req: any, @Query('portfolioId') portfolioId: string) {
+    return this.crossRisk.getCorrelationReport(portfolioId);
+  }
+
   @Patch(':id/close')
   close(
     @Request() req: any,
@@ -75,5 +84,10 @@ export class PositionsController {
     @Body('currentPrice') currentPrice?: number,
   ) {
     return this.positionsService.continuationAdvice(req.user.id, id, currentPrice);
+  }
+
+  @Post(':id/pyramid')
+  pyramid(@Request() req: any, @Param('id') id: string) {
+    return this.positionsService.pyramid(req.user.id, id);
   }
 }

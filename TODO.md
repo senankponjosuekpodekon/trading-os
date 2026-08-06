@@ -12,8 +12,18 @@ Phase A (prochain) → Enrichissement par marché : on-chain, macro, tick stats
 Phase A+           → Solidifier le moteur : Swing Detection, BOS Score, Session feature, SL liquidity-aware
 Phase A++          → Synthetic Market Engine + Unified Market Representation
 Phase B            → ML scoring + Feature Factory + Probability Engine + feedback loop
-Phase C            → Analyse asymétrique pré-listing + alpha on-chain + Backtesting scientifique (anti-overfitting)
-Phase D            → Multi-agents autonomes + Market Memory System + Self-Learning + exécution réelle
+Phase B+           → Position Management : 3-tier scaling, pyramiding, trailing stops ✅
+Phase C            → Text-to-Strategy (LLM → rules JSON) ✅
+Phase D            → Dashboard Admin : santé système, data flow, performance stratégies ✅
+Phase E            → Gold Specialist : DXY inverse, sessions London/NY, safe haven, ATR adapté ✅
+Phase F            → News filter étendu : crypto + commodities (pas juste forex) ✅
+Phase G            → Cross-position correlation risk ✅
+Phase H            → Daily Pulse & RSS aggregation (inspiré Token Metrics)
+Phase I            → ML avancé : XGBoost + FinBERT + Token Grade 0-100
+Phase J            → US Stocks & Indices (NASDAQ, S&P500, AAPL, etc.)
+Phase K            → YouTube & Reddit sentiment analysis
+Phase L            → Portfolio rebalancing + Hidden Gems + AI Defense Report
+Phase D (vision)   → Multi-agents autonomes + Market Memory System + Self-Learning + exécution réelle
 Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timeline) + Data Pipeline scalable
 ```
 
@@ -207,12 +217,9 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 ## 🔑 À FAIRE PAR TOI (actions externes / comptes)
 
 ### Clés API MVP
-- [ ] 👤 Créer compte **newsapi.org** (gratuit) → copier `NEWS_API_KEY` dans `.env`
-  - Plan gratuit : 100 req/jour — suffisant (cache 15 min actif)
-- [ ] 👤 Optionnel : créer compte **OpenAI** → `OPENAI_API_KEY` pour activer GPT-4o
-  - Alternative gratuite : installer Ollama local (`ollama pull llama3.2`)
-- [ ] 👤 Optionnel : créer compte **Twelve Data** → `TWELVE_DATA_API_KEY` pour Forex réel
-  - Plan gratuit : 800 req/jour — https://twelvedata.com
+- [x] 👤 Créer compte **newsapi.org** (gratuit) → `NEWS_API_KEY` dans `.env` ✅
+- [x] 👤 Créer compte **OpenAI** → `OPENAI_API_KEY` ✅ (maintenant priorité #1, Ollama en fallback)
+- [x] 👤 Compte **Twelve Data** → `TWELVE_DATA_API_KEY` pour Forex réel ✅
 - [ ] 👤 Optionnel : générer **DERIV_TOKEN** pour trades réels
   - App Deriv → API Token → permission : Trade, Read
 
@@ -1320,7 +1327,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 ## �🚀 Déploiement (priorité)
 
-- [ ] 👤 Louer VPS Hetzner (CX21 min — 2 vCPU, 4GB RAM, 40GB SSD)
+- [x] 👤 Louer VPS Hetzner (CX21 min — 2 vCPU, 4GB RAM, 40GB SSD) ✅
   - Région : Nuremberg ou Helsinki
   - OS : Ubuntu 24.04 LTS
 - [ ] 👤 Pointer domaine DNS → IP VPS
@@ -1987,6 +1994,49 @@ Une stratégie peut être approuvée uniquement pour les profils où elle perfor
 ## 🔥 Priorités actuelles — Ce qui manque
 
 > Synthèse des manques identifiés suite aux échanges. Les points sont triés du plus critique au plus stratégique.
+> Mise à jour août 2026 : VPS + clés API déjà en place. OpenAI maintenant en priorité #1, Ollama en fallback.
+
+### ⚡ Nouvelles priorités — Août 2026
+
+#### Phase A — Outcome Tracker + Feature Store automatique (CRITIQUE)
+- [ ] 🤖 **Outcome Tracker** : job périodique qui vérifie les signaux BUY/SELL des dernières 24h
+  - Récupère le prix actuel, compare avec entry/SL/TP1/TP2
+  - Label: WIN_TP1, WIN_TP2, LOSS_SL, EXPIRED, STILL_OPEN
+  - Stocke dans `signal_features.outcome` + `pnl`
+  - Objectif: 5000+ signaux labellisés pour entraîner le ML
+- [ ] 🤖 **Feature Store automatique** : à chaque signal BUY/SELL, stocker features dans `signal_features`
+  - Pas juste 14 records — tous les signaux
+  - Inclure sentiment news, on-chain, volume profile, time since last BOS
+
+#### Phase B — Position Management Engine (RENTABLE)
+- [ ] 🤖 **Pyramiding** : ajouter des positions quand le signal se confirme
+- [ ] 🤖 **Scaling out** : sortir en plusieurs tranches (50% à TP1, 30% à TP2, 20% à TP3)
+- [ ] 🤖 **Trailing stop adaptatif** : déjà implémenté (4 méthodes) — connecter au position management
+
+#### Phase C — Text-to-Strategy (DIFFÉRENCIATEUR SaaS)
+- [ ] 🤖 **Endpoint `/strategies/from-text`** : LLM génère le JSON rules depuis une description texte
+  - User: "J'analyse les support et résistance en D1, H4, H1 avant de penser à l'analyse chartiste"
+  - LLM → génère rules JSON compatible `Strategy.rules`
+  - Validation du JSON + sauvegarde en base
+  - Utilise OpenAI gpt-4o (maintenant priorité #1)
+
+#### Phase D — Dashboard Admin enrichi
+- [ ] 🤖 **Vue temps réel** des scans en cours (WebSocket)
+- [ ] 🤖 **Vue historique** des signaux (graphes, pas juste compteurs)
+- [ ] 🤖 **Vue performance par stratégie** (win rate, PnL)
+- [ ] 🤖 **Vue data flow** (source → fetch → analyze → cache → DB → signal)
+- [ ] 🤖 **Vue santé système** (Redis, DB, API sources)
+Timing engine?  Thinking engine?
+le superadmin pourrait recevoir des conseils d'optimisation? supposons aussi qu'un user met une strategie dont les element n'etait pas implementer dans notre systeme
+
+#### Phase E — Gold Specialist Strategy
+- [ ] 🤖 **Stratégie dédiée XAU/USD** : corrélation DXY inverse, sessions London/NY, safe haven en VOLATILE, ATR adapté
+
+#### Phase F — News filter tous marchés
+- [ ] 🤖 **Étendre news filter** à crypto/commodités (pas juste forex)
+
+#### Phase G — Risk cross-position
+- [ ] 🤖 **Corrélation entre positions simultanées** : limiter l'exposition sur actifs corrélés
 
 ### 0. Passer de la lecture du marché à la prédiction du prochain pas
 
@@ -2353,3 +2403,176 @@ Nouveau router `engine/routers/options.py` (~100 lignes) :
 - Aucune nouvelle lib — `httpx` déjà utilisé partout
 - Aucune clé API — endpoints publics Deribit
 - Complète (ne remplace pas) l'existant : futures OI (Binance) dans `onchain.py` + OI history (Coinalyze) dans `onchain_advanced.py`
+
+
+---
+
+## ✅ Phases B+ à G — Implémentées (Août 2026)
+
+### Phase B+ — Position Management Engine ✅
+
+- [x] 🤖 **3-tier scaling out (50/30/20)** — TP1/TP2/TP3
+  - `Position` étendue : `takeProfit3`, `secondPartialExitPrice`, `secondPartialExitAt`, `secondPartialPnl`
+  - `PositionStatus.PARTIAL_2` ajouté au enum
+  - `_syncOneTrailingStop` réécrit pour le lifecycle 3-tier
+  - `secondPartialCloseByWatcher` + `closeByWatcher` gère `PARTIAL_2` et agrège PnL
+  - `openFromSignal`, `create`, `getLivePositions`, `getSummary`, `syncTrailingStops` → tous incluent `PARTIAL_2`
+
+- [x] 🤖 **Pyramiding** — ajout à position existante après TP1
+  - `parentPositionId` sur `Position` + index
+  - `pyramid()` method : +25% quantité au prix courant, SL au breakeven
+  - Anti-duplicate : un seul child pyramid par parent
+  - Endpoint `POST /positions/:id/pyramid`
+
+- [x] 🤖 **Trailing stops connectés** — vérification ATR/Swing/EMA/Chandelier
+  - Tous les méthodes déjà implémentées dans `trailing_stop.py` (engine)
+  - `syncTrailingStops` cron gère `OPEN`, `PARTIAL`, `PARTIAL_2`
+
+### Phase C — Text-to-Strategy ✅
+
+- [x] 🤖 **`POST /llm/strategy-from-text`** (engine) — LLM génère rules JSON depuis description texte
+  - System prompt détaillé avec schema JSON complet
+  - `_call_llm_with_fallback` (OpenAI gpt-4o → Ollama → mock)
+  - Extraction JSON robuste (code fences, fallback regex)
+
+- [x] 🤖 **`POST /strategies/from-text`** (API) — endpoint admin
+  - `StrategiesService.fromText()` : appelle engine, valide rules, sauve optionnellement
+  - `EngineHttpModule` injecté dans `StrategiesModule`
+  - Si validation échoue → retourne rules + erreurs pour ajustement utilisateur
+
+### Phase D — Dashboard Admin ✅
+
+- [x] 🤖 **`GET /strategies/performance`** — win rate, PnL, signaux par stratégie
+- [x] 🤖 **`GET /system/data-flow`** — pipeline complet : assets → strategies → signals → positions → logs → features
+  - Outcome breakdown (TP_HIT, SL_HIT, STILL_OPEN, etc.)
+  - Cron status temps réel
+- [x] 🤖 **Page `/admin`** (frontend) — 3 tabs : Santé système, Data Flow, Stratégies
+  - Health checks avec statuts ok/warning/critical
+  - Pipeline visualization (Assets → Strategies → Signals → Positions → Logs → Features)
+  - Table performance par stratégie (win rate, PnL, avg confidence)
+  - Sidebar navigation mise à jour
+
+### Phase E — Gold Specialist Strategy ✅
+
+- [x] 🤖 **`engine/routers/gold_specialist.py`** — Module spécialisé XAU/USD
+  - DXY inverse correlation : DXY bearish → gold bullish bias (+15)
+  - Session awareness : London/NY overlap = peak volume (+10), Asian = low (-8)
+  - Safe haven : VOLATILE regime → gold bullish bias (+12)
+  - ATR adapté par session : multipliers ajustés selon vol_multiplier
+  - `is_gold_symbol()` : XAU/USD, PAXG/USDT, etc.
+
+- [x] 🤖 **Intégration scan.py** — gold specialist bonus appliqué après `evaluate_strategy`
+  - DXY fetch pour gold symbols
+  - SL/TP recalculés avec ATR multipliers gold-spécifiques
+
+- [x] 🤖 **Seed "Gold Specialist XAU/USD"** — EMA 9/21/50, RSI 14, SMC, COMMODITIES, VOLATILE allowed
+
+### Phase F — News Filter étendu ✅
+
+- [x] 🤖 **`engine/routers/news_filter.py`** — Filtre macro multi-asset
+  - `MACRO_EVENTS_ALL` : FOMC, CPI, NFP, GDP, ECB, etc. → affectent tous les actifs
+  - `COMMODITY_EVENTS` : Crude Oil, OPEC, EIA → commodities
+  - `CRYPTO_EVENTS` : Bitcoin, SEC, ETF → crypto
+  - `should_suspend_signal()` : unified pour FOREX, COMMODITY, CRYPTO
+
+- [x] 🤖 **Intégration scan.py** — macro context fetch pour COMMODITY + CRYPTO (pas juste FOREX)
+  - Pre-strategy filter : suspend signal si HIGH event < 2h
+  - Post-strategy filter : re-applique après `evaluate_strategy`
+
+### Phase G — Cross-Position Correlation Risk ✅
+
+- [x] 🤖 **`apps/api/src/positions/cross-position-risk.service.ts`**
+  - `checkCorrelationRisk()` : bloque si >3 positions même direction dans même cluster
+  - `checkCorrelationRisk()` : bloque si >5 positions total dans même cluster
+  - Clusters : CRYPTO_MAJOR, FOREX, METALS, COMMODITIES, SYNTHETIC, BRVM
+  - `getCorrelationReport()` : rapport par cluster avec risk level
+
+- [x] 🤖 **Intégration** — `create()` et `openFromSignal()` appellent `checkCorrelationRisk()`
+- [x] 🤖 **`GET /positions/correlation-report`** — endpoint exposé
+
+
+---
+
+## 🔄 Roadmap Post-Phases B-G — Inspiré Token Metrics
+
+> Benchmark : Token Metrics (tokenmetrics.com) — plateforme IA crypto avec Daily Pulse, Token Grades, predictive models, portfolio rebalancing.
+> Notre système a déjà : signaux multi-asset, LLM, backtesting, 3-tier scaling, pyramiding, trailing stops, text-to-strategy, cross-position risk.
+> Ce qui manque vs Token Metrics → ci-dessous.
+
+### Phase H — Daily Pulse & News Aggregation
+
+- [ ] 🤖 **`engine/routers/daily_pulse.py`** — Brief matinal automatisé
+  - Cron 6h UTC : compile news + market summary via LLM
+  - Sources : RSS feeds (CoinDesk, Bloomberg, Reuters, CoinTelegraph) + economic calendar + market data
+  - Output : brief structuré (What changed overnight, Why it matters, What to watch next)
+  - Endpoint `GET /ai/daily-pulse` — brief du jour
+  - Push notification aux users actifs
+  - Dépendances : `_call_llm_with_fallback` (existant), nouveaux scrapers RSS
+
+- [ ] 🤖 **`engine/scrapers/rss_aggregator.py`** — RSS feeds multi-sources
+  - CoinDesk, CoinTelegraph, Bloomberg Markets, Reuters Finance, Decrypt
+  - Cache 1h, deduplication par hash titre
+  - Alimente Daily Pulse + RAG
+
+### Phase I — ML Scoring Avancé (XGBoost + FinBERT)
+
+- [ ] 🤖 **XGBoost sur SignalFeature** — entraîner P(TP1 hit) sur nos outcomes
+  - Dataset : `SignalFeature` + `SignalLog` (outcome) déjà en DB
+  - Remplace progressivement le k-NN actuel
+  - Shadow mode d'abord → comparer ML vs rule-based
+  - `POST /ml/train-xgboost` → fit → save → deploy
+
+- [ ] 🤖 **FinBERT local** — sentiment NLP à bas coût
+  - HuggingFace `ProsusAI/finbert` ou `yiyanghkust/finbert-tone`
+  - Batch processing : des milliers de tweets/articles sans payer OpenAI
+  - LLM (GPT-4o) réservé au Daily Pulse et analyses approfondies
+  - Intégré dans `social_sentiment.py` comme fallback/complément LunarCrush
+
+- [ ] 🤖 **Token Grade 0-100** — score agrégé multi-couches
+  - Note technique (notre score actuel normalisé)
+  - Note on-chain (onchain_bonus normalisé)
+  - Note sociale (social_bonus normalisé)
+  - Note tokenomics (tokenomics_penalty normalisé)
+  - Algorithme de pondération → note finale 0-100
+  - Affiché dans la Signal Card
+
+### Phase J — US Stocks & Indices
+
+- [ ] 🤖 **Ajout US stocks/indices** — NASDAQ, S&P500, AAPL, TSLA, etc.
+  - `get_asset_type()` → nouveau type `US_STOCK`
+  - Data : YFinance (15min delay gratuit) ou Polygon.io (temps réel, free tier 5 req/min)
+  - Seed : ajouter actifs US majeurs
+  - `US_STOCKS` cluster dans `portfolio_risk.py` + `cross-position-risk.service.ts`
+  - Session NYSE : 14:30–21:00 UTC (pas 24/7)
+  - Earnings calendar filter (similaire forex macro risk)
+
+### Phase K — YouTube & Social Sentiment
+
+- [ ] 🤖 **`engine/routers/youtube_sentiment.py`** — Transcript analysis
+  - YouTube Data API v3 (gratuit, 10k quota/jour)
+  - Chaînes : Coin Bureau, Token Metrics podcast, Bloomberg Crypto
+  - Pipeline : transcript → FinBERT/LLM → sentiment score → bonus dans scan.py
+  - Cache 24h par vidéo
+
+- [ ] 🤖 **Reddit API sentiment** — r/CryptoCurrency, r/Bitcoin, r/StockMarket
+  - Reddit API (gratuit, 100 req/min)
+  - Hot posts → FinBERT → sentiment score
+  - Intégré dans `social_sentiment.py`
+
+### Phase L — Portfolio Rebalancing & Alpha
+
+- [ ] 🤖 **Portfolio rebalancing** — frontière efficiente (Markowitz)
+  - Calcul quotidien/hebdo : maximiser Sharpe ratio
+  - Suggestions d'ajustement aux users
+  - Adaptation bull/bear cycle
+  - `engine/routers/portfolio_rebalancing.py`
+
+- [ ] 🤖 **Hidden Gems screener** — détection altcoins sous-évalués
+  - Critères : TVL croissant + price flat + developer activity + low market cap
+  - `engine/routers/hidden_gems.py`
+  - Page dédiée "Early Alpha" dans le frontend
+
+- [ ] 🤖 **AI Portfolio Defense Report** — analyse automatique du portefeuille
+  - LLM analyse : exposition, corrélation, drawdown, suggestions
+  - `POST /ai/portfolio-defense`
+  - Rapport hebdomadaire pushé aux users Premium

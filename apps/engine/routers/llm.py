@@ -59,7 +59,7 @@ async def _get_llm_config() -> dict:
     if _llm_config_cache["value"] is not None and (now - _llm_config_cache["ts"]) < _LLM_CONFIG_TTL_S:
         return _llm_config_cache["value"]
 
-    config = {"ollamaEnabled": True, "openaiEnabled": True, "preferred": "ollama"}
+    config = {"ollamaEnabled": True, "openaiEnabled": True, "preferred": "openai"}
     try:
         pool = await _get_pool()
         async with pool.acquire() as conn:
@@ -566,7 +566,7 @@ async def _call_llm_with_fallback(
     cfg = await _get_llm_config()
     ollama_enabled = bool(cfg.get("ollamaEnabled", True)) and bool(OLLAMA_BASE_URL)
     openai_enabled = bool(cfg.get("openaiEnabled", True)) and bool(OPENAI_API_KEY)
-    preferred = cfg.get("preferred", "ollama")
+    preferred = cfg.get("preferred", "openai")
 
     async def _try_ollama():
         client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama", timeout=OLLAMA_TIMEOUT_S)
@@ -819,4 +819,107 @@ async def llm_health():
         "openai_configured": bool(OPENAI_API_KEY),
         "ollama_url":        OLLAMA_BASE_URL if provider == "ollama" else None,
         "status":            "ready" if provider != "mock" else "mock_mode",
+    }
+
+
+# ── Text-to-Strategy (Phase C) ──────────────────────────────────────
+
+class StrategyFromTextRequest(BaseModel):
+    description: str
+    language: str = "fr"
+
+
+_STRATEGY_SYSTEM_PROMPT = """Tu es un expert en trading algorithmique. L'utilisateur décrit sa stratégie en langage naturel.
+Tu dois générer un objet JSON valide compatible avec le système de stratégies.
+
+Format JSON attendu (tous les champs sont optionnels sauf indication):
+{
+  "name": "Nom court de la stratégie",
+  "description": "Description en une phrase",
+  "analysis_timeframe": "1d",          // timeframe d'analyse (1m,5m,15m,30m,1h,4h,1d)
+  "entry_timeframe": "1h",             // timeframe d'entrée
+  "timeframes": ["1d","4h","1h"],      // timeframes MTF
+  "trigger": "BREAKOUT",               // BREAKOUT | RETEST | LIMIT | MOMENTUM_CONFIRMATION | VOLATILITY_EXPANSION
+  "markets": ["CRYPTO","FOREX"],       // CRYPTO | FOREX | METALS | SYNTHETIC | BRVM | COMMODITY
+  "profiles": ["SWING","DAY"],         // INVESTOR | SWING | DAY | SCALPER
+  "ema_fast": 9,                       // 2-500
+  "ema_slow": 21,                      // 2-500
+  "ema_trend": 50,                     // 2-1000
+  "rsi_period": 14,                    // 2-100
+  "rsi_oversold": 30,                  // 0-100
+  "rsi_overbought": 70,                // 0-100
+  "rsi_bullish_zone": 50,              // 0-100
+  "rsi_bearish_zone": 50,              // 0-100
+  "min_confidence": 60,                // 0-100
+  "volume_spike_min": 1.5,             // 0-20
+  "atr_min_pct": 0.5,                  // 0-50
+  "use_price_action": true,
+  "use_sr_zones": true,
+  "use_smc": false,
+  "use_patterns": true,
+  "filters": {
+    "regime": ["TRENDING_BULL","TRENDING_BEAR"]  // TRENDING_BULL | TRENDING_BEAR | RANGING | VOLATILE | UNKNOWN
+  },
+  "entry_rules": {
+    // conditions personnalisées
+  },
+  "exit_rules": {
+    "sl_atr": 1.5,     // stop loss en multiple d'ATR
+    "tp1_atr": 2.0,    // TP1 en multiple d'ATR
+    "tp2_atr": 3.5     // TP2 en multiple d'ATR
+  },
+  "invalidation": {
+    // condition d'invalidation
+  }
+}
+
+Règles importantes:
+- ema_fast < ema_slow < ema_trend
+- rsi_oversold < rsi_overbought
+- Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.
+- Adapte les paramètres à la description de l'utilisateur.
+- Si l'utilisateur mentionne des concepts non supportés (ex: Fibonacci, Elliott Wave), mappe-les vers les champs disponibles et note-le dans "description".
+"""
+
+
+@router.post("/llm/strategy-from-text")
+async def strategy_from_text(req: StrategyFromTextRequest):
+    prompt = f"{_STRATEGY_SYSTEM_PROMPT}\n\nDescription de l'utilisateur:\n{req.description}"
+    raw, provider, model = await _call_llm_with_fallback(prompt, max_tokens=800)
+
+    # Try to extract JSON from the response
+    import re
+    # Strip markdown code fences if present
+    raw_clean = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
+    raw_clean = re.sub(r'\s*```$', '', raw_clean.strip())
+
+    try:
+        rules = json.loads(raw_clean)
+    except json.JSONDecodeError:
+        # Try to find a JSON block in the response
+        match = re.search(r'\{[\s\S]*\}', raw)
+        if match:
+            try:
+                rules = json.loads(match.group())
+            except json.JSONDecodeError:
+                return {
+                    "error": "LLM did not return valid JSON",
+                    "raw": raw,
+                    "provider": provider,
+                    "model": model,
+                }
+        else:
+            return {
+                "error": "LLM did not return valid JSON",
+                "raw": raw,
+                "provider": provider,
+                "model": model,
+            }
+
+    return {
+        "rules": rules,
+        "name": rules.get("name", ""),
+        "description": rules.get("description", ""),
+        "provider": provider,
+        "model": model,
     }

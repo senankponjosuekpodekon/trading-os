@@ -11,6 +11,7 @@ import { AuditService } from '../audit/audit.service';
 import { CreatePositionDto } from './dto/create-position.dto';
 import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { CrossPositionRiskService } from './cross-position-risk.service';
 
 const BINANCE_TICKER = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -34,6 +35,7 @@ export class PositionsService {
     private journal: JournalService,
     private audit: AuditService,
     private health: SystemHealthService,
+    private crossRisk: CrossPositionRiskService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
@@ -172,10 +174,13 @@ export class PositionsService {
       where: {
         portfolioId: dto.portfolioId,
         assetId: asset.id,
-        status: { in: ['OPEN', 'PARTIAL'] },
+        status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] },
       },
     });
     if (duplicate) throw new ConflictException('DUPLICATE_POSITION');
+
+    // Phase G — Cross-position correlation risk
+    await this.crossRisk.checkCorrelationRisk(dto.portfolioId, asset.symbol, dto.direction as 'BUY' | 'SELL');
 
     const position = await this.rlsTransaction(async (tx) => {
       const created = await tx.position.create({
@@ -188,6 +193,8 @@ export class PositionsService {
           originalQuantity: dto.quantity,
           stopLoss: dto.stopLoss,
           takeProfit: dto.takeProfit,
+          takeProfit2: dto.takeProfit2 ?? null,
+          takeProfit3: dto.takeProfit3 ?? null,
           trailingStop: dto.stopLoss,
           trailingMethod: dto.trailingMethod ?? 'atr',
           trailingActive: dto.trailingActive ?? true,
@@ -250,7 +257,7 @@ export class PositionsService {
 
   async close(userId: string, positionId: string, exitPrice: number) {
     const position = await this.prisma.position.findFirst({
-      where: { id: positionId, status: { in: ['OPEN', 'PARTIAL'] }, portfolio: { userId } },
+      where: { id: positionId, status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { userId } },
       include: { portfolio: true, asset: { select: { symbol: true } } },
     });
     if (!position) throw new NotFoundException('Position not found or already closed');
@@ -263,10 +270,13 @@ export class PositionsService {
     const realizedPartial = position.partialPnl
       ? parseFloat(position.partialPnl.toString())
       : 0;
+    const realizedSecondPartial = position.secondPartialPnl
+      ? parseFloat(position.secondPartialPnl.toString())
+      : 0;
     const pnlOnRemaining = position.direction === 'BUY'
       ? (exitPrice - entry) * qty
       : (entry - exitPrice) * qty;
-    const pnl = realizedPartial + pnlOnRemaining;
+    const pnl = realizedPartial + realizedSecondPartial + pnlOnRemaining;
     const pnlPct = originalQty > 0 ? ((pnl / (entry * originalQty)) * 100) : 0;
     const proceeds = exitPrice * qty;
 
@@ -321,7 +331,7 @@ export class PositionsService {
       resolvedId = first.id;
     }
     const { data: positions } = await this.findByPortfolio(userId, resolvedId!, { page: 1, limit: 10_000, sort: 'openedAt:desc' });
-    const open   = positions.filter(p => p.status === 'OPEN' || p.status === 'PARTIAL');
+    const open   = positions.filter(p => p.status === 'OPEN' || p.status === 'PARTIAL' || p.status === 'PARTIAL_2');
     const closed = positions.filter(p => p.status === 'CLOSED');
     const totalPnl = closed.reduce((sum, p) => sum + parseFloat((p.pnl ?? 0).toString()), 0);
     const winRate  = closed.length > 0
@@ -340,7 +350,7 @@ export class PositionsService {
     }
 
     const openPositions = await this.prisma.position.findMany({
-      where: { portfolioId: resolvedId, status: { in: ['OPEN', 'PARTIAL'] }, portfolio: { userId } },
+      where: { portfolioId: resolvedId, status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { userId } },
       include: { asset: { select: { symbol: true, name: true } } },
       orderBy: { openedAt: 'desc' },
     });
@@ -401,10 +411,13 @@ export class PositionsService {
       where: {
         portfolioId: portfolio.id,
         assetId: signal.assetId,
-        status: { in: ['OPEN', 'PARTIAL'] },
+        status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] },
       },
     });
     if (duplicate) throw new ConflictException('DUPLICATE_POSITION');
+
+    // Phase G — Cross-position correlation risk
+    await this.crossRisk.checkCorrelationRisk(portfolio.id, signal.asset.symbol, signal.signal as 'BUY' | 'SELL');
 
     const capital    = parseFloat(portfolio.currentCapital.toString());
     const riskPct    = 0.01;  // 1% risque par défaut
@@ -444,6 +457,7 @@ export class PositionsService {
           stopLoss:    slPrice,
           takeProfit:  signal.takeProfit1 ? parseFloat(signal.takeProfit1.toString()) : null,
           takeProfit2: signal.takeProfit2 ? parseFloat(signal.takeProfit2.toString()) : null,
+          takeProfit3: (signal as any).takeProfit3 ? parseFloat((signal as any).takeProfit3.toString()) : null,
           trailingStop: slPrice,
           signalId,
           status:      'OPEN',
@@ -473,7 +487,7 @@ export class PositionsService {
     try {
       this.logger.log('TRAILING: synchronisation des trailing stops');
       const open = await this.systemPrisma.position.findMany({
-        where: { status: { in: ['OPEN', 'PARTIAL'] } },
+        where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } },
         include: {
           asset: { select: { symbol: true } },
           portfolio: { select: { userId: true } },
@@ -502,21 +516,36 @@ export class PositionsService {
         const sl = pos.stopLoss ? parseFloat(pos.stopLoss.toString()) : null;
         const tp1 = pos.takeProfit ? parseFloat(pos.takeProfit.toString()) : null;
         const tp2 = pos.takeProfit2 ? parseFloat(pos.takeProfit2.toString()) : null;
+        const tp3 = pos.takeProfit3 ? parseFloat(pos.takeProfit3.toString()) : null;
         let trailingStop = pos.trailingStop
           ? parseFloat(pos.trailingStop.toString())
           : (sl ?? (pos.direction === 'BUY' ? entry * 0.99 : entry * 1.01));
 
-        // Handle TP1/TP2 lifecycle first
+        // Handle 3-tier TP lifecycle: OPEN → PARTIAL (50%@TP1) → PARTIAL_2 (30%@TP2) → CLOSED (20%@TP3 or trailing)
         if (pos.direction === 'BUY') {
+          // TP1: OPEN → PARTIAL (close 50%)
           if (pos.status === 'OPEN' && tp1 && tp2 && price >= tp1) {
             await this.partialCloseByWatcher(pos.id, price);
             return;
           }
-          if (pos.status === 'PARTIAL' && tp2 && price >= tp2) {
+          // TP1 without TP2: full close
+          if (pos.status === 'OPEN' && tp1 && !tp2 && price >= tp1) {
             await this.closeByWatcher(pos.id, price, 'TP');
             return;
           }
-          if (pos.status === 'OPEN' && tp1 && !tp2 && price >= tp1) {
+          // TP2: PARTIAL → PARTIAL_2 (close 30% of original, i.e. 60% of remaining)
+          if (pos.status === 'PARTIAL' && tp2 && price >= tp2) {
+            if (tp3) {
+              await this.secondPartialCloseByWatcher(pos.id, price);
+              return;
+            } else {
+              // No TP3 — close the rest at TP2
+              await this.closeByWatcher(pos.id, price, 'TP');
+              return;
+            }
+          }
+          // TP3: PARTIAL_2 → CLOSED (close remaining 20%)
+          if (pos.status === 'PARTIAL_2' && tp3 && price >= tp3) {
             await this.closeByWatcher(pos.id, price, 'TP');
             return;
           }
@@ -525,11 +554,20 @@ export class PositionsService {
             await this.partialCloseByWatcher(pos.id, price);
             return;
           }
-          if (pos.status === 'PARTIAL' && tp2 && price <= tp2) {
+          if (pos.status === 'OPEN' && tp1 && !tp2 && price <= tp1) {
             await this.closeByWatcher(pos.id, price, 'TP');
             return;
           }
-          if (pos.status === 'OPEN' && tp1 && !tp2 && price <= tp1) {
+          if (pos.status === 'PARTIAL' && tp2 && price <= tp2) {
+            if (tp3) {
+              await this.secondPartialCloseByWatcher(pos.id, price);
+              return;
+            } else {
+              await this.closeByWatcher(pos.id, price, 'TP');
+              return;
+            }
+          }
+          if (pos.status === 'PARTIAL_2' && tp3 && price <= tp3) {
             await this.closeByWatcher(pos.id, price, 'TP');
             return;
           }
@@ -638,6 +676,71 @@ export class PositionsService {
     return { positionId, exitPrice, partialPnl: partialPnl.toFixed(2), remainingQty };
   }
 
+  private async secondPartialCloseByWatcher(positionId: string, exitPrice: number) {
+    const pos = await this.prisma.position.findFirst({
+      where: { id: positionId, status: 'PARTIAL' },
+      include: { portfolio: { include: { user: true } }, asset: true },
+    });
+    if (!pos) return null;
+
+    const entry = parseFloat(pos.entryPrice.toString());
+    const currentQty = parseFloat(pos.quantity.toString());
+    const originalQty = pos.originalQuantity
+      ? parseFloat(pos.originalQuantity.toString())
+      : currentQty;
+    // Close 30% of original quantity (i.e. 60% of what remains after first 50% close)
+    const closeQty = parseFloat((originalQty * 0.3).toFixed(6));
+    const remainingQty = parseFloat((currentQty - closeQty).toFixed(6));
+    if (closeQty <= 0 || remainingQty <= 0) {
+      // Not enough left — close everything
+      await this.closeByWatcher(positionId, exitPrice, 'TP');
+      return null;
+    }
+
+    const partialPnl = pos.direction === 'BUY'
+      ? (exitPrice - entry) * closeQty
+      : (entry - exitPrice) * closeQty;
+    const proceeds = exitPrice * closeQty;
+
+    // Move trailing stop to lock more profit (above entry for BUY, below for SELL)
+    const prevTrailing = pos.trailingStop
+      ? parseFloat(pos.trailingStop.toString())
+      : (pos.direction === 'BUY' ? entry * 0.99 : entry * 1.01);
+    const tightenedTrail = pos.direction === 'BUY'
+      ? Math.max(prevTrailing, exitPrice - (exitPrice - entry) * 0.3)
+      : Math.min(prevTrailing, exitPrice + (entry - exitPrice) * 0.3);
+
+    const firstPartialPnl = pos.partialPnl ? parseFloat(pos.partialPnl.toString()) : 0;
+
+    await this.rlsTransaction(async (tx) => {
+      await tx.position.update({
+        where: { id: positionId },
+        data: {
+          status: 'PARTIAL_2',
+          quantity: remainingQty,
+          trailingStop: tightenedTrail,
+          secondPartialExitPrice: exitPrice,
+          secondPartialExitAt: new Date(),
+          secondPartialPnl: partialPnl,
+        },
+      });
+      await tx.portfolio.update({
+        where: { id: pos.portfolioId },
+        data: { currentCapital: { increment: proceeds } },
+      });
+    });
+
+    this.notifications.push({
+      userId: pos.portfolio.userId,
+      type: 'POSITION',
+      title: `TP2 atteint — ${pos.asset.symbol}`,
+      message: `30% clôturé à $${exitPrice}. Reste 20% vers TP3 ou trailing.`,
+      data: { positionId, exitPrice, partialPnl, remainingQty, status: 'PARTIAL_2' },
+    });
+
+    return { positionId, exitPrice, secondPartialPnl: partialPnl.toFixed(2), remainingQty };
+  }
+
   async closeByWatcher(
     positionId: string,
     exitPrice: number,
@@ -645,7 +748,7 @@ export class PositionsService {
     opts?: { skipJournal?: boolean },
   ) {
     const pos = await this.prisma.position.findFirst({
-      where: { id: positionId, status: { in: ['OPEN', 'PARTIAL'] } },
+      where: { id: positionId, status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } },
       include: { portfolio: { include: { user: true } }, asset: true },
     });
     if (!pos) return null;
@@ -656,10 +759,11 @@ export class PositionsService {
       ? parseFloat(pos.originalQuantity.toString())
       : qty;
     const realizedPartial = pos.partialPnl ? parseFloat(pos.partialPnl.toString()) : 0;
+    const realizedSecondPartial = pos.secondPartialPnl ? parseFloat(pos.secondPartialPnl.toString()) : 0;
     const pnlOnRemaining = pos.direction === 'BUY'
       ? (exitPrice - entry) * qty
       : (entry - exitPrice) * qty;
-    const pnl   = realizedPartial + pnlOnRemaining;
+    const pnl   = realizedPartial + realizedSecondPartial + pnlOnRemaining;
     const pnlPct = originalQty > 0 ? (pnl / (entry * originalQty)) * 100 : 0;
 
     await this.rlsTransaction(async (tx) => {
@@ -755,5 +859,93 @@ export class PositionsService {
       this.http.post(`${this.engineUrl}/probability/continuation`, payload, { headers: engineHeaders(this.config) }),
     );
     return data;
+  }
+
+  async pyramid(userId: string, positionId: string) {
+    const parent = await this.prisma.position.findFirst({
+      where: { id: positionId, portfolio: { userId } },
+      include: { portfolio: true, asset: { select: { symbol: true } } },
+    });
+    if (!parent) throw new NotFoundException('Position not found');
+    if (parent.status !== 'PARTIAL' && parent.status !== 'PARTIAL_2') {
+      throw new BadRequestException('Pyramiding only allowed after TP1 (PARTIAL or PARTIAL_2 status)');
+    }
+
+    // Check no existing pyramid child
+    const existingPyramid = await this.prisma.position.findFirst({
+      where: { parentPositionId: positionId, status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } },
+    });
+    if (existingPyramid) throw new ConflictException('PYRAMID_ALREADY_EXISTS');
+
+    const price = await this.fetchLivePrice(parent.asset.symbol);
+    if (!price) throw new BadRequestException('Cannot fetch live price for pyramiding');
+
+    const originalQty = parent.originalQuantity
+      ? parseFloat(parent.originalQuantity.toString())
+      : parseFloat(parent.quantity.toString());
+    const entry = parseFloat(parent.entryPrice.toString());
+
+    // Pyramid size: 25% of original quantity
+    const pyramidQty = parseFloat((originalQty * 0.25).toFixed(6));
+    const cost = price * pyramidQty;
+
+    const capital = parseFloat(parent.portfolio.currentCapital.toString());
+    if (cost > capital * 0.15) {
+      throw new BadRequestException('Insufficient capital for pyramid (max 15% of portfolio)');
+    }
+    if (cost > capital) {
+      throw new BadRequestException('Insufficient capital for pyramid');
+    }
+
+    // SL at breakeven (entry price of parent) — risk-free add-on
+    const pyramidSl = entry;
+    // TP at parent's TP2 or TP3 (whichever is further)
+    const pyramidTp1 = parent.takeProfit2 ? parseFloat(parent.takeProfit2.toString()) : null;
+    const pyramidTp2 = parent.takeProfit3 ? parseFloat(parent.takeProfit3.toString()) : null;
+
+    const child = await this.rlsTransaction(async (tx) => {
+      const created = await tx.position.create({
+        data: {
+          portfolioId: parent.portfolioId,
+          assetId: parent.assetId,
+          parentPositionId: positionId,
+          direction: parent.direction,
+          entryPrice: price,
+          quantity: pyramidQty,
+          originalQuantity: pyramidQty,
+          stopLoss: pyramidSl,
+          takeProfit: pyramidTp1,
+          takeProfit2: pyramidTp2,
+          trailingStop: pyramidSl,
+          trailingMethod: parent.trailingMethod ?? 'atr',
+          trailingActive: true,
+          signalId: parent.signalId,
+          status: 'OPEN',
+        },
+        include: { asset: { select: { symbol: true, name: true } } },
+      });
+      await tx.portfolio.update({
+        where: { id: parent.portfolioId },
+        data: { currentCapital: { decrement: cost } },
+      });
+      return created;
+    });
+
+    this.notifications.push({
+      userId,
+      type: 'POSITION',
+      title: `Pyramiding — ${parent.asset.symbol}`,
+      message: `+25% ajouté à $${price} (SL au breakeven $${entry}). Position totale renforcée.`,
+      data: { parentPositionId: positionId, childPositionId: child.id, pyramidQty, entryPrice: price },
+    });
+
+    await this.audit.log({
+      userId,
+      action: 'POSITION_PYRAMID',
+      resource: 'position',
+      details: { parentPositionId: positionId, childPositionId: child.id, symbol: parent.asset.symbol, pyramidQty, entryPrice: price },
+    });
+
+    return { parentPositionId: positionId, childPositionId: child.id, pyramidQty, entryPrice: price };
   }
 }

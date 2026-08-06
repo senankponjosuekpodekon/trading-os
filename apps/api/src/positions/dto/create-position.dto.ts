@@ -38,6 +38,14 @@ export class CreatePositionDto {
   takeProfit?: number;
 
   @IsOptional()
+  @IsNumber()
+  takeProfit2?: number;
+
+  @IsOptional()
+  @IsNumber()
+  takeProfit3?: number;
+
+  @IsOptional()
   @IsEnum(TrailingMethod)
   trailingMethod?: TrailingMethod;
 

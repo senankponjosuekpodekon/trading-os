@@ -412,9 +412,29 @@ export class SignalsService {
 
     const saved: any[] = [];
     let quotaRemaining = opts?.signalAllowance?.limit != null
-      ? Math.max(0, opts.signalAllowance.limit - opts.signalAllowance.used)
+      ? Math.max(0, opts?.signalAllowance?.limit - opts?.signalAllowance?.used)
       : null;
     let signalsCounted = 0;
+
+    // ── Pre-pass: log ALL BUY/SELL signals into SignalLog for calibration ──
+    // This eliminates the survivorship bias: we record every signal generated
+    // by the engine (even confidence < 50) so the Outcome Tracker can measure
+    // the real win rate per confidence bucket and optimize the threshold.
+    // signalId=null means the signal was not persisted as a Signal entity.
+    for (const r of results) {
+      if (!r.signal || r.signal === 'NEUTRAL' || !r.entry_price) continue;
+      const _asset = await this.prisma.asset.findUnique({
+        where: { symbol: r.symbol },
+        select: { market: { select: { name: true } } },
+      });
+      Promise.resolve(
+        this.outcomeService.logSignal(
+          { ...r, signalId: null, marketContext: marketContext ?? r.context ?? null },
+          _asset?.market?.name ?? 'UNKNOWN',
+        ),
+      ).catch(() => {});
+    }
+
     for (const r of results) {
       // Ne pas persister les signaux encore en attente de confirmation hystérésis
       if (!r.signal || r.signal === 'NEUTRAL' || r.confidence < 50) continue;
@@ -519,31 +539,59 @@ export class SignalsService {
       (signal as any)._raw = r;
       saved.push(signal);
 
-      if (r.feature_vector) {
-        await this.featureStore.upsertSnapshot({
-          signalId: signal.id,
-          features: r.feature_vector,
-          concept: r.market_concept_vector ?? r.marketConcept ?? null,
-          embedding: r.market_embedding ?? null,
-          symbol: r.symbol,
-          market: asset.market?.name ?? null,
-          timeframe: r.timeframe ?? null,
-          direction: r.signal,
-          confidence: r.confidence ?? null,
-          mlConfidence: mlConfidence ?? null,
-          mlRegime: mlRegime ?? null,
-          expectedMove: expectedMoveSnapshot,
-          source: r.feature_source ?? 'engine.scan',
-        });
-      }
+      // Always store features in FeatureStore for every BUY/SELL signal
+      const indicators = r.indicators ?? {};
+      const autoFeatureVector = r.feature_vector ?? {
+        score_trend:     indicators.score_trend     ?? null,
+        score_pa:        indicators.score_pa        ?? null,
+        score_sr:        indicators.score_sr        ?? null,
+        score_patterns:  indicators.score_patterns  ?? null,
+        score_regime:    indicators.score_regime    ?? null,
+        score_smc:       indicators.score_smc       ?? null,
+        score_mtf:       indicators.score_mtf       ?? null,
+        score_sentiment: indicators.score_sentiment ?? null,
+        score_bias:      indicators.score_bias      ?? null,
+        score_total:     indicators.score_total     ?? r.score ?? r.confidence ?? null,
+        rsi:             indicators.rsi             ?? null,
+        ema20:           indicators.ema20           ?? null,
+        ema50:           indicators.ema50           ?? null,
+        ema200:          indicators.ema200          ?? null,
+        macd:            indicators.macd            ?? null,
+        macd_signal:     indicators.macd_signal     ?? null,
+        macd_hist:       indicators.macd_hist       ?? null,
+        bb_bw:           indicators.bb_bw           ?? null,
+        atr:             indicators.atr             ?? null,
+        adx:             r.regime?.adx              ?? indicators.adx ?? null,
+        volume_ratio:    indicators.volume_ratio    ?? null,
+        confidence:      r.confidence               ?? null,
+        risk_reward:     r.risk_reward              ?? null,
+      };
+      await this.featureStore.upsertSnapshot({
+        signalId: signal.id,
+        features: autoFeatureVector,
+        concept: r.market_concept_vector ?? r.marketContext ?? null,
+        embedding: r.market_embedding ?? null,
+        symbol: r.symbol,
+        market: asset.market?.name ?? null,
+        timeframe: r.timeframe ?? null,
+        direction: r.signal,
+        confidence: r.confidence ?? null,
+        mlConfidence: mlConfidence ?? null,
+        mlRegime: mlRegime ?? null,
+        expectedMove: expectedMoveSnapshot,
+        source: r.feature_source ?? 'engine.scan',
+      }).catch(() => {});
 
-      // Feedback loop : signal log pour calibration / ML
-      Promise.resolve(
-        this.outcomeService.logSignal(
-          { ...r, signalId: signal.id, marketContext: marketContext ?? r.context ?? null },
-          asset.market?.name ?? 'UNKNOWN',
-        ),
-      ).catch(() => {});
+      // Link the SignalLog entry (created in pre-pass) to the persisted Signal
+      // so the Outcome Tracker can attach the outcome to the Feature Store.
+      if (r.signal && r.signal !== 'NEUTRAL' && r.entry_price) {
+        Promise.resolve(
+          this.prisma.signalLog.updateMany({
+            where: { symbol: r.symbol, timeframe: r.timeframe, signalId: null, signalType: r.signal as any, createdAt: { gte: new Date(Date.now() - 60_000) } },
+            data: { signalId: signal.id },
+          }),
+        ).catch(() => {});
+      }
 
       // Notifier seulement si le sentiment est déjà appliqué,
       // sinon le pass 2 notifiera après validation

@@ -394,6 +394,60 @@ async function main() {
     },
   });
 
+  // ── Phase E — Gold Specialist Strategy ──
+  const goldSpecialistRules = {
+    ema_fast: 9,
+    ema_slow: 21,
+    ema_trend: 50,
+    rsi_period: 14,
+    rsi_oversold: 35,
+    rsi_overbought: 65,
+    rsi_bullish_zone: 50,
+    rsi_bearish_zone: 50,
+    min_confidence: 55,
+    min_dps: 55,
+    volume_spike_min: 1.5,
+    use_price_action: true,
+    use_sr_zones: true,
+    use_smc: true,
+    use_patterns: true,
+    atr_min_pct: 0.3,
+    timeframes: ['1d', '4h', '1h'],
+    analysis_timeframe: '4h',
+    entry_timeframe: '1h',
+    trigger: 'BREAKOUT',
+    markets: ['COMMODITIES'],
+    profiles: ['SWING', 'DAY'],
+    entry_rules: {
+      ema_fast_above_slow: true,
+      adx_min: 20,
+    },
+    filters: {
+      regime: ['TRENDING_BULL', 'TRENDING_BEAR', 'VOLATILE'],
+    },
+    exit_rules: {
+      sl_atr: 2.0,
+      tp1_atr: 2.5,
+      tp2_atr: 4.0,
+    },
+    invalidation: {
+      description: 'Signal invalidé si DXY casse dans la direction opposée à la corrélation inverse attendue',
+    },
+  };
+
+  const goldSpecialist = await prisma.strategy.upsert({
+    where: { name: 'Gold Specialist XAU/USD' },
+    update: { rules: goldSpecialistRules, analysisTimeframe: '4h', entryTimeframe: '1h', isActive: true },
+    create: {
+      name: 'Gold Specialist XAU/USD',
+      description: 'Stratégie spécialisée XAU/USD avec corrélation DXY inverse, awareness des sessions London/NY, safe haven en régime VOLATILE, ATR adapté. EMA 9/21/50, RSI 14, SMC activé.',
+      rules: goldSpecialistRules,
+      analysisTimeframe: '4h',
+      entryTimeframe: '1h',
+      isActive: true,
+    },
+  });
+
   // Post-seed assertion: verify all strategies have markets
   const allStrategies = await prisma.strategy.findMany({ select: { name: true, rules: true } });
   for (const s of allStrategies) {

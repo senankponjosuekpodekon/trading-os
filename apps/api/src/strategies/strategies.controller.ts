@@ -21,6 +21,12 @@ export class StrategiesController {
     return this.strategiesService.getStats();
   }
 
+  @Roles(UserRole.ADMIN)
+  @Get('performance')
+  getStrategyPerformance() {
+    return this.strategiesService.getStrategyPerformance();
+  }
+
   @Get('mine')
   getUserStrategies(@Request() req: any) {
     return this.strategiesService.getUserStrategies(req.user.id);
@@ -52,6 +58,12 @@ export class StrategiesController {
   @Post()
   create(@Body() dto: CreateStrategyDto) {
     return this.strategiesService.create(dto);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('from-text')
+  fromText(@Body() body: { description: string; save?: boolean }) {
+    return this.strategiesService.fromText(body.description, body.save ?? false);
   }
 
   @Roles(UserRole.ADMIN)

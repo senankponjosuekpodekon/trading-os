@@ -21,4 +21,10 @@ export class SystemHealthController {
   getCronStatus() {
     return this.health.getCronStatus();
   }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('data-flow')
+  getDataFlow() {
+    return this.health.getDataFlow();
+  }
 }
