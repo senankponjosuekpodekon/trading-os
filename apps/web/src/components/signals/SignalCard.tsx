@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   TrendingUp, TrendingDown, Minus, Brain, BarChart2, ChevronUp, ChevronDown,
   Newspaper, ExternalLink, AlertTriangle, CheckCircle2, Target, ShieldAlert, Layers,
-  Waves, Activity, ArrowUpRight,
+  Waves, Activity, ArrowUpRight, History,
 } from 'lucide-react';
 import { ExpectedMoveResponse, Signal } from '@/types';
 import { useModeStore } from '@/store/mode.store';
@@ -59,6 +59,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const [showWhy, setShowWhy] = useState(false);
   const [showWhyNot, setShowWhyNot] = useState(false);
   const [showPatterns, setShowPatterns] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const userTz = user?.timezone;
   const safeCreatedAt = signal.createdAt ?? new Date().toISOString();
@@ -214,6 +215,20 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
         </div>
       )}
 
+      {/* Signal vivant — real-time PnL + progress toward TP/SL */}
+      {livePrice !== null && entry !== null && sl !== null && signal.signal !== 'NEUTRAL' && (
+        <LiveSignalTracker
+          isBuy={isBuy}
+          livePrice={livePrice}
+          entry={entry}
+          sl={sl}
+          tp1={tp1}
+          tp2={tp2}
+          tp3={tp3}
+          status={status}
+        />
+      )}
+
       {/* Entry zone + optimal entry */}
       {entryZone && (
         <div className="mb-4 p-3 bg-gray-800/40 border border-gray-700/50 rounded-lg">
@@ -318,6 +333,21 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
             <span className="font-mono">{signal.metadata.ml_confidence.toFixed(1)}%</span>
           </span>
         )}
+        {signal.metadata?.token_grade && (
+          <span
+            className="text-xs px-2 py-0.5 rounded border flex items-center gap-1"
+            title={`Token Grade — Technical: ${signal.metadata.token_grade.technical_score} · On-chain: ${signal.metadata.token_grade.onchain_score} · Social: ${signal.metadata.token_grade.social_score} · Tokenomics: ${signal.metadata.token_grade.tokenomics_score}`}
+            style={{
+              color: signal.metadata.token_grade.overall_grade >= 70 ? '#34d399' : signal.metadata.token_grade.overall_grade >= 50 ? '#fbbf24' : '#f87171',
+              borderColor: signal.metadata.token_grade.overall_grade >= 70 ? 'rgba(52,211,153,0.2)' : signal.metadata.token_grade.overall_grade >= 50 ? 'rgba(251,191,36,0.2)' : 'rgba(248,113,113,0.2)',
+              backgroundColor: signal.metadata.token_grade.overall_grade >= 70 ? 'rgba(52,211,153,0.1)' : signal.metadata.token_grade.overall_grade >= 50 ? 'rgba(251,191,36,0.1)' : 'rgba(248,113,113,0.1)',
+            }}
+          >
+            <span className="text-[10px] uppercase tracking-wide">Grade</span>
+            <span className="font-mono font-bold">{signal.metadata.token_grade.overall_grade}</span>
+            <span className="text-[10px] opacity-70">{signal.metadata.token_grade.grade_label}</span>
+          </span>
+        )}
         {regime.adx !== undefined && (
           <span className="text-xs text-gray-500">ADX {regime.adx}</span>
         )}
@@ -357,6 +387,63 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
       <p className="text-gray-500 text-xs leading-relaxed line-clamp-2 mb-3" title={signal.explanation ?? ''}>
         {signal.explanation ?? '—'}
       </p>
+
+      {/* AI Defense alert */}
+      {(signal.metadata as any)?.ai_defense && (signal.metadata as any).ai_defense.alert_count > 0 && (
+        <div className="mb-3 p-2 rounded-lg border border-red-500/20 bg-red-500/5">
+          <div className="flex items-center gap-1.5 text-xs text-red-400">
+            <ShieldAlert className="w-3 h-3" />
+            <span className="font-medium">AI Defense: {(signal.metadata as any).ai_defense.recommendation}</span>
+            <span className="text-gray-500">· {(signal.metadata as any).ai_defense.alert_count} alerts</span>
+          </div>
+          {(signal.metadata as any).ai_defense.alerts?.[0] && (
+            <p className="text-[11px] text-red-400/70 mt-1">{(signal.metadata as any).ai_defense.alerts[0].message}</p>
+          )}
+        </div>
+      )}
+
+      {/* X Sentiment + On-chain signals */}
+      {(signal.metadata as any)?.x_sentiment && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-500 flex items-center gap-1">
+            <Newspaper className="w-3 h-3" /> X Sentiment
+          </span>
+          <span className={`text-xs px-2 py-0.5 rounded border font-medium capitalize ${
+            (signal.metadata as any).x_sentiment.overall_label === 'positive' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
+            (signal.metadata as any).x_sentiment.overall_label === 'negative' ? 'text-red-400 bg-red-400/10 border-red-400/20' :
+            'text-gray-400 bg-gray-700 border-gray-600'
+          }`}>
+            {(signal.metadata as any).x_sentiment.overall_label ?? 'neutral'}
+          </span>
+          <span className="text-xs text-gray-500">
+            {(signal.metadata as any).x_sentiment.tweet_count} tweets · {(signal.metadata as any).x_sentiment.source}
+          </span>
+        </div>
+      )}
+
+      {(signal.metadata as any)?.onchain_signals && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-500 flex items-center gap-1">
+            <Activity className="w-3 h-3" /> On-chain
+          </span>
+          <span className={`text-xs px-2 py-0.5 rounded border font-medium ${
+            (signal.metadata as any).onchain_signals.signal_score >= 70 ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
+            (signal.metadata as any).onchain_signals.signal_score >= 40 ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' :
+            'text-red-400 bg-red-400/10 border-red-400/20'
+          }`}>
+            {(signal.metadata as any).onchain_signals.verdict ?? '—'} · {(signal.metadata as any).onchain_signals.signal_score}
+          </span>
+          {(signal.metadata as any).onchain_signals.whale_accumulation && (
+            <span className="text-xs text-cyan-400">🐳 Whale accum</span>
+          )}
+          {(signal.metadata as any).onchain_signals.liquidity_building && (
+            <span className="text-xs text-blue-400">💧 Liq building</span>
+          )}
+          {(signal.metadata as any).onchain_signals.dev_activity && (
+            <span className="text-xs text-violet-400">💻 Dev active</span>
+          )}
+        </div>
+      )}
 
       {/* News sentiment */}
       {news && (
@@ -478,6 +565,15 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
               ))}
               {whyNotPoints.length === 0 && <li className="text-xs text-gray-600">Aucun risque majeur identifié.</li>}
             </ul>
+          </Expandable>
+        </div>
+      )}
+
+      {/* Signal Timeline — key events history */}
+      {!isBeginner && signal.signal !== 'NEUTRAL' && (
+        <div className="mb-3">
+          <Expandable title="Timeline" icon={<History className="w-3.5 h-3.5 text-gray-400" />} open={showTimeline} onToggle={() => setShowTimeline(v => !v)}>
+            <SignalTimeline signal={signal} livePrice={livePrice} />
           </Expandable>
         </div>
       )}
@@ -625,7 +721,7 @@ function buildBeginnerSummary(s: Signal): { title: string; sub: string } {
 function buildWhyPoints(s: Signal): { label: string; score?: number }[] {
   const trace = (s.metadata as any)?.decisionTrace;
   if (trace?.why?.length) return trace.why;
-  const pts: { label: string }[] = [];
+  const pts: { label: string; score?: number }[] = [];
   const pa = s.metadata?.price_action ?? {};
   const mtf = s.metadata?.mtf_context ?? {};
   const smc = s.metadata?.smc ?? {};
@@ -639,23 +735,58 @@ function buildWhyPoints(s: Signal): { label: string; score?: number }[] {
   if (smc.liquidity?.near_eqh || smc.liquidity?.near_eql) pts.push({ label: 'Liquidité majeure proche (EQH/EQL)' });
   if (pats.pin_bar) pts.push({ label: 'Pin bar de confirmation' });
   if (pats.engulfing) pts.push({ label: 'Engulfing de confirmation' });
+
+  // ── Dynamic: Token Grade ──
+  const tg = (s.metadata as any)?.token_grade;
+  if (tg && tg.overall_grade >= 70) pts.push({ label: `Token Grade élevé (${tg.overall_grade}/100 — ${tg.grade_label})`, score: 10 });
+
+  // ── Dynamic: X Sentiment ──
+  const xs = (s.metadata as any)?.x_sentiment;
+  if (xs && xs.overall_label === 'positive' && xs.tweet_count > 20) pts.push({ label: `Sentiment X positif (${xs.tweet_count} tweets, score ${xs.overall_score})`, score: 5 });
+
+  // ── Dynamic: On-chain signals ──
+  const oc = (s.metadata as any)?.onchain_signals;
+  if (oc && oc.signal_score >= 70) pts.push({ label: `On-chain bullish (${oc.verdict}) — whale accumulation détectée`, score: 8 });
+  if (oc?.dev_activity) pts.push({ label: 'Activité développeur élevée on-chain', score: 3 });
+
+  // ── Dynamic: AI Defense clear ──
+  const ad = (s.metadata as any)?.ai_defense;
+  if (ad && ad.alert_count === 0) pts.push({ label: 'AI Defense: aucun signal de manipulation détecté', score: 5 });
+
   return pts;
 }
 
 function buildWhyNotPoints(s: Signal): { label: string; score?: number }[] {
   const trace = (s.metadata as any)?.decisionTrace;
   if (trace?.whyNot?.length) return trace.whyNot;
-  const pts: { label: string }[] = [];
+  const pts: { label: string; score?: number }[] = [];
   const mtf = s.metadata?.mtf_context ?? {};
   const pa = s.metadata?.price_action ?? {};
   const regime = s.metadata?.regime ?? {};
   const news = (s.metadata as any)?.news_sentiment;
   if (mtf.htf_aligned === false) pts.push({ label: `Désalignement HTF : ${mtf.htf_regime}` });
-  if (regime.regime?.includes('VOLATILE')) pts.push({ label: 'Régime volatile — risque d’extension brusque' });
+  if (regime.regime?.includes('VOLATILE')) pts.push({ label: 'Régime volatile — risque d\u2019extension brusque' });
   if (regime.adx !== undefined && regime.adx < 20) pts.push({ label: 'Tendance faible (ADX < 20)' });
   if (pa.structure?.includes('RANGE')) pts.push({ label: 'Prix en range — patience requise' });
   if (news?.bonus < 0) pts.push({ label: `Sentiment news négatif (${news.bonus} pts)` });
   if ((s.confidence ?? 0) < 55) pts.push({ label: 'Confiance globale faible (< 55%)' });
+
+  // ── Dynamic: Token Grade low ──
+  const tg = (s.metadata as any)?.token_grade;
+  if (tg && tg.overall_grade < 40) pts.push({ label: `Token Grade faible (${tg.overall_grade}/100 — ${tg.grade_label})`, score: 8 });
+
+  // ── Dynamic: X Sentiment negative ──
+  const xs = (s.metadata as any)?.x_sentiment;
+  if (xs && xs.overall_label === 'negative' && xs.tweet_count > 10) pts.push({ label: `Sentiment X négatif (${xs.tweet_count} tweets, score ${xs.overall_score})`, score: 5 });
+
+  // ── Dynamic: On-chain bearish ──
+  const oc = (s.metadata as any)?.onchain_signals;
+  if (oc && oc.signal_score < 30) pts.push({ label: `On-chain bearish (${oc.verdict}) — distribution whale possible`, score: 6 });
+
+  // ── Dynamic: AI Defense alerts ──
+  const ad = (s.metadata as any)?.ai_defense;
+  if (ad && ad.alert_count > 0) pts.push({ label: `AI Defense: ${ad.alert_count} alerte(s) — ${ad.recommendation}`, score: 10 });
+
   return pts;
 }
 
@@ -674,4 +805,210 @@ function fmtPrice(value: number | string | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return '—';
   const digits = n >= 1000 ? 0 : n >= 1 ? 2 : n >= 0.01 ? 4 : 6;
   return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+// ── Live Signal Tracker — real-time PnL + progress ──────────────────────────
+
+function LiveSignalTracker({
+  isBuy, livePrice, entry, sl, tp1, tp2, tp3, status,
+}: {
+  isBuy: boolean;
+  livePrice: number;
+  entry: number;
+  sl: number;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
+  status?: string | null;
+}) {
+  const distToSl = Math.abs(livePrice - sl);
+  const distToEntry = Math.abs(livePrice - entry);
+  const totalRange = Math.abs(entry - sl);
+  const progressPct = Math.max(0, Math.min(100, (distToEntry / totalRange) * 100));
+
+  const nearestTp = [tp1, tp2, tp3].filter((t): t is number => t !== null).sort((a, b) =>
+    Math.abs(livePrice - a) - Math.abs(livePrice - b)
+  )[0];
+
+  const distToNearestTp = nearestTp ? Math.abs(livePrice - nearestTp) : null;
+  const tpProgress = nearestTp
+    ? Math.max(0, Math.min(100, (1 - distToNearestTp! / Math.abs(nearestTp - sl)) * 100))
+    : null;
+
+  const pnlPct = isBuy
+    ? ((livePrice - entry) / entry) * 100
+    : ((entry - livePrice) / entry) * 100;
+
+  const pnlPositive = pnlPct > 0;
+
+  const hitSl = isBuy ? livePrice <= sl : livePrice >= sl;
+  const hitTp1 = tp1 !== null && (isBuy ? livePrice >= tp1 : livePrice <= tp1);
+
+  let liveStatus = 'EN COURS';
+  let liveStatusColor = 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20';
+  if (hitSl) {
+    liveStatus = 'SL TOUCHÉ';
+    liveStatusColor = 'text-red-400 bg-red-400/10 border-red-400/20';
+  } else if (tp3 !== null && (isBuy ? livePrice >= tp3 : livePrice <= tp3)) {
+    liveStatus = 'TP3 TOUCHÉ';
+    liveStatusColor = 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
+  } else if (tp2 !== null && (isBuy ? livePrice >= tp2 : livePrice <= tp2)) {
+    liveStatus = 'TP2 TOUCHÉ';
+    liveStatusColor = 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
+  } else if (hitTp1) {
+    liveStatus = 'TP1 TOUCHÉ';
+    liveStatusColor = 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
+  }
+
+  return (
+    <div className="mb-4 p-3 bg-gray-800/40 border border-gray-700/50 rounded-lg space-y-2">
+      {/* PnL + status */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">PnL live</span>
+          <span className={`text-sm font-mono font-bold ${pnlPositive ? 'text-emerald-400' : pnlPct < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+            {pnlPositive ? '+' : ''}{pnlPct.toFixed(2)}%
+          </span>
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded border font-medium ${liveStatusColor}`}>
+          {liveStatus}
+        </span>
+      </div>
+
+      {/* Progress bar: SL ← Entry → TP */}
+      <div className="relative h-6 bg-gray-900 rounded-full overflow-hidden">
+        {/* SL zone (red) */}
+        <div className="absolute left-0 top-0 h-full bg-red-500/20" style={{ width: '50%' }} />
+        {/* TP zone (green) */}
+        <div className="absolute right-0 top-0 h-full bg-emerald-500/20" style={{ width: '50%' }} />
+        {/* Entry marker */}
+        <div className="absolute top-0 h-full w-0.5 bg-gray-400" style={{ left: '50%' }} />
+        {/* Live price indicator */}
+        <div
+          className="absolute top-0 h-full w-1 rounded-full transition-all duration-300"
+          style={{
+            left: `${progressPct}%`,
+            backgroundColor: pnlPositive ? '#34d399' : '#f87171',
+            boxShadow: `0 0 6px ${pnlPositive ? '#34d399' : '#f87171'}`,
+          }}
+        />
+        {/* Labels */}
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-red-400/70 font-mono">SL</span>
+        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-emerald-400/70 font-mono">TP</span>
+      </div>
+
+      {/* Distance metrics */}
+      <div className="flex items-center justify-between text-[10px] text-gray-500">
+        <span>SL: <span className="font-mono text-red-400/80">{distToSl.toFixed(2)}</span> away</span>
+        {nearestTp && (
+          <span>TP: <span className="font-mono text-emerald-400/80">{distToNearestTp!.toFixed(2)}</span> away</span>
+        )}
+        {tpProgress !== null && (
+          <span className="text-gray-400">{tpProgress.toFixed(0)}% vers TP</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Signal Timeline — key events history ─────────────────────────────────────
+
+function SignalTimeline({ signal, livePrice }: { signal: Signal; livePrice: number | null }) {
+  const events: { time: string; label: string; icon: React.ReactNode; color: string }[] = [];
+
+  // 1. Signal created
+  events.push({
+    time: signal.createdAt ?? '—',
+    label: `Signal ${signal.signal} g\u00e9n\u00e9r\u00e9 (confiance ${signal.confidence}%)`,
+    icon: <CheckCircle2 className="w-3 h-3" />,
+    color: 'text-emerald-400',
+  });
+
+  // 2. AI Defense alert
+  const ad = (signal.metadata as any)?.ai_defense;
+  if (ad && ad.alert_count > 0) {
+    events.push({
+      time: signal.createdAt ?? '—',
+      label: `AI Defense: ${ad.alert_count} alerte(s) \u2014 ${ad.recommendation}`,
+      icon: <ShieldAlert className="w-3 h-3" />,
+      color: 'text-red-400',
+    });
+  }
+
+  // 3. X Sentiment detected
+  const xs = (signal.metadata as any)?.x_sentiment;
+  if (xs) {
+    events.push({
+      time: signal.createdAt ?? '—',
+      label: `Sentiment X: ${xs.overall_label} (${xs.tweet_count} tweets)`,
+      icon: <Newspaper className="w-3 h-3" />,
+      color: xs.overall_label === 'positive' ? 'text-emerald-400' : xs.overall_label === 'negative' ? 'text-red-400' : 'text-gray-400',
+    });
+  }
+
+  // 4. On-chain signals
+  const oc = (signal.metadata as any)?.onchain_signals;
+  if (oc) {
+    events.push({
+      time: signal.createdAt ?? '—',
+      label: `On-chain: ${oc.verdict} (score ${oc.signal_score})`,
+      icon: <Activity className="w-3 h-3" />,
+      color: oc.signal_score >= 70 ? 'text-emerald-400' : oc.signal_score >= 40 ? 'text-yellow-400' : 'text-red-400',
+    });
+  }
+
+  // 5. Token Grade computed
+  const tg = (signal.metadata as any)?.token_grade;
+  if (tg) {
+    events.push({
+      time: signal.createdAt ?? '—',
+      label: `Token Grade: ${tg.overall_grade}/100 (${tg.grade_label})`,
+      icon: <Target className="w-3 h-3" />,
+      color: tg.overall_grade >= 70 ? 'text-emerald-400' : tg.overall_grade >= 50 ? 'text-yellow-400' : 'text-red-400',
+    });
+  }
+
+  // 6. Live price event
+  if (livePrice !== null && signal.entryPrice) {
+    const entry = parseFloat(signal.entryPrice);
+    const pnlPct = signal.signal === 'BUY'
+      ? ((livePrice - entry) / entry) * 100
+      : ((entry - livePrice) / entry) * 100;
+    const sl = signal.stopLoss ? parseFloat(signal.stopLoss) : null;
+    const tp1 = signal.takeProfit1 ? parseFloat(signal.takeProfit1) : null;
+    const isBuy = signal.signal === 'BUY';
+    let label = `Prix live: $${livePrice.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
+    let color = pnlPct > 0 ? 'text-emerald-400' : pnlPct < 0 ? 'text-red-400' : 'text-gray-400';
+
+    if (sl !== null && (isBuy ? livePrice <= sl : livePrice >= sl)) {
+      label = `SL touch\u00e9 \u2014 prix $${livePrice.toFixed(2)}`;
+      color = 'text-red-400';
+    } else if (tp1 !== null && (isBuy ? livePrice >= tp1 : livePrice <= tp1)) {
+      label = `TP1 touch\u00e9 \u2014 prix $${livePrice.toFixed(2)}`;
+      color = 'text-emerald-400';
+    }
+
+    events.push({
+      time: new Date().toISOString(),
+      label,
+      icon: <Clock className="w-3 h-3" />,
+      color,
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      {events.map((ev, i) => (
+        <div key={i} className="flex items-start gap-2 text-xs">
+          <div className={`mt-0.5 ${ev.color}`}>{ev.icon}</div>
+          <div className="flex-1">
+            <span className="text-gray-300">{ev.label}</span>
+            <span className="text-gray-600 ml-2 text-[10px]">
+              {new Date(ev.time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

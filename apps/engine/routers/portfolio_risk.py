@@ -61,6 +61,23 @@ ASSET_CLUSTERS: dict[str, str] = {
     "CBIBF":      "BRVM",
     "ABJC":       "BRVM",
     "STAC":       "BRVM",
+    # US Stocks & Indices
+    "AAPL/USD":   "US_STOCKS",
+    "TSLA/USD":   "US_STOCKS",
+    "MSFT/USD":   "US_STOCKS",
+    "NVDA/USD":   "US_STOCKS",
+    "AMZN/USD":   "US_STOCKS",
+    "META/USD":   "US_STOCKS",
+    "GOOGL/USD":  "US_STOCKS",
+    "NFLX/USD":   "US_STOCKS",
+    "AMD/USD":    "US_STOCKS",
+    "INTC/USD":   "US_STOCKS",
+    "JPM/USD":    "US_STOCKS",
+    "BAC/USD":    "US_STOCKS",
+    "SP500/USD":  "US_INDICES",
+    "NASDAQ/USD": "US_INDICES",
+    "DOW/USD":    "US_INDICES",
+    "VIX/USD":    "US_INDICES",
 }
 
 # Seuil d'alerte : à partir de N signaux dans le même cluster + même direction
@@ -73,6 +90,8 @@ CLUSTER_LABELS: dict[str, str] = {
     "COMMODITIES":  "Matières premières",
     "SYNTHETIC":    "Indices synthétiques",
     "BRVM":         "BRVM",
+    "US_STOCKS":    "US Stocks",
+    "US_INDICES":   "US Indices",
     "UNKNOWN":      "Autres",
 }
 

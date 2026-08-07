@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Request, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AiService } from './ai.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -76,6 +76,148 @@ export class AiController {
   @Post('chat')
   chat(@Body() body: any) {
     return this.ai.chat(body);
+  }
+
+  @Get('daily-pulse')
+  dailyPulse(@Query('refresh') refresh?: string) {
+    return this.ai.getDailyPulse(refresh === 'true');
+  }
+
+  @Post('ml/train-xgboost')
+  trainXgboost(@Body() body: { market?: string; timeframe?: string; limit?: number }) {
+    return this.ai.trainXgboost(body.market, body.timeframe, body.limit ?? 2000);
+  }
+
+  @Get('ml/xgboost-status')
+  xgboostStatus() {
+    return this.ai.xgboostStatus();
+  }
+
+  @Post('ml/xgboost-predict')
+  xgboostPredict(@Body() body: { features: any }) {
+    return this.ai.xgboostPredict(body.features);
+  }
+
+  @Post('ml/finbert-sentiment')
+  finbertSentiment(@Body() body: { text: string; texts?: string[] }) {
+    return this.ai.finbertSentiment(body.text, body.texts);
+  }
+
+  @Post('ml/token-grade')
+  tokenGrade(@Body() body: any) {
+    return this.ai.tokenGrade(body);
+  }
+
+  @Get('social/youtube')
+  youtubeSentiment(@Query('category') category = 'crypto', @Query('refresh') refresh?: string) {
+    return this.ai.youtubeSentiment(category, refresh === 'true');
+  }
+
+  @Get('social/reddit')
+  redditSentiment(@Query('category') category = 'crypto', @Query('min_score') minScore?: string, @Query('refresh') refresh?: string) {
+    return this.ai.redditSentiment(category, minScore ? parseInt(minScore, 10) : 10, refresh === 'true');
+  }
+
+  @Get('social/aggregate')
+  aggregateSocialSentiment(@Query('category') category = 'crypto', @Query('refresh') refresh?: string) {
+    return this.ai.aggregateSocialSentiment(category, refresh === 'true');
+  }
+
+  @Post('ml/rebalance')
+  rebalance(@Body() body: { positions: any[]; profile: string; total_capital?: number; portfolio_risk?: any }) {
+    return this.ai.rebalance(body.positions, body.profile, body.total_capital, body.portfolio_risk);
+  }
+
+  @Get('ml/hidden-gems')
+  hiddenGems(
+    @Query('min_liquidity') minLiquidity?: string,
+    @Query('min_volume') minVolume?: string,
+    @Query('limit') limit?: string,
+    @Query('refresh') refresh?: string,
+  ) {
+    return this.ai.hiddenGems(
+      minLiquidity ? parseFloat(minLiquidity) : 50_000,
+      minVolume ? parseFloat(minVolume) : 100_000,
+      limit ? parseInt(limit, 10) : 10,
+      refresh === 'true',
+    );
+  }
+
+  @Post('ml/ai-defense')
+  aiDefense(@Body() body: any) {
+    return this.ai.aiDefense(body);
+  }
+
+  @Get('social/x')
+  xSentiment(@Query('category') category = 'crypto', @Query('symbol') symbol?: string, @Query('refresh') refresh?: string) {
+    return this.ai.xSentiment(category, symbol, refresh === 'true');
+  }
+
+  @Get('social/x/status')
+  xApiStatus() {
+    return this.ai.xApiStatus();
+  }
+
+  @Get('alpha/pre-listing/discover')
+  preListingDiscover(
+    @Query('min_score') minScore?: string,
+    @Query('limit') limit?: string,
+    @Query('refresh') refresh?: string,
+  ) {
+    return this.ai.preListingDiscover(
+      minScore ? parseInt(minScore, 10) : 40,
+      limit ? parseInt(limit, 10) : 15,
+      refresh === 'true',
+    );
+  }
+
+  @Get('alpha/pre-listing/analyze/:symbol')
+  preListingAnalyze(@Param('symbol') symbol: string) {
+    return this.ai.preListingAnalyze(symbol);
+  }
+
+  @Get('onchain/pre-listing/signals/:symbol')
+  preListingSignals(
+    @Param('symbol') symbol: string,
+    @Query('chain') chain = 'ethereum',
+    @Query('refresh') refresh?: string,
+  ) {
+    return this.ai.preListingSignals(symbol, chain, refresh === 'true');
+  }
+
+  @Post('backtest/scientific-report')
+  scientificReport(@Body() body: any) {
+    return this.ai.scientificReport(body);
+  }
+
+  @Post('backtest/monte-carlo')
+  monteCarlo(@Body() body: any) {
+    return this.ai.monteCarlo(body);
+  }
+
+  @Post('backtest/walk-forward')
+  walkForward(@Body() body: any) {
+    return this.ai.walkForward(body);
+  }
+
+  @Post('backtest/overfitting-check')
+  overfittingCheck(@Body() body: { in_sample: any; out_sample: any }) {
+    return this.ai.overfittingCheck(body.in_sample, body.out_sample);
+  }
+
+  @Post('ml/predict-shadow')
+  shadowPredict(@Body() body: { features: any }) {
+    return this.ai.shadowPredict(body.features);
+  }
+
+  @Get('ml/shadow-stats')
+  shadowStats() {
+    return this.ai.shadowStats();
+  }
+
+  @Post('ml/shadow-reset')
+  shadowReset() {
+    return this.ai.shadowReset();
   }
 
   @Post('review/position/:positionId')
@@ -204,5 +346,67 @@ export class AiController {
     };
 
     return this.ai.reviewPosition(payload);
+  }
+
+  // ── Phase D: Market Memory + Feedback Loop + Multi-Agent ──
+
+  @Post('memory/store')
+  memoryStore(@Body() body: any) {
+    return this.ai.memoryStore(body);
+  }
+
+  @Post('memory/resolve')
+  memoryResolve(@Body() body: any) {
+    return this.ai.memoryResolve(body);
+  }
+
+  @Post('memory/recall')
+  memoryRecall(@Body() body: any) {
+    return this.ai.memoryRecall(body);
+  }
+
+  @Post('memory/stats')
+  memoryStats(@Body() body: any) {
+    return this.ai.memoryStats(body);
+  }
+
+  @Get('memory/summary')
+  memorySummary() {
+    return this.ai.memorySummary();
+  }
+
+  @Post('memory/init-db')
+  memoryInitDb() {
+    return this.ai.memoryInitDb();
+  }
+
+  @Post('feedback/register')
+  feedbackRegister(@Body() body: any) {
+    return this.ai.feedbackRegister(body);
+  }
+
+  @Post('feedback/tick')
+  feedbackTick(@Body() body: { live_prices: any }) {
+    return this.ai.feedbackTick(body.live_prices);
+  }
+
+  @Get('feedback/stats')
+  feedbackStats() {
+    return this.ai.feedbackStats();
+  }
+
+  @Post('agents/analyze')
+  agentsAnalyze(@Body() body: any) {
+    return this.ai.agentsAnalyze(body);
+  }
+
+  @Get('agents/status')
+  agentsStatus() {
+    return this.ai.agentsStatus();
+  }
+
+  @Post('agents/performance')
+  agentsPerformance(@Body() body: any) {
+    return this.ai.agentsPerformance(body);
   }
 }

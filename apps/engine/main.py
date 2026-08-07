@@ -44,6 +44,16 @@ from routers import (
     ml_signals,
     dex_discovery,
     dashboard,
+    daily_pulse,
+    ml_advanced,
+    youtube_sentiment,
+    reddit_sentiment,
+    phase_l,
+    x_sentiment,
+    pre_listing,
+    onchain_prelisting,
+    scientific_backtest_router,
+    phase_d,
 )
 from utils.errors import EngineException, format_error_response
 from config import settings  # noqa: F401 — valide les secrets au démarrage
@@ -59,10 +69,13 @@ async def lifespan(app: FastAPI):
     logger.info("Trading OS Engine starting up")
     price_task = asyncio.create_task(ws.price_broadcaster())
     warmup_task = asyncio.create_task(scan.warmup_features())
+    from utils.crons import run_all_crons
+    cron_task = asyncio.create_task(run_all_crons())
     yield
     price_task.cancel()
     warmup_task.cancel()
-    for task in (price_task, warmup_task):
+    cron_task.cancel()
+    for task in (price_task, warmup_task, cron_task):
         try:
             await asyncio.wait_for(task, timeout=5.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
@@ -156,6 +169,16 @@ app.include_router(expected_move.router)
 app.include_router(ml_regime.router, prefix="", tags=["ML"])
 app.include_router(dex_discovery.router, prefix="/dex", tags=["DEX Discovery"])
 app.include_router(dashboard.router, tags=["Dashboard"])
+app.include_router(daily_pulse.router, tags=["Daily Pulse"])
+app.include_router(ml_advanced.router, tags=["ML Advanced"])
+app.include_router(youtube_sentiment.router, prefix="/social", tags=["YouTube Sentiment"])
+app.include_router(reddit_sentiment.router, prefix="/social", tags=["Reddit Sentiment"])
+app.include_router(phase_l.router, tags=["Phase L"])
+app.include_router(x_sentiment.router, prefix="/social", tags=["X Sentiment"])
+app.include_router(pre_listing.router, prefix="/alpha", tags=["Pre-Listing Alpha"])
+app.include_router(onchain_prelisting.router, prefix="/onchain", tags=["On-Chain Pre-Listing"])
+app.include_router(scientific_backtest_router.router, tags=["Scientific Backtest"])
+app.include_router(phase_d.router, tags=["Phase D — Market Memory + Agents"])
 
 
 # ── Candles endpoint (used by API predictMlRegime) ───────────────────

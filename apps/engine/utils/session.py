@@ -8,10 +8,12 @@ SESSIONS = {
     "Tokyo": (0, 9),
     "London": (7, 16),
     "New_York": (13, 22),
+    "NYSE": (14, 21),  # 14:30–21:00 UTC (US stock market)
 }
 
 OVERLAPS = [
     ("London_New_York", 13, 16),
+    ("London_NYSE", 14, 16),
 ]
 
 

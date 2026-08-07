@@ -210,6 +210,14 @@ export interface Signal {
     expected_move_engine?: ExpectedMoveResponse | null;
     ml_confidence?: number | null;
     ml_regime?: 'LOW' | 'NORMAL' | 'HIGH' | string | null;
+    token_grade?: {
+      overall_grade: number;
+      grade_label: string;
+      technical_score: number;
+      onchain_score: number;
+      social_score: number;
+      tokenomics_score: number;
+    } | null;
   };
 }
 

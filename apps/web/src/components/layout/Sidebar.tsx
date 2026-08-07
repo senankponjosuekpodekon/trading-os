@@ -5,13 +5,20 @@ import {
   LayoutDashboard, TrendingUp, Briefcase, BookOpen, Layers,
   Settings, LogOut, Zap, FlaskConical, LineChart, Brain, Globe, Activity, Beaker, MessageSquare,
   ShieldAlert, Trophy, Search, Cpu, Calendar, Database, SlidersHorizontal, DatabaseBackup, BarChart3, Eye,
-  Radio, Key, Send,
+  Radio, Key, Send, Newspaper,
+  Gem, Scale, Youtube, Rocket,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { clsx } from 'clsx';
 
 const nav = [
   { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
+  { href: '/daily-pulse', label: 'Daily Pulse', icon: Newspaper },
+  { href: '/sentiment',  label: 'Sentiment',   icon: Youtube },
+  { href: '/hidden-gems', label: 'Hidden Gems', icon: Gem },
+  { href: '/pre-listing', label: 'Pre-Listing',  icon: Rocket },
+  { href: '/ai-defense',  label: 'AI Defense',   icon: ShieldAlert },
+  { href: '/rebalancing', label: 'Rebalancing',  icon: Scale },
   { href: '/scanner',   label: 'Scanner',    icon: Search },
   { href: '/signals',    label: 'Signaux',     icon: TrendingUp },
   { href: '/chart',      label: 'Graphique',   icon: LineChart },
@@ -19,6 +26,7 @@ const nav = [
   { href: '/risk',       label: 'Risk',        icon: ShieldAlert },
   { href: '/performance', label: 'Performance', icon: Trophy },
   { href: '/backtest',   label: 'Backtest',    icon: FlaskConical },
+  { href: '/scientific-backtest', label: 'Scientific', icon: BarChart3 },
   { href: '/patterns',  label: 'Patterns',      icon: BarChart3 },
   { href: '/features',   label: 'Features',   icon: SlidersHorizontal },
   { href: '/phase-b',    label: 'Phase B',    icon: Layers },

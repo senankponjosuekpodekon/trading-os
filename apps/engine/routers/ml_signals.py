@@ -40,3 +40,54 @@ async def signal_scorer_predict(body: PredictRequest):
         return await signal_scorer.predict(body.features)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ── XGBoost Shadow Mode ──────────────────────────────────────────────────────
+
+@router.post("/ml/predict-shadow")
+async def shadow_predict(body: PredictRequest):
+    """POST /ml/predict-shadow — Run both logistic + XGBoost, return comparison."""
+    from ml.xgboost_shadow import shadow_predict as _shadow
+    try:
+        return await _shadow(body.features)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/ml/shadow-stats")
+async def shadow_stats():
+    """GET /ml/shadow-stats — XGBoost shadow mode comparison statistics."""
+    from ml.xgboost_shadow import get_shadow_stats
+    return get_shadow_stats()
+
+
+@router.post("/ml/shadow-reset")
+async def shadow_reset():
+    """POST /ml/shadow-reset — Reset shadow mode statistics."""
+    from ml.xgboost_shadow import reset_shadow_stats
+    reset_shadow_stats()
+    return {"reset": True}
+
+
+@router.post("/ml/train-xgboost")
+async def train_xgboost(body: TrainRequest):
+    """POST /ml/train-xgboost — Train the XGBoost scorer (shadow mode)."""
+    from ml.xgboost_scorer import XGBoostSignalScorer
+    try:
+        scorer = XGBoostSignalScorer()
+        result = await scorer.train(
+            market=body.market,
+            timeframe=body.timeframe,
+            limit=body.limit,
+        )
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/ml/xgboost-status")
+async def xgboost_status():
+    """GET /ml/xgboost-status — XGBoost scorer status."""
+    from ml.xgboost_scorer import XGBoostSignalScorer
+    scorer = XGBoostSignalScorer()
+    return await scorer.status()

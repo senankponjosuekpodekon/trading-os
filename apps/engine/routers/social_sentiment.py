@@ -109,6 +109,7 @@ def social_bonus(metrics: dict, signal_direction: str) -> tuple[int, list[str]]:
     """
     Social momentum bonus.
     Galaxy Score > 60 + AltRank improving (< 20) → +12 pts in signal direction.
+    Enhanced with FinBERT sentiment when available.
     """
     bonus = 0
     reasons = []
@@ -122,5 +123,20 @@ def social_bonus(metrics: dict, signal_direction: str) -> tuple[int, list[str]]:
     elif galaxy > 55 and dominance > 5:
         bonus += 8
         reasons.append(f"Social: dominance {dominance:.1f}% + Galaxy {galaxy:.0f} → mild momentum")
+
+    # FinBERT sentiment enhancement (Phase K integration)
+    finbert_label = metrics.get("finbert_label")
+    finbert_score = metrics.get("finbert_score", 0) or 0
+    if finbert_label:
+        direction_match = (
+            (finbert_label == "positive" and signal_direction == "BUY") or
+            (finbert_label == "negative" and signal_direction == "SELL")
+        )
+        if direction_match and abs(finbert_score) > 0.3:
+            bonus += min(int(abs(finbert_score) * 10), 8)
+            reasons.append(f"FinBERT: {finbert_label} sentiment ({finbert_score:+.2f}) aligns with {signal_direction}")
+        elif not direction_match and abs(finbert_score) > 0.3:
+            bonus -= min(int(abs(finbert_score) * 5), 5)
+            reasons.append(f"FinBERT: {finbert_label} sentiment ({finbert_score:+.2f}) conflicts with {signal_direction}")
 
     return bonus, reasons

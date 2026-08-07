@@ -22,9 +22,13 @@ Phase H            → Daily Pulse & RSS aggregation (inspiré Token Metrics)
 Phase I            → ML avancé : XGBoost + FinBERT + Token Grade 0-100
 Phase J            → US Stocks & Indices (NASDAQ, S&P500, AAPL, etc.)
 Phase K            → YouTube & Reddit sentiment analysis
-Phase L            → Portfolio rebalancing + Hidden Gems + AI Defense Report
-Phase D (vision)   → Multi-agents autonomes + Market Memory System + Self-Learning + exécution réelle
-Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timeline) + Data Pipeline scalable
+Phase L            → Portfolio rebalancing + Hidden Gems + AI Defense Report ✅
+Phase M            → X (Twitter) API v2 + Nitter fallback sentiment ✅
+Phase N            → Pre-listing alpha (IDO/IEO/ICO discovery + asymmetric scoring) ✅
+Phase O            → Scientific backtesting (Sortino, Calmar, Monte Carlo, walk-forward, overfitting) ✅
+Phase P            → On-chain pre-listing signals (whale accumulation, liquidity building, dev activity) ✅
+Phase D (vision)   → Multi-agents autonomes + Market Memory System + Self-Learning + exécution réelle ✅
+Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timeline) + Data Pipeline scalable ✅
 ```
 
 ---

@@ -11,6 +11,8 @@ async function main() {
     { name: 'Commodities', type: 'COMMODITIES' as const },
     { name: 'Synthetic', type: 'SYNTHETIC' as const },
     { name: 'BRVM', type: 'STOCKS' as const },
+    { name: 'US Stocks', type: 'STOCKS' as const },
+    { name: 'US Indices', type: 'INDICES' as const },
   ];
 
   for (const m of markets) {
@@ -26,6 +28,8 @@ async function main() {
   const synth  = await prisma.market.findUnique({ where: { name: 'Synthetic' } });
   const commo  = await prisma.market.findUnique({ where: { name: 'Commodities' } });
   const brvm   = await prisma.market.findUnique({ where: { name: 'BRVM' } });
+  const usStocks = await prisma.market.findUnique({ where: { name: 'US Stocks' } });
+  const usIndices = await prisma.market.findUnique({ where: { name: 'US Indices' } });
 
   const assets = [
     { symbol: 'BTC/USDT',  name: 'Bitcoin',           marketId: crypto!.id, baseCurrency: 'USDT' },
@@ -56,6 +60,24 @@ async function main() {
     { symbol: 'CBIBF', name: 'Coris Bank',          marketId: brvm!.id, baseCurrency: 'XOF' },
     { symbol: 'ABJC',  name: 'Abidjan.net',         marketId: brvm!.id, baseCurrency: 'XOF' },
     { symbol: 'STAC',  name: 'SOLIBRA',             marketId: brvm!.id, baseCurrency: 'XOF' },
+    // ── US Stocks (Phase J) ──
+    { symbol: 'AAPL/USD',  name: 'Apple Inc.',           marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'TSLA/USD',  name: 'Tesla Inc.',           marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'MSFT/USD',  name: 'Microsoft Corp.',      marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'NVDA/USD',  name: 'NVIDIA Corp.',         marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'AMZN/USD',  name: 'Amazon.com Inc.',      marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'META/USD',  name: 'Meta Platforms Inc.',  marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'GOOGL/USD', name: 'Alphabet Inc. (Class A)', marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'NFLX/USD',  name: 'Netflix Inc.',         marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'AMD/USD',   name: 'Advanced Micro Devices', marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'INTC/USD',  name: 'Intel Corp.',          marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'JPM/USD',   name: 'JPMorgan Chase & Co.',  marketId: usStocks!.id, baseCurrency: 'USD' },
+    { symbol: 'BAC/USD',   name: 'Bank of America Corp.', marketId: usStocks!.id, baseCurrency: 'USD' },
+    // ── US Indices ──
+    { symbol: 'SP500/USD',  name: 'S&P 500 Index',       marketId: usIndices!.id, baseCurrency: 'USD' },
+    { symbol: 'NASDAQ/USD', name: 'NASDAQ Composite',    marketId: usIndices!.id, baseCurrency: 'USD' },
+    { symbol: 'DOW/USD',    name: 'Dow Jones Industrial', marketId: usIndices!.id, baseCurrency: 'USD' },
+    { symbol: 'VIX/USD',    name: 'Volatility Index (VIX)', marketId: usIndices!.id, baseCurrency: 'USD' },
   ];
 
   for (const a of assets) {

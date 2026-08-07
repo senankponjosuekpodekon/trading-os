@@ -361,6 +361,30 @@ SYMBOL_TO_YFINANCE = {
     "XAG/USD":   "SI=F",      # Silver Futures
     "WTI/USD":   "CL=F",      # WTI Crude Oil Futures
     "BRENT/USD": "BZ=F",      # Brent Crude Futures
+    # ── US Stocks & Indices (Phase J) ──
+    "AAPL/USD":  "AAPL",
+    "TSLA/USD":  "TSLA",
+    "MSFT/USD":  "MSFT",
+    "NVDA/USD":  "NVDA",
+    "AMZN/USD":  "AMZN",
+    "META/USD":  "META",
+    "GOOGL/USD": "GOOGL",
+    "NFLX/USD":  "NFLX",
+    "AMD/USD":   "AMD",
+    "INTC/USD":  "INTC",
+    "JPM/USD":   "JPM",
+    "BAC/USD":   "BAC",
+    "SP500/USD": "^GSPC",     # S&P 500 Index
+    "NASDAQ/USD": "^IXIC",    # NASDAQ Composite
+    "DOW/USD":   "^DJI",      # Dow Jones Industrial Average
+    "VIX/USD":   "^VIX",      # Volatility Index
+}
+
+# US Stock symbols for asset type classification
+US_STOCK_SYMBOLS = {
+    "AAPL/USD", "TSLA/USD", "MSFT/USD", "NVDA/USD", "AMZN/USD",
+    "META/USD", "GOOGL/USD", "NFLX/USD", "AMD/USD", "INTC/USD",
+    "JPM/USD", "BAC/USD", "SP500/USD", "NASDAQ/USD", "DOW/USD", "VIX/USD",
 }
 
 # Conversion timeframe interne → yfinance interval
@@ -411,16 +435,18 @@ TF_TO_DERIV_GRANULARITY: dict = {
 }
 
 # Asset type classification
-FOREX_SYMBOLS = set(SYMBOL_TO_TWELVEDATA.keys()) | set(SYMBOL_TO_YFINANCE.keys())
+FOREX_SYMBOLS = set(SYMBOL_TO_TWELVEDATA.keys()) | (set(SYMBOL_TO_YFINANCE.keys()) - US_STOCK_SYMBOLS)
 COMMODITY_SYMBOLS = {"XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD"}
 
 
 def get_asset_type(symbol: str) -> str:
-    """Classify an internal symbol into CRYPTO | FOREX | SYNTHETIC | BRVM | COMMODITY | UNKNOWN."""
+    """Classify an internal symbol into CRYPTO | FOREX | SYNTHETIC | BRVM | COMMODITY | US_STOCK | UNKNOWN."""
     if symbol in SYMBOL_TO_BINANCE or symbol.endswith("/USDT"):
         return "CRYPTO"
     if symbol in SYNTHETIC_SYMBOLS:
         return "SYNTHETIC"
+    if symbol in US_STOCK_SYMBOLS:
+        return "US_STOCK"
     if is_brvm_symbol(symbol):
         return "BRVM"
     if symbol in COMMODITY_SYMBOLS:
@@ -2042,6 +2068,22 @@ def analyze_candles(
 
 async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None, strategy: Optional[dict] = None, bias_regimes: Optional[dict[str, dict]] = None) -> dict:
     """Fetch klines et analyse un actif — utilisé par warmup et fallback."""
+    # ── Phase J: NYSE session guard for US stocks ──
+    _asset_type = get_asset_type(symbol)
+    if _asset_type == "US_STOCK":
+        from datetime import datetime, timezone as _tz
+        _now = datetime.now(_tz.utc)
+        _hour_min = _now.hour * 60 + _now.minute
+        # NYSE: 14:30–21:00 UTC, Mon–Fri
+        if _now.weekday() >= 5 or _hour_min < 870 or _hour_min >= 1260:
+            return {
+                "symbol": symbol,
+                "signal": "NEUTRAL",
+                "confidence": 0,
+                "reason": "NYSE closed — US stock scanning suspended outside market hours (14:30–21:00 UTC, Mon–Fri)",
+                "asset_type": "US_STOCK",
+            }
+
     tf = TF_MAP.get(timeframe, "1h")
     df = await fetch_binance_klines(symbol, tf)
     if df is None:
@@ -2112,8 +2154,49 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             logger.warning("social_context_failed", symbol=symbol, error=str(exc))
             social_context = None
 
+    # ── Phase M: X/Twitter sentiment for crypto ──
+    x_sentiment_context = None
+    if get_asset_type(symbol) == "CRYPTO":
+        try:
+            from routers.x_sentiment import fetch_x_sentiment
+            _base = symbol.split("/")[0]
+            x_result = await asyncio.wait_for(fetch_x_sentiment(category="crypto", symbol=_base), timeout=8.0)
+            if x_result and not x_result.get("error"):
+                x_sentiment_context = {
+                    "overall_label": x_result.get("overall_sentiment", {}).get("overall_label"),
+                    "overall_score": x_result.get("overall_sentiment", {}).get("overall_score", 0),
+                    "tweet_count": x_result.get("overall_sentiment", {}).get("count", 0),
+                    "engagement": x_result.get("engagement", {}),
+                    "source": x_result.get("source"),
+                }
+        except Exception as exc:
+            logger.debug("x_sentiment_context_failed", symbol=symbol, error=str(exc))
+
+    # ── Phase L: AI Defense pre-filter for crypto ──
+    if get_asset_type(symbol) == "CRYPTO" and df is not None and len(df) >= 2:
+        try:
+            from ml.ai_defense import run_defense_checks
+            _pc24 = float((df["close"].iloc[-1] / df["close"].iloc[-min(len(df), 24)] - 1) * 100) if len(df) >= 24 else 0
+            _pc1 = float((df["close"].iloc[-1] / df["close"].iloc[-2] - 1) * 100) if len(df) >= 2 else 0
+            _vol24 = float(df["volume"].iloc[-min(len(df), 24):].sum() * df["close"].iloc[-1]) if "volume" in df else 0
+            _defense = run_defense_checks(
+                symbol, price_change_24h=_pc24, price_change_1h=_pc1,
+                volume_24h=_vol24, liquidity=0,
+            )
+            if _defense["recommendation"] == "BLOCK":
+                return {
+                    "symbol": symbol,
+                    "signal": "NEUTRAL",
+                    "confidence": 0,
+                    "reason": f"AI Defense BLOCK: {_defense['alerts'][0]['message'] if _defense['alerts'] else 'critical risk detected'}",
+                    "asset_type": "CRYPTO",
+                    "ai_defense": _defense,
+                }
+        except Exception:
+            pass
+
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
+    result = await loop.run_in_executor(
         _executor,
         lambda: analyze_candles(
             symbol, timeframe, df,
@@ -2125,6 +2208,59 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             bias_regimes=bias_regimes if bias_regimes else None,
         ),
     )
+
+    # ── Phase M: Attach X sentiment to result metadata ──
+    if result and isinstance(result, dict) and x_sentiment_context:
+        if "metadata" not in result:
+            result["metadata"] = {}
+        result["metadata"]["x_sentiment"] = x_sentiment_context
+
+    # ── Phase P: On-chain pre-listing signals for crypto ──
+    if result and isinstance(result, dict) and get_asset_type(symbol) == "CRYPTO":
+        try:
+            from routers.onchain_prelisting import analyze_pre_listing_signals
+            _base = symbol.split("/")[0]
+            _chain = "solana" if "SOL" in _base else "ethereum"
+            _onchain = await asyncio.wait_for(
+                analyze_pre_listing_signals(_base, chain=_chain),
+                timeout=8.0,
+            )
+            if _onchain and not _onchain.get("error"):
+                if "metadata" not in result:
+                    result["metadata"] = {}
+                result["metadata"]["onchain_signals"] = {
+                    "signal_score": _onchain.get("signal_score", 0),
+                    "verdict": _onchain.get("verdict"),
+                    "whale_accumulation": _onchain.get("signals", {}).get("whale_accumulation"),
+                    "liquidity_building": _onchain.get("signals", {}).get("liquidity_building"),
+                    "dev_activity": _onchain.get("signals", {}).get("dev_activity"),
+                    "holder_growth": _onchain.get("signals", {}).get("holder_growth"),
+                }
+        except Exception as exc:
+            logger.debug("onchain_signals_failed", symbol=symbol, error=str(exc))
+
+    # ── Phase I: Token Grade 0-100 in scan results ──
+    if result and isinstance(result, dict) and result.get("signal") in ("BUY", "SELL"):
+        try:
+            from ml.token_grade import compute_token_grade
+            _social_score = 50
+            _tokenomics_score = 50
+            if social_context:
+                _social_score = min(100, (social_context.get("galaxy_score", 50)) + 20)
+            if tokenomics_context:
+                _tokenomics_score = max(0, 100 - tokenomics_context.get("risk_score", 50))
+            _grade = compute_token_grade(
+                symbol,
+                technical_score=result.get("confidence", 50),
+                onchain_score=50,
+                social_score=_social_score,
+                tokenomics_score=_tokenomics_score,
+            )
+            result["token_grade"] = _grade
+        except Exception:
+            pass
+
+    return result
 
 
 async def warmup_fast():
