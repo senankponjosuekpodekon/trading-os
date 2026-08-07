@@ -10,6 +10,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { QuotaService } from '../billing/quota.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 
 const fakeGuard: CanActivate = {
   canActivate: (context: ExecutionContext) => {
@@ -22,6 +23,7 @@ describe('SignalsController (integration)', () => {
   let app: INestApplication;
   let outcomeService: { logSignal: jest.Mock; getStats: jest.Mock };
   const httpService = { post: jest.fn() };
+  const engineHttpService = { post: jest.fn(), get: jest.fn() };
   const strategy = { id: 's1', name: 'EMA Trend + RSI', rules: {} };
   const asset = { id: 'a1', symbol: 'BTC/USDT', market: { name: 'crypto' } };
   const createdSignal = { id: 'sig1', asset: { symbol: asset.symbol, name: undefined }, strategy: { name: strategy.name } };
@@ -42,6 +44,9 @@ describe('SignalsController (integration)', () => {
     userStrategy: {
       findMany: jest.fn().mockResolvedValue([]),
     },
+    signalLog: {
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
   };
 
   beforeAll(async () => {
@@ -55,6 +60,8 @@ describe('SignalsController (integration)', () => {
     })
       .overrideProvider(HttpService)
       .useValue(httpService)
+      .overrideProvider(EngineHttpService)
+      .useValue(engineHttpService)
       .overrideProvider(PrismaService)
       .useValue(prismaMock as any)
       .overrideProvider(PrismaSystemService)
@@ -80,6 +87,8 @@ describe('SignalsController (integration)', () => {
 
   beforeEach(() => {
     httpService.post.mockReset();
+    engineHttpService.post.mockReset();
+    engineHttpService.get.mockReset();
   });
 
   it('GET /signals returns paginated signals', async () => {
@@ -93,8 +102,7 @@ describe('SignalsController (integration)', () => {
   });
 
   it('POST /signals/scan triggers engine scan and persists signals', async () => {
-    httpService.post.mockReturnValue(of({
-      data: {
+    engineHttpService.post.mockResolvedValue({
         results: [{
           symbol: 'BTC/USDT',
           signal: 'BUY',
@@ -116,8 +124,7 @@ describe('SignalsController (integration)', () => {
           score: 45,
         }],
         portfolio_risk: { exposure: 0.1 },
-      },
-    }));
+    });
 
     await request(app.getHttpServer())
       .post('/signals/scan')
@@ -142,16 +149,14 @@ describe('SignalsController (integration)', () => {
         strategy: { id: 'us1', name: 'Custom', rules: { ema_fast: 20 } },
       },
     ]);
-    httpService.post.mockReturnValue(of({
-      data: { results: [], portfolio_risk: null },
-    }));
+    engineHttpService.post.mockResolvedValue({ results: [], portfolio_risk: null });
 
     await request(app.getHttpServer())
       .post('/signals/scan')
       .send({ symbols: ['BTC/USDT'], timeframe: '1h' })
       .expect(201);
 
-    const payload = httpService.post.mock.calls[0][1];
+    const payload = engineHttpService.post.mock.calls[0][1];
     expect(payload.strategies).toHaveLength(1);
     expect(payload.strategies[0].rules.ema_fast).toBe(10);
   });

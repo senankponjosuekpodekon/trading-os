@@ -32,6 +32,7 @@ describe('PositionsController (integration)', () => {
     stopLoss: 95,
     takeProfit: 110,
     pnl: 0,
+    asset: { symbol: 'BTC/USDT' },
   };
 
   const prismaMock = {

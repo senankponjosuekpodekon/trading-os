@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { StrategiesService } from './strategies.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotaService } from '../billing/quota.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 
 describe('StrategiesService', () => {
   let service: StrategiesService;
@@ -29,6 +30,7 @@ describe('StrategiesService', () => {
         StrategiesService,
         { provide: PrismaService, useValue: prismaMock as any },
         { provide: QuotaService, useValue: { assertCanEnableStrategy: jest.fn().mockResolvedValue(undefined) } },
+        { provide: EngineHttpService, useValue: { get: jest.fn(), post: jest.fn() } },
       ],
     }).compile();
 

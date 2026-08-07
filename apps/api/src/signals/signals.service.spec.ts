@@ -34,6 +34,9 @@ describe('SignalsService', () => {
     userStrategy: {
       findMany: jest.fn().mockResolvedValue([]),
     },
+    signalLog: {
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
   };
 
   const mockEngineHttp = {

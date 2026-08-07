@@ -9,6 +9,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { JournalService } from '../journal/journal.service';
 import { AuditService } from '../audit/audit.service';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { CrossPositionRiskService } from './cross-position-risk.service';
 
 describe('PositionsService', () => {
   let service: PositionsService;
@@ -74,6 +75,7 @@ describe('PositionsService', () => {
         { provide: JournalService, useValue: mockJournal },
         { provide: AuditService, useValue: mockAudit },
         { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
+        { provide: CrossPositionRiskService, useValue: { checkCorrelationRisk: jest.fn().mockResolvedValue({ allowed: true }) } },
       ],
     }).compile();
 
