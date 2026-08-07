@@ -11,7 +11,7 @@ def test_london_ny_overlap():
     now = datetime(2026, 7, 15, 14, 0, tzinfo=timezone.utc)
     info = get_session_info(now)
     assert info["overlap"] == "London_New_York"
-    assert info["session"] == "London_New_York"
+    assert info["session"] == "London_NYSE_New_York"
     assert info["hour"] == 14
 
 
