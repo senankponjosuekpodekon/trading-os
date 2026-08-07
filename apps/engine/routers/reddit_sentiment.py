@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -174,6 +173,7 @@ async def aggregate_social_sentiment(
     Returns a unified sentiment score across all social sources.
     """
     from routers.social_sentiment import fetch_social_metrics
+    from routers.youtube_sentiment import fetch_youtube_sentiment
 
     # Fetch all sources in parallel
     yt_task = fetch_youtube_sentiment(category)

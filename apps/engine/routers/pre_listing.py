@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
@@ -31,8 +31,6 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from utils.logger import get_logger
-from utils.rate_limiter import rate_limit
-from utils.http import retry_async
 
 logger = get_logger(__name__)
 router = APIRouter()

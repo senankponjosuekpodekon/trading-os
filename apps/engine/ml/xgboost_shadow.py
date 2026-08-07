@@ -8,11 +8,9 @@ via a simple config flag.
 """
 from __future__ import annotations
 
-import asyncio
-import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
+from typing import Any, Dict
+from dataclasses import dataclass
 
 from utils.logger import get_logger
 

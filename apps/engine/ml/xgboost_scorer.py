@@ -20,7 +20,7 @@ import numpy as np
 
 from config import settings
 from utils.logger import get_logger
-from ml.signal_scorer import _flatten_features, _coerce_number
+from ml.signal_scorer import _flatten_features
 
 logger = get_logger(__name__)
 

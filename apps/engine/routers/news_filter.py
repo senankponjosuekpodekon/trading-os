@@ -9,11 +9,10 @@ affect commodities, and SEC/crypto regulation news affects crypto.
 This module maps economic events to affected asset types and provides
 a unified `should_suspend_signal` function used by scan.py.
 """
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timezone
 import structlog
 
-from scrapers.forex_calendar_scraper import get_macro_context, get_cached_calendar
+from scrapers.forex_calendar_scraper import get_cached_calendar
 
 log = structlog.get_logger()
 

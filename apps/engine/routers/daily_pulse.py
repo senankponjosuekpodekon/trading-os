@@ -5,7 +5,6 @@ Endpoint: GET /ai/daily-pulse
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional
 import asyncio
 import json
 import time
@@ -131,7 +130,7 @@ async def _gather_market_data() -> dict:
     # 4. Economic calendar (high-impact events today)
     try:
         from scrapers.forex_calendar_scraper import get_cached_calendar
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         events = await get_cached_calendar()
         today_events = [

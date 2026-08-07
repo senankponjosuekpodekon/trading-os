@@ -3,9 +3,9 @@ Phase D API Router — Market Memory, Feedback Loop, Multi-Agent System
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 router = APIRouter()
 

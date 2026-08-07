@@ -23,7 +23,6 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from utils.logger import get_logger
-from utils.rate_limiter import rate_limit
 
 logger = get_logger(__name__)
 router = APIRouter()

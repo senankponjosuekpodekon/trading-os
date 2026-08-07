@@ -4,7 +4,6 @@ Tests the FastAPI routers directly using TestClient.
 
 Run: python -m pytest tests/test_phase_mnop.py -v
 """
-import pytest
 import sys
 import os
 
@@ -207,7 +206,7 @@ def test_smart_money_addresses_config():
 
 def test_smart_money_address_structure():
     from routers.onchain_prelisting import SMART_MONEY_ADDRESSES
-    for chain, addresses in SMART_MONEY_ADDRESSES.items():
+    for _chain, addresses in SMART_MONEY_ADDRESSES.items():
         assert len(addresses) > 0
         for addr in addresses:
             assert isinstance(addr, str)

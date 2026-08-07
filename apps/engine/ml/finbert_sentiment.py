@@ -10,7 +10,7 @@ without paying OpenAI API costs.
 from __future__ import annotations
 
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict
 from dataclasses import dataclass
 
 from utils.logger import get_logger
@@ -60,7 +60,7 @@ _BULLISH_WORDS = {
     "approve", "launch", "partnership", "upgrade", "all-time", "breakout",
     "buy", "accumulate", "positive", "outperform", "beat", "exceed", "strong",
     "growth", "opportunity", "bullish", "uptrend", "support", "recovery",
-    "inflow", "demand", "accumulate", "hold", "upgrade", "raise", "boost",
+    "inflow", "demand", "hold", "raise", "boost",
 }
 
 _BEARISH_WORDS = {

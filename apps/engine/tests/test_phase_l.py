@@ -2,7 +2,6 @@
 Unit tests for Phase L ML modules: portfolio_rebalancing, hidden_gems, ai_defense.
 Run: python -m pytest tests/test_phase_l.py -v
 """
-import pytest
 import sys
 import os
 

@@ -27,7 +27,7 @@ async def cron_daily_pulse():
             try:
                 from routers.daily_pulse import generate_daily_pulse
                 logger.info("cron_daily_pulse_start")
-                pulse = await generate_daily_pulse()
+                await generate_daily_pulse()
                 last_generated = today
                 logger.info("cron_daily_pulse_done", date=today, status="ok")
             except Exception as exc:
@@ -41,7 +41,7 @@ async def cron_hidden_gems():
     """Scan for hidden gems every 30 minutes and cache results."""
     while True:
         try:
-            from ml.hidden_gems import discover_hidden_gems, _cache, _CACHE_TTL
+            from ml.hidden_gems import discover_hidden_gems, _cache
             logger.info("cron_hidden_gems_start")
             result = await discover_hidden_gems(limit=10)
             _cache["gems"] = result

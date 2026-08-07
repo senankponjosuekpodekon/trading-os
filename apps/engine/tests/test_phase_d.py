@@ -1,7 +1,6 @@
 """
 Tests for Phase D: Market Memory, Feedback Loop, Multi-Agent System.
 """
-import pytest
 import sys
 import os
 import asyncio
@@ -43,7 +42,7 @@ def test_extract_features():
 
 
 def test_store_and_recall_pattern():
-    from ml.market_memory import store_pattern, recall_similar_patterns, _memory_cache
+    from ml.market_memory import store_pattern, recall_similar_patterns
     metadata = {
         "price_action": {"bos": True, "bos_dir": "bullish"},
         "smc": {"ob": {"near_bullish_ob": True}},
@@ -61,7 +60,7 @@ def test_store_and_recall_pattern():
 
 
 def test_resolve_pattern():
-    from ml.market_memory import store_pattern, resolve_pattern, recall_similar_patterns, _memory_cache
+    from ml.market_memory import store_pattern, resolve_pattern, recall_similar_patterns
     metadata = {
         "price_action": {"bos": True},
         "smc": {"ob": {"near_bullish_ob": True}},

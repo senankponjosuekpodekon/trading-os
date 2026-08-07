@@ -25,7 +25,7 @@ from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
 from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
-from routers.forex_context import should_suspend_forex, get_dxy_momentum
+from routers.forex_context import get_dxy_momentum
 from routers.gold_specialist import is_gold_symbol, gold_specialist_bonus, gold_atr_adjustment, get_session_info as gold_session_info
 from routers.news_filter import should_suspend_signal
 from routers.portfolio_risk import analyze_portfolio_risk, get_cluster
@@ -969,6 +969,8 @@ def analyze_candles(
     tokenomics_context: Optional[dict] = None,  # token unlocks / concentration risk
     social_context: Optional[dict] = None,  # LunarCrush social sentiment
     bias_regimes: Optional[dict[str, dict]] = None,  # D1/Weekly bias regimes
+    news_context: Optional[dict] = None,  # macro news for COMMODITY/CRYPTO
+    gold_dxy: Optional[dict] = None,  # DXY momentum for gold specialist
 ) -> dict:
     # ── Correlation ID for end-to-end tracing ──
     corr_id = set_correlation_id()
@@ -1380,9 +1382,7 @@ def analyze_candles(
         w1_regime = bias_regimes.get("1w")
 
         d1_aligned = False
-        w1_aligned = False
         d1_opposed = False
-        w1_opposed = False
 
         if d1_regime and d1_regime.get("regime") not in ("UNKNOWN", None):
             d1_r = d1_regime["regime"]
@@ -1411,11 +1411,9 @@ def analyze_candles(
                    (w1_r == "TRENDING_BEAR" and provisional_dir == "SELL"):
                     score += 8; _sub_bias += 8
                     reasons.append("Bias(1W): aligné avec D1 (+8)")
-                    w1_aligned = True
                 else:
                     score -= 4; _sub_bias -= 4
                     reasons.append("Bias(1W): opposé au signal (-4)")
-                    w1_opposed = True
             elif d1_opposed and w1_r in ("TRENDING_BULL", "TRENDING_BEAR"):
                 # D1 déjà opposé — Weekly dans le sens du signal = renforcement du doute
                 if (w1_r == "TRENDING_BULL" and provisional_dir == "BUY") or \
@@ -2206,6 +2204,8 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             tokenomics_context=tokenomics_context,
             social_context=social_context,
             bias_regimes=bias_regimes if bias_regimes else None,
+            news_context=news_context,
+            gold_dxy=gold_dxy,
         ),
     )
 

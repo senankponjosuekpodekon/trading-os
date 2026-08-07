@@ -153,19 +153,19 @@ class SwingAgent(BaseAgent):
         if ema20 > ema50 > ema200:
             signal_type = "BUY"
             confidence = 65.0
-            reasoning = f"Swing long: EMA20>50>200, strong uptrend"
+            reasoning = "Swing long: EMA20>50>200, strong uptrend"
         elif ema20 < ema50 < ema200:
             signal_type = "SELL"
             confidence = 65.0
-            reasoning = f"Swing short: EMA20<50<200, strong downtrend"
+            reasoning = "Swing short: EMA20<50<200, strong downtrend"
         elif ema20 > ema50:
             signal_type = "BUY"
             confidence = 45.0
-            reasoning = f"Swing long (weak): EMA20>50 only"
+            reasoning = "Swing long (weak): EMA20>50 only"
         elif ema20 < ema50:
             signal_type = "SELL"
             confidence = 45.0
-            reasoning = f"Swing short (weak): EMA20<50 only"
+            reasoning = "Swing short (weak): EMA20<50 only"
 
         atr = float(df["close"].rolling(20).std().iloc[-1]) if len(df) >= 20 else close * 0.02
 

@@ -9,12 +9,11 @@ Retrieval: Vector similarity on feature embeddings (simplified: key-based matchi
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
 
 from utils.logger import get_logger
 
@@ -199,7 +198,6 @@ async def recall_similar_patterns(
     Returns list of historical patterns with outcomes.
     """
     setup_type = _extract_setup_type(metadata)
-    features = _extract_features(metadata)
     key = _build_pattern_key(symbol, timeframe, setup_type, signal_type)
 
     # Try DB first

@@ -13,9 +13,7 @@ Features:
 """
 from __future__ import annotations
 
-import random
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -109,7 +107,7 @@ def monte_carlo_simulation(
     initial_capital: float = 10_000,
     risk_pct: float = 1.0,
     simulations: int = 1000,
-    confidence_levels: List[float] = [5, 25, 50, 75, 95],
+    confidence_levels: Optional[List[float]] = None,
 ) -> Dict[str, Any]:
     """
     Bootstrap Monte Carlo: randomly sample trade sequences (with replacement)
@@ -121,6 +119,8 @@ def monte_carlo_simulation(
     - Win rate
     - Profit factor
     """
+    if confidence_levels is None:
+        confidence_levels = [5, 25, 50, 75, 95]
     if len(trades) < 10:
         return {
             "error": "Not enough trades for Monte Carlo (minimum 10 required)",

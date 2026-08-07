@@ -10,14 +10,13 @@ import asyncio
 import re
 import time
 from datetime import datetime, timezone
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
 from utils.logger import get_logger
-from ml.finbert_sentiment import analyze_sentiment, aggregate_sentiment, get_sentiment_bonus
+from ml.finbert_sentiment import aggregate_sentiment, get_sentiment_bonus
 
 logger = get_logger(__name__)
 router = APIRouter()

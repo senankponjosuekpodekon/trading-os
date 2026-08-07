@@ -3,8 +3,8 @@ Scientific Backtesting Endpoints — Phase O
 Exposes advanced backtesting metrics: Sortino, Calmar, Monte Carlo,
 walk-forward validation, and overfitting detection.
 """
-from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException
+from typing import Any, Dict, List
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from utils.logger import get_logger
