@@ -135,3 +135,15 @@ async def macro_summary():
         "dxy": results[2] if not isinstance(results[2], Exception) else None,
         "btc_dominance": results[3] if not isinstance(results[3], Exception) else None,
     }
+
+
+@router.get("/rotation")
+async def macro_rotation():
+    """Macro rotation signal — BTC → ETH → altcoins → memecoins."""
+    from risk.macro_rotation import compute_macro_rotation
+    cached = _get_cached("macro_rotation")
+    if cached:
+        return cached
+    result = await compute_macro_rotation()
+    _set_cached("macro_rotation", result)
+    return result

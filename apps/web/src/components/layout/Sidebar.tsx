@@ -39,6 +39,7 @@ const nav = [
   { href: '/deriv',      label: 'Deriv V75',    icon: Activity },
   { href: '/onchain',    label: 'On-chain',    icon: Database },
   { href: '/observability', label: 'Observability', icon: Eye },
+  { href: '/macro-rotation', label: 'Rotation', icon: TrendingUp },
   { href: '/admin',        label: 'Admin',         icon: ShieldAlert },
   { href: '/admin/users',  label: 'Utilisateurs',  icon: Users },
   { href: '/admin/ops',    label: 'Ops Système',   icon: Activity },
