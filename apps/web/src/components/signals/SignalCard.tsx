@@ -152,7 +152,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
                 {signal.metadata.market_cap_tier}
               </span>
             )}
-            {signal.metadata?.red_flags?.red_flag_count > 0 && (
+            {signal.metadata?.red_flags && signal.metadata.red_flags.red_flag_count > 0 && (
               <span
                 className={`text-xs px-2 py-0.5 rounded border font-medium ${
                   signal.metadata.red_flags.danger
