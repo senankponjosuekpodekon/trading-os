@@ -24,6 +24,7 @@ export class SignalsController {
     @Query('sort') sort?: string,
     @Query('profile') profile?: string,
     @Query('market') market?: string,
+    @Query('risk_level') riskLevel?: string,
   ) {
     return this.signalsService.findAll({
       page:    page   ? Math.max(1, parseInt(page, 10))   : 1,
@@ -31,6 +32,7 @@ export class SignalsController {
       sort:    sort   || 'createdAt:desc',
       profile: profile,
       market:  market,
+      riskLevel: riskLevel,
     });
   }
 

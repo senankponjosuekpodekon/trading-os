@@ -218,6 +218,41 @@ export interface Signal {
       social_score: number;
       tokenomics_score: number;
     } | null;
+    risk_level?: 'EXTREME' | 'HIGH' | 'MODERATE' | 'LOW' | null;
+    market_cap_tier?: 'MICRO' | 'SMALL' | 'MID' | 'LARGE' | null;
+    liquidity_score?: {
+      score: number;
+      depth_score: number;
+      spread_score: number;
+      volume_score: number;
+      warning: string | null;
+    } | null;
+    max_position_pct?: number | null;
+    risk_level_reasons?: string[] | null;
+    red_flags?: {
+      red_flags: string[];
+      red_flag_count: number;
+      danger: boolean;
+      warning: string | null;
+    } | null;
+    moonshot_tp?: {
+      tp_moonshot_2x: number;
+      tp_moonshot_3x: number;
+      sell_pct_at_2x: number;
+      description: string;
+    } | null;
+    dca_tranches?: {
+      mode: string;
+      fear_greed: number;
+      tranches: { tranche: number; pct: number; trigger: string; price: number }[];
+      description: string;
+    } | null;
+    scale_out?: {
+      mode: string;
+      fear_greed: number;
+      steps: { step: number; pct: number; trigger: string; price: number | null }[];
+      description: string;
+    } | null;
   };
 }
 

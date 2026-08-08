@@ -208,10 +208,108 @@ def analyze_portfolio_risk(results: list[dict]) -> dict:
         "total_buy":      n_buy_total,
         "total_sell":     n_sell_total,
         "dominant_dir":   dominant_dir,
+        "allocation":     _compute_allocation(active),
         "summary": (
             f"{total_active} signaux actifs · "
             f"{n_buy_total} BUY / {n_sell_total} SELL · "
             f"Risque {risk_level}"
             + (f" · {len(alerts)} alerte(s)" if alerts else "")
         ),
+    }
+
+
+# ── Phase 0++: 80/20 allocation by profile ──
+
+# Profiles and their allocation rules
+PROFILE_ALLOCATION: dict[str, dict] = {
+    "ACCUMULATION": {
+        "safe_pct": 0.80,   # 80% large/mid cap
+        "moonshot_pct": 0.20,  # 20% small/micro cap
+        "description": "80% accumulation (large/mid cap) + 20% moonshot (small/micro cap)",
+    },
+    "SWING": {
+        "safe_pct": 0.60,
+        "moonshot_pct": 0.40,
+        "description": "60% swing (large/mid cap) + 40% moonshot (small/micro cap)",
+    },
+    "MOONSHOT": {
+        "safe_pct": 0.30,
+        "moonshot_pct": 0.70,
+        "description": "30% safe + 70% moonshot — profil spéculatif",
+    },
+    "SCALP": {
+        "safe_pct": 0.90,
+        "moonshot_pct": 0.10,
+        "description": "90% liquidité élevée + 10% spéculatif",
+    },
+}
+
+# Tiers considered "safe" (large/mid) vs "moonshot" (small/micro)
+SAFE_TIERS = {"LARGE", "MID"}
+MOONSHOT_TIERS = {"SMALL", "MICRO"}
+
+
+def _compute_allocation(active: list[dict]) -> dict:
+    """Compute current allocation vs recommended 80/20 split.
+
+    Returns:
+        {
+            "current_safe_pct": float,
+            "current_moonshot_pct": float,
+            "recommended_safe_pct": float,
+            "recommended_moonshot_pct": float,
+            "profile": str,
+            "breach": bool,         # True if moonshot allocation exceeds recommended
+            "warning": str | None,
+        }
+    """
+    if not active:
+        return {
+            "current_safe_pct": 0.0,
+            "current_moonshot_pct": 0.0,
+            "recommended_safe_pct": 0.80,
+            "recommended_moonshot_pct": 0.20,
+            "profile": "ACCUMULATION",
+            "breach": False,
+            "warning": None,
+        }
+
+    safe_count = 0
+    moonshot_count = 0
+    unknown_count = 0
+
+    for r in active:
+        tier = r.get("market_cap_tier")
+        if tier in SAFE_TIERS:
+            safe_count += 1
+        elif tier in MOONSHOT_TIERS:
+            moonshot_count += 1
+        else:
+            # Non-crypto or unknown → count as safe
+            safe_count += 1
+
+    total = safe_count + moonshot_count + unknown_count
+    current_safe_pct = round(safe_count / total * 100, 1) if total > 0 else 0
+    current_moonshot_pct = round(moonshot_count / total * 100, 1) if total > 0 else 0
+
+    # Default to ACCUMULATION profile
+    profile = "ACCUMULATION"
+    recommended = PROFILE_ALLOCATION[profile]
+
+    breach = current_moonshot_pct > recommended["moonshot_pct"] * 100
+    warning = None
+    if breach:
+        warning = (
+            f"Allocation moonshot {current_moonshot_pct}% > seuil recommandé "
+            f"{recommended['moonshot_pct'] * 100}% — réduire l'exposition small/micro cap"
+        )
+
+    return {
+        "current_safe_pct": current_safe_pct,
+        "current_moonshot_pct": current_moonshot_pct,
+        "recommended_safe_pct": recommended["safe_pct"] * 100,
+        "recommended_moonshot_pct": recommended["moonshot_pct"] * 100,
+        "profile": profile,
+        "breach": breach,
+        "warning": warning,
     }

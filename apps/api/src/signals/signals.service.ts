@@ -208,7 +208,7 @@ export class SignalsService {
     await Promise.allSettled(scans);
   }
 
-  async findAll(opts: { page: number; limit: number; sort: string; profile?: string; market?: string }) {
+  async findAll(opts: { page: number; limit: number; sort: string; profile?: string; market?: string; riskLevel?: string }) {
     const [field, dir] = opts.sort.split(':');
     const orderByField = ['createdAt', 'confidence', 'entryPrice'].includes(field) ? field : 'createdAt';
     const orderBy: any = { [orderByField]: dir === 'asc' ? 'asc' : 'desc' };
@@ -220,6 +220,9 @@ export class SignalsService {
     }
     if (opts.market) {
       where.asset = { market: { name: { equals: opts.market, mode: 'insensitive' } } };
+    }
+    if (opts.riskLevel) {
+      where.metadata = { path: ['risk_level'], equals: opts.riskLevel };
     }
 
     const [data, total] = await Promise.all([
@@ -525,6 +528,15 @@ export class SignalsService {
             context:           r.context ?? null,
             marketContext:     marketContext as any,
             decisionTrace:     decisionTrace,
+            risk_level:        r.risk_level ?? null,
+            market_cap_tier:   r.market_cap_tier ?? null,
+            liquidity_score:   r.liquidity_score ?? null,
+            max_position_pct:  r.max_position_pct ?? null,
+            risk_level_reasons: r.risk_level_reasons ?? null,
+            red_flags:         r.red_flags ?? null,
+            moonshot_tp:       r.moonshot_tp ?? null,
+            dca_tranches:      r.dca_tranches ?? null,
+            scale_out:         r.scale_out ?? null,
           },
           explanation: r.explanation,
           expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),

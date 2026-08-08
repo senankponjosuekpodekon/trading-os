@@ -10,6 +10,7 @@ import { ExpectedMoveResponse, Signal } from '@/types';
 import { useModeStore } from '@/store/mode.store';
 import { RegimeBadge } from '@/components/ui/RegimeBadge';
 import { AssetTypeBadge } from '@/components/ui/AssetTypeBadge';
+import { RiskLevelBadge } from '@/components/ui/RiskLevelBadge';
 import { ProbabilityBar } from '@/components/ui/ProbabilityBar';
 import { OpportunityScore } from '@/components/ui/OpportunityScore';
 import { ConfidenceGauge } from '@/components/ui/ConfidenceGauge';
@@ -140,6 +141,29 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
             <span className="text-white font-bold text-lg">{signal.asset?.symbol ?? '—'}</span>
             <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">{signal.timeframe}</span>
             <AssetTypeBadge type={inferAssetType(signal.asset?.symbol)} />
+            {signal.metadata?.risk_level && (
+              <RiskLevelBadge
+                level={signal.metadata.risk_level}
+                reasons={signal.metadata.risk_level_reasons}
+              />
+            )}
+            {signal.metadata?.market_cap_tier && (
+              <span className="text-xs px-2 py-0.5 rounded border border-gray-600/30 bg-gray-700/30 text-gray-400 font-medium">
+                {signal.metadata.market_cap_tier}
+              </span>
+            )}
+            {signal.metadata?.red_flags?.red_flag_count > 0 && (
+              <span
+                className={`text-xs px-2 py-0.5 rounded border font-medium ${
+                  signal.metadata.red_flags.danger
+                    ? 'border-red-500/40 bg-red-500/10 text-red-400'
+                    : 'border-orange-500/30 bg-orange-500/10 text-orange-400'
+                }`}
+                title={signal.metadata.red_flags.red_flags.join(', ')}
+              >
+                ⚠ {signal.metadata.red_flags.red_flag_count} red flags
+              </span>
+            )}
             {signal.profileSuitability?.map(p => (
               <span key={p} className="text-xs px-2 py-0.5 rounded border border-indigo-400/30 bg-indigo-400/10 text-indigo-300 font-medium">{p}</span>
             ))}

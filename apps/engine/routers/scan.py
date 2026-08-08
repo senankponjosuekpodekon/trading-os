@@ -51,6 +51,11 @@ from utils.metrics import inc, observe
 from utils.session import get_session_info
 from risk.engine import get_risk_engine
 from risk.discipline_controller import TradeDecision
+from risk.market_cap import fetch_market_cap_tier, get_market_cap_tier_sync
+from risk.liquidity import compute_liquidity_score, estimate_liquidity_score_sync
+from risk.risk_level import compute_risk_level, get_max_position_pct
+from risk.red_flags import check_red_flags
+from risk.dca_tranches import compute_dca_tranches, compute_scale_out
 from utils.correlation import set_correlation_id, clear_correlation_id
 
 logger = get_logger(__name__)
@@ -956,6 +961,31 @@ def _analyze_synthetic_candles(symbol: str, timeframe: str, df: pd.DataFrame, st
     }
 
 
+def _compute_moonshot_tp(signal: str, entry: float | None, tp1: float | None, tp2: float | None, market_cap_tier: str) -> dict | None:
+    """For MICRO cap crypto, add moonshot take-profit: sell 50% at 2x entry.
+
+    Returns None if not applicable (non-MICRO or no entry price).
+    """
+    if market_cap_tier != "MICRO" or entry is None or entry <= 0:
+        return None
+
+    if signal == "BUY":
+        tp_moonshot = round(entry * 2.0, 6)  # 2x entry
+        tp_3x = round(entry * 3.0, 6)       # 3x for trailing moon
+    elif signal == "SELL":
+        tp_moonshot = round(entry * 0.5, 6)  # 50% of entry (2x inverse)
+        tp_3x = round(entry * 0.33, 6)      # 33% of entry (3x inverse)
+    else:
+        return None
+
+    return {
+        "tp_moonshot_2x": tp_moonshot,
+        "tp_moonshot_3x": tp_3x,
+        "sell_pct_at_2x": 50,  # sell 50% at 2x
+        "description": "Moonshot TP: sell 50% at 2x, trail rest to 3x",
+    }
+
+
 def analyze_candles(
     symbol: str,
     timeframe: str,
@@ -971,6 +1001,10 @@ def analyze_candles(
     bias_regimes: Optional[dict[str, dict]] = None,  # D1/Weekly bias regimes
     news_context: Optional[dict] = None,  # macro news for COMMODITY/CRYPTO
     gold_dxy: Optional[dict] = None,  # DXY momentum for gold specialist
+    market_cap_tier: Optional[str] = None,  # MICRO/SMALL/MID/LARGE
+    liquidity_data: Optional[dict] = None,  # liquidity score dict
+    red_flags_data: Optional[dict] = None,  # red flags checklist result
+    fear_greed_value: Optional[int] = None,  # Fear & Greed index value
 ) -> dict:
     # ── Correlation ID for end-to-end tracing ──
     corr_id = set_correlation_id()
@@ -1913,6 +1947,39 @@ def analyze_candles(
         except Exception as _e:
             logger.warning("risk_engine.evaluate failed", error=str(_e))
 
+    # ── Phase 0++: Risk level computation ──
+    _final_mcap_tier = market_cap_tier or get_market_cap_tier_sync(symbol, asset_type)
+    _final_liquidity = liquidity_data or estimate_liquidity_score_sync(symbol, asset_type, df)
+    _atr_pct = (atr_v / c_val) * 100 if atr_v and c_val else 0.0
+    _risk_level_result = compute_risk_level(
+        asset_type=asset_type,
+        market_cap_tier=_final_mcap_tier,
+        liquidity_score=_final_liquidity.get("score", 50.0),
+        atr_pct=_atr_pct,
+    )
+    _risk_level = _risk_level_result["risk_level"]
+    _risk_reasons = _risk_level_result["reasons"]
+
+    # Liquidity warning: reduce confidence if critical
+    if signal != "NEUTRAL" and _final_liquidity.get("score", 100) < 10:
+        confidence = int(confidence * 0.5)
+        reasons.append(f"Liquidité critique (score={_final_liquidity['score']}) — confidence réduite 50%")
+        if confidence < 40:
+            signal = "NEUTRAL"
+            confidence = 0
+            reasons.append("Liquidité insuffisante — signal neutralisé")
+
+    # ── Phase 0++: Red flags checklist ──
+    _red_flags = red_flags_data or {"red_flags": [], "red_flag_count": 0, "danger": False, "warning": None}
+    if signal != "NEUTRAL" and _red_flags.get("danger"):
+        signal = "NEUTRAL"
+        confidence = 0
+        sl = None
+        tp1 = None
+        tp2 = None
+        rr = None
+        reasons.append(f"[RED FLAGS] {_red_flags.get('warning', 'Projet à risque extrême')}")
+
     result = {
         "symbol":       symbol,
         "strategy_id":  strategy_id,
@@ -2056,6 +2123,15 @@ def analyze_candles(
             "drawdown":        risk_assessment.drawdown_level if risk_assessment else "",
             "crisis_mode":     risk_assessment.crisis_mode if risk_assessment else False,
         } if risk_assessment else None,
+        "risk_level": _risk_level,
+        "market_cap_tier": _final_mcap_tier,
+        "liquidity_score": _final_liquidity,
+        "max_position_pct": get_max_position_pct(_risk_level),
+        "risk_level_reasons": _risk_reasons,
+        "red_flags": _red_flags,
+        "moonshot_tp": _compute_moonshot_tp(signal, entry, tp1, tp2, _final_mcap_tier) if signal != "NEUTRAL" else None,
+        "dca_tranches": compute_dca_tranches(signal, entry if signal != "NEUTRAL" else None, fear_greed_value) if signal != "NEUTRAL" else None,
+        "scale_out": compute_scale_out(signal, entry if signal != "NEUTRAL" else None, fear_greed_value) if signal != "NEUTRAL" else None,
         "correlation_id": corr_id,
     }
 
@@ -2170,6 +2246,37 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
         except Exception as exc:
             logger.debug("x_sentiment_context_failed", symbol=symbol, error=str(exc))
 
+    # ── Phase 0++: Market cap tier + Liquidity score (async) ──
+    _mcap_tier = None
+    _liquidity = None
+    _asset_type_for_risk = get_asset_type(symbol)
+    if _asset_type_for_risk == "CRYPTO":
+        try:
+            _mcap_tier = await asyncio.wait_for(fetch_market_cap_tier(symbol), timeout=5.0)
+        except Exception:
+            _mcap_tier = get_market_cap_tier_sync(symbol, "CRYPTO")
+        try:
+            _liquidity = await asyncio.wait_for(compute_liquidity_score(symbol, "CRYPTO"), timeout=5.0)
+        except Exception:
+            _liquidity = estimate_liquidity_score_sync(symbol, "CRYPTO", df)
+
+    # ── Phase 0++: Red flags checklist for micro/small cap crypto ──
+    _red_flags = None
+    if _asset_type_for_risk == "CRYPTO" and _mcap_tier in ("MICRO", "SMALL"):
+        try:
+            _red_flags = await asyncio.wait_for(check_red_flags(symbol, _mcap_tier), timeout=8.0)
+        except Exception:
+            _red_flags = {"red_flags": [], "red_flag_count": 0, "danger": False, "warning": None}
+
+    # ── Phase 0++: Fear & Greed for DCA/scale-out logic ──
+    _fg_value = None
+    if _asset_type_for_risk == "CRYPTO":
+        try:
+            _fg = await asyncio.wait_for(fear_greed(), timeout=3.0)
+            _fg_value = _fg.get("value") if isinstance(_fg, dict) else None
+        except Exception:
+            _fg_value = None
+
     # ── Phase L: AI Defense pre-filter for crypto ──
     if get_asset_type(symbol) == "CRYPTO" and df is not None and len(df) >= 2:
         try:
@@ -2206,6 +2313,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             bias_regimes=bias_regimes if bias_regimes else None,
             news_context=news_context,
             gold_dxy=gold_dxy,
+            market_cap_tier=_mcap_tier,
+            liquidity_data=_liquidity,
+            red_flags_data=_red_flags,
+            fear_greed_value=_fg_value,
         ),
     )
 
