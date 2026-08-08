@@ -6,7 +6,7 @@ import {
   Settings, LogOut, Zap, FlaskConical, LineChart, Brain, Globe, Activity, Beaker, MessageSquare,
   ShieldAlert, Trophy, Search, Cpu, Calendar, Database, SlidersHorizontal, DatabaseBackup, BarChart3, Eye,
   Radio, Key, Send, Newspaper,
-  Gem, Scale, Youtube, Rocket,
+  Gem, Scale, Youtube, Rocket, Users,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { clsx } from 'clsx';
@@ -40,6 +40,8 @@ const nav = [
   { href: '/onchain',    label: 'On-chain',    icon: Database },
   { href: '/observability', label: 'Observability', icon: Eye },
   { href: '/admin',        label: 'Admin',         icon: ShieldAlert },
+  { href: '/admin/users',  label: 'Utilisateurs',  icon: Users },
+  { href: '/admin/ops',    label: 'Ops Système',   icon: Activity },
   { href: '/economic-calendar', label: 'Calendrier', icon: Calendar },
   { href: '/channels',  label: 'Canaux',      icon: Radio },
   { href: '/journal',    label: 'Journal',     icon: BookOpen },
@@ -52,6 +54,13 @@ const nav = [
 export function Sidebar() {
   const pathname = usePathname();
   const logout  = useAuthStore((s) => s.logout);
+  const user    = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+
+  const visibleNav = nav.filter(({ href }) => {
+    if (href.startsWith('/admin')) return isAdmin;
+    return true;
+  });
 
   return (
     <aside className="w-64 h-screen sticky top-0 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
@@ -64,7 +73,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {nav.map(({ href, label, icon: Icon }) => (
+        {visibleNav.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}

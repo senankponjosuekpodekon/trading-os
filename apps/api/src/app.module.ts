@@ -41,6 +41,7 @@ import { ExchangeConnectionsModule } from './exchange-connections/exchange-conne
 import { ExecutionModule } from './execution/execution.module';
 import { SignalChannelsModule } from './signal-channels/signal-channels.module';
 import { SignalDistributionModule } from './signal-distribution/signal-distribution.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { SignalDistributionModule } from './signal-distribution/signal-distribut
     SignalChannelsModule,
     SignalDistributionModule,
     SecurityModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [
