@@ -44,7 +44,7 @@ async def shadow_predict(features: Dict[str, Any]) -> Dict[str, Any]:
     Returns the logistic result (production) + shadow XGBoost result for logging.
     """
     from ml.signal_scorer import signal_scorer
-    from ml.xgboost_scorer import XGBoostSignalScorer
+    from ml.xgboost_scorer import xgboost_scorer as _xgb_singleton
 
     # Get logistic prediction (production)
     try:
@@ -56,8 +56,8 @@ async def shadow_predict(features: Dict[str, Any]) -> Dict[str, Any]:
     # Get XGBoost prediction (shadow)
     xgb_result = None
     try:
-        xgb_scorer = XGBoostSignalScorer()
-        xgb_result = await xgb_scorer.predict(features)
+        await _xgb_singleton._ensure_state()
+        xgb_result = await _xgb_singleton.predict(features)
     except Exception as exc:
         # XGBoost might not be trained yet — that's OK in shadow mode
         logger.debug("shadow_xgb_not_ready", error=str(exc))

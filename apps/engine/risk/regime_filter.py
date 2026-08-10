@@ -114,6 +114,17 @@ class RegimeFilter:
         """Register a custom strategy with its regime compatibility."""
         self._compatibility[name] = compatibility
 
+    # Map real strategy name slugs to compatibility categories
+    _STRATEGY_CATEGORY_MAP: dict[str, str] = {
+        "ema_trend_+_rsi": "trend_follow",
+        "macd_momentum": "trend_follow",
+        "swing_trend_follow": "trend_follow",
+        "smc_retest_ob/fvg": "reversal",
+        "scalper_rsi_reversal": "scalp",
+        "brvm_value_swing": "trend_follow",
+        "synthetic_mean_reversion": "mean_revert",
+    }
+
     def check(
         self,
         strategy: str,
@@ -131,6 +142,8 @@ class RegimeFilter:
         Returns:
             RegimeFilterResult with allowed, compatibility, adjusted_score
         """
+        # Normalize strategy name to a known category
+        strategy = self._STRATEGY_CATEGORY_MAP.get(strategy, strategy)
         compat_map = self._compatibility.get(strategy, self._compatibility["default"])
         compatibility = compat_map.get(regime, 0.5)
 

@@ -178,7 +178,7 @@ async def _fetch_dex_search(query: str = "trending") -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
                 "https://api.dexscreener.com/latest/dex/search",
-                params={"q": "sol"},
+                params={"q": query},
             )
             r.raise_for_status()
             data = r.json()
@@ -238,16 +238,40 @@ async def discover_hidden_gems(
     if not filtered:
         filtered = tokens  # Don't return empty if we have tokens
 
+    # Enrich with social sentiment + tokenomics data
+    import asyncio as _asyncio
+    from routers.social_sentiment import fetch_social_metrics
+    from routers.tokenomics import fetch_tokenomics
+
+    async def _enrich_token(t: dict) -> dict:
+        sym = t.get("symbol", "")
+        if not sym:
+            return t
+        try:
+            social = await _asyncio.wait_for(fetch_social_metrics(sym), timeout=5.0)
+            t["social_buzz"] = min(1.0, social.get("social_dominance", 0) / 10.0)
+        except Exception:
+            t["social_buzz"] = 0.0
+        try:
+            tokenomics = await _asyncio.wait_for(fetch_tokenomics(sym), timeout=5.0)
+            unlock_pct = tokenomics.get("next_unlock_pct", 0)
+            t["tokenomics_safety"] = max(0, 100 - unlock_pct * 5)
+        except Exception:
+            t["tokenomics_safety"] = 50.0
+        return t
+
+    filtered = await _asyncio.gather(*[_enrich_token(t) for t in filtered[:50]], return_exceptions=False)
+
     # Score each token
     candidates: List[GemCandidate] = []
-    for t in filtered[:50]:  # Process max 50
+    for t in filtered:
         score, reasons, warnings = _compute_gem_score(
             liquidity=t.get("liquidity", 0),
             volume_24h=t.get("volume_24h", 0),
             price_change_24h=t.get("price_change_24h", 0),
             age_hours=t.get("age_hours", 168),  # Default to 1 week if unknown
-            social_buzz=0,  # Would be enriched from social sentiment
-            tokenomics_safety=50,  # Default neutral
+            social_buzz=t.get("social_buzz", 0),
+            tokenomics_safety=t.get("tokenomics_safety", 50),
         )
 
         candidates.append(GemCandidate(
@@ -262,8 +286,8 @@ async def discover_hidden_gems(
             gem_score=score,
             reasons=reasons,
             warnings=warnings,
-            social_buzz=0,
-            tokenomics_safety=50,
+            social_buzz=t.get("social_buzz", 0),
+            tokenomics_safety=t.get("tokenomics_safety", 50),
         ))
 
     # Sort by gem_score descending
@@ -282,6 +306,8 @@ async def discover_hidden_gems(
                 "volume_24h": c.volume_24h,
                 "price_change_24h": c.price_change_24h,
                 "gem_score": c.gem_score,
+                "social_buzz": c.social_buzz,
+                "tokenomics_safety": c.tokenomics_safety,
                 "reasons": c.reasons,
                 "warnings": c.warnings,
                 "url": next((t.get("url", "") for t in filtered if t.get("symbol") == c.symbol), ""),

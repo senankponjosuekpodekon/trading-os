@@ -35,6 +35,10 @@ export function useNotifications() {
         const res = await fetch(`${API_URL}/notifications/sse-token`, {
           credentials: 'include',
         });
+        if (res.status === 401) {
+          stopped = true;
+          return;
+        }
         if (!res.ok) throw new Error('Failed to get SSE token');
         const { sseToken } = await res.json();
 

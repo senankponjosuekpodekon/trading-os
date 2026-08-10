@@ -8,6 +8,7 @@ import json
 import asyncio
 
 from config import settings
+from utils.db_pool import get_shared_pool
 
 router = APIRouter()
 
@@ -22,26 +23,15 @@ OLLAMA_BASE_URL = settings.ollama_base_url or os.getenv("OLLAMA_BASE_URL", "http
 OLLAMA_MODEL    = settings.ollama_model or os.getenv("OLLAMA_MODEL", "llama3.2")
 
 # ── Pool DB (lecture system_settings + cache llm_cache) ─────────────
-_db_pool = None
-_db_pool_lock = asyncio.Lock()
 
 
 async def _get_pool():
-    global _db_pool
-    if _db_pool is None:
-        async with _db_pool_lock:
-            if _db_pool is None:
-                import asyncpg
-                url = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
-                _db_pool = await asyncpg.create_pool(url, min_size=1, max_size=5)
-    return _db_pool
+    return await get_shared_pool()
 
 
 async def close_pool():
-    global _db_pool
-    if _db_pool is not None:
-        await _db_pool.close()
-        _db_pool = None
+    # Shared pool is closed centrally on shutdown
+    pass
 
 
 # ── Toggle admin (system_settings, clé "llm_config") ────────────────

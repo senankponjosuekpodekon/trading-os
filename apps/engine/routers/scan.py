@@ -1872,7 +1872,7 @@ def analyze_candles(
         scored_patterns = []
         mtf_ctx = {"mtf_aligned": _mtf_aligned, "htf_aligned": _htf_aligned}
         for p in chart_patterns:
-            conf, tags = score_pattern_confluence(p, pa, smc, mtf_context=mtf_ctx, regime=regime)
+            conf, tags = score_pattern_confluence(p, pa, smc, mtf_context=mtf_ctx, regime=regime, sr=sr)
             p["confluenceScore"] = conf
             p["confluenceTags"] = tags
             scored_patterns.append(p)
@@ -2286,7 +2286,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             _vol24 = float(df["volume"].iloc[-min(len(df), 24):].sum() * df["close"].iloc[-1]) if "volume" in df else 0
             _defense = run_defense_checks(
                 symbol, price_change_24h=_pc24, price_change_1h=_pc1,
-                volume_24h=_vol24, liquidity=0,
+                volume_24h=_vol24, liquidity=_liquidity if _liquidity else 0,
             )
             if _defense["recommendation"] == "BLOCK":
                 return {
@@ -2301,6 +2301,14 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             pass
 
     loop = asyncio.get_event_loop()
+    # Feed price history to CorrelationManager
+    try:
+        _risk_engine = get_risk_engine()
+        if df is not None and len(df) >= 10 and "close" in df:
+            _risk_engine.correlation.update_price_history(symbol, df["close"])
+    except Exception:
+        pass
+
     result = await loop.run_in_executor(
         _executor,
         lambda: analyze_candles(
@@ -2360,12 +2368,14 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
                 _social_score = min(100, (social_context.get("galaxy_score", 50)) + 20)
             if tokenomics_context:
                 _tokenomics_score = max(0, 100 - tokenomics_context.get("risk_score", 50))
+            _tokenomics_penalty = max(0, _tokenomics_score) if _tokenomics_score else None
             _grade = compute_token_grade(
                 symbol,
                 technical_score=result.get("confidence", 50),
-                onchain_score=50,
+                technical_confidence=result.get("confidence", 50),
+                onchain_bonus=onchain.get("context", {}).get("fear_greed") if onchain else None,
                 social_score=_social_score,
-                tokenomics_score=_tokenomics_score,
+                tokenomics_penalty=_tokenomics_penalty,
             )
             result["token_grade"] = _grade
         except Exception:
@@ -2784,6 +2794,89 @@ async def scan_multi(req: ScanRequest):
                 sym, sctx = item
                 social_contexts[sym] = sctx
 
+    # 1c-quinquies. Phase 0++ batch pre-fetch: market_cap_tier, liquidity, red_flags, news_context, gold_dxy
+    mcap_tiers: dict[str, str] = {}
+    liquidity_data: dict[str, dict] = {}
+    red_flags_data: dict[str, dict] = {}
+    news_contexts: dict[str, dict] = {}
+    gold_dxy_data: dict[str, dict] = {}
+
+    if missing_symbols:
+        # Fear & Greed already fetched above as fg_value — reuse it
+        # Market cap tier + liquidity (crypto only)
+        async def _fetch_mcap_liq(sym: str):
+            _mcap, _liq = None, None
+            if is_crypto_symbol(sym):
+                try:
+                    _mcap = await asyncio.wait_for(fetch_market_cap_tier(sym), timeout=5.0)
+                except Exception:
+                    _mcap = get_market_cap_tier_sync(sym, "CRYPTO")
+                try:
+                    _liq = await asyncio.wait_for(compute_liquidity_score(sym, "CRYPTO"), timeout=5.0)
+                except Exception:
+                    _liq = None
+            return sym, _mcap, _liq
+
+        ml_results = await asyncio.gather(
+            *[_fetch_mcap_liq(sym) for sym in missing_symbols], return_exceptions=True
+        )
+        for item in ml_results:
+            if not isinstance(item, Exception):
+                sym, _mcap, _liq = item
+                if _mcap:
+                    mcap_tiers[sym] = _mcap
+                if _liq:
+                    liquidity_data[sym] = _liq
+
+        # Red flags for MICRO/SMALL cap crypto
+        micro_syms = [s for s in missing_symbols if mcap_tiers.get(s) in ("MICRO", "SMALL")]
+        if micro_syms:
+            async def _fetch_red_flags(sym: str):
+                try:
+                    _rf = await asyncio.wait_for(check_red_flags(sym, mcap_tiers[sym]), timeout=8.0)
+                except Exception:
+                    _rf = {"red_flags": [], "red_flag_count": 0, "danger": False, "warning": None}
+                return sym, _rf
+
+            rf_results = await asyncio.gather(
+                *[_fetch_red_flags(sym) for sym in micro_syms], return_exceptions=True
+            )
+            for item in rf_results:
+                if not isinstance(item, Exception):
+                    sym, _rf = item
+                    red_flags_data[sym] = _rf
+
+        # News context for COMMODITY/CRYPTO
+        news_syms = [s for s in missing_symbols if get_asset_type(s) in ("COMMODITY", "CRYPTO")]
+        if news_syms:
+            async def _fetch_news_ctx(sym: str):
+                try:
+                    _suspend, _nctx = await asyncio.wait_for(
+                        should_suspend_signal(sym, get_asset_type(sym)), timeout=10.0
+                    )
+                except Exception:
+                    _nctx = None
+                return sym, _nctx
+
+            nc_results = await asyncio.gather(
+                *[_fetch_news_ctx(sym) for sym in news_syms], return_exceptions=True
+            )
+            for item in nc_results:
+                if not isinstance(item, Exception):
+                    sym, _nctx = item
+                    if _nctx:
+                        news_contexts[sym] = _nctx
+
+        # Gold DXY for gold symbols
+        gold_syms = [s for s in missing_symbols if is_gold_symbol(s)]
+        if gold_syms:
+            try:
+                _shared_dxy = await asyncio.wait_for(get_dxy_momentum(days=5), timeout=5.0)
+                for sym in gold_syms:
+                    gold_dxy_data[sym] = _shared_dxy
+            except Exception:
+                pass
+
     # 1d. Scheduler différencié analysis_timeframe/entry_timeframe (Sprint 3) — dernière
     # clôture sur le(s) entry_timeframe(s) distincts déclarés par les stratégies actives.
     entry_contexts: dict[tuple[str, str], dict] = {}   # (symbol, entry_timeframe) -> {"close": float}
@@ -2820,6 +2913,15 @@ async def scan_multi(req: ScanRequest):
                 entry_contexts[(sym, etf)] = ctx
 
     # 2. Analyse CPU dans un thread pool pour ne pas bloquer l'event loop
+    # Feed price history to CorrelationManager for correlation detection
+    try:
+        _risk_engine = get_risk_engine()
+        for sym, df in zip(missing_symbols, dfs):
+            if df is not None and len(df) >= 10 and "close" in df:
+                _risk_engine.correlation.update_price_history(sym, df["close"])
+    except Exception:
+        pass
+
     analyze_tasks = []
     for sym, df in zip(missing_symbols, dfs):
         if df is None or len(df) < 50:
@@ -2840,8 +2942,14 @@ async def scan_multi(req: ScanRequest):
                             _executor,
                             lambda s=sym, tf=req.timeframe, d=df, h=htf_r, m=mtf_r, st=strat,
                                    oc=onchain_ctx, ec=entry_ctx, fc=None, tc=tokenomics_ctx,
-                                   sc=social_ctx, br=bias_r:
-                                analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc, bias_regimes=br),
+                                   sc=social_ctx, br=bias_r,
+                                   nc=news_contexts.get(s), gd=gold_dxy_data.get(s),
+                                   mct=mcap_tiers.get(s), ld=liquidity_data.get(s),
+                                   rfd=red_flags_data.get(s), fg=fg_value:
+                                analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc,
+                                    bias_regimes=br, news_context=nc, gold_dxy=gd,
+                                    market_cap_tier=mct, liquidity_data=ld,
+                                    red_flags_data=rfd, fear_greed_value=fg),
                         )
                     )
             else:
@@ -2850,8 +2958,14 @@ async def scan_multi(req: ScanRequest):
                         _executor,
                         lambda s=sym, tf=req.timeframe, d=df, h=htf_r, m=mtf_r, st=None,
                                oc=onchain_ctx, ec=None, fc=None, tc=tokenomics_ctx,
-                               sc=social_ctx, br=bias_r:
-                            analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc, bias_regimes=br),
+                               sc=social_ctx, br=bias_r,
+                               nc=news_contexts.get(s), gd=gold_dxy_data.get(s),
+                               mct=mcap_tiers.get(s), ld=liquidity_data.get(s),
+                               rfd=red_flags_data.get(s), fg=fg_value:
+                            analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc,
+                                bias_regimes=br, news_context=nc, gold_dxy=gd,
+                                market_cap_tier=mct, liquidity_data=ld,
+                                red_flags_data=rfd, fear_greed_value=fg),
                     )
                 )
 

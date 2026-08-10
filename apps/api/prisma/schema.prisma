@@ -389,6 +389,7 @@ enum SignalOutcome {
 model SignalLog {
   id              String        @id @default(cuid())
   signalId        String?       @map("signal_id")
+  strategyId      String?       @map("strategy_id")
   symbol          String
   timeframe       String
   signalType      SignalType    @map("signal_type")

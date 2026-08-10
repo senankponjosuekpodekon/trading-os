@@ -93,6 +93,16 @@ async def lifespan(app: FastAPI):
         await signal_scorer.close_pool()
     except Exception:
         pass
+    try:
+        from ml.xgboost_scorer import xgboost_scorer
+        await xgboost_scorer.close_pool()
+    except Exception:
+        pass
+    try:
+        from utils.db_pool import close_shared_pool
+        await close_shared_pool()
+    except Exception:
+        pass
     logger.info("Trading OS Engine shutting down")
 
 

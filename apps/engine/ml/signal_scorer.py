@@ -7,12 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
-import asyncpg
 import numpy as np
 import json
 
-from config import settings
 from utils.logger import get_logger
+from utils.db_pool import get_shared_pool as _get_pool
 
 
 logger = get_logger(__name__)
@@ -217,8 +216,7 @@ class SignalScorer:
         max_ml_confidence: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         if self._pool is None:
-            db_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
-            self._pool = await asyncpg.create_pool(db_url, min_size=1, max_size=2)
+            self._pool = await _get_pool()
 
         clauses = [
             "sf.features_json IS NOT NULL",
@@ -363,8 +361,7 @@ class SignalScorer:
             return
         try:
             if self._pool is None:
-                db_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
-                self._pool = await asyncpg.create_pool(db_url, min_size=1, max_size=2)
+                self._pool = await _get_pool()
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
                     "SELECT model_json FROM signal_models WHERE name = 'signal_scorer' LIMIT 1"
@@ -424,10 +421,8 @@ class SignalScorer:
             logger.warning("signal_scorer.persist_failed", error=str(exc))
 
     async def close_pool(self):
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
-            logger.info("signal_scorer.pool_closed")
+        # Shared pool is closed centrally on shutdown
+        self._pool = None
 
 
 signal_scorer = SignalScorer()

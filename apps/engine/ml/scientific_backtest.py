@@ -48,8 +48,6 @@ def compute_calmar(returns: List[float], equity: List[float], periods_per_year: 
         return 0.0
 
     total_return = (equity[-1] / equity[0]) - 1
-    n_periods = len(equity)
-    annualized = (1 + total_return) ** (periods_per_year / n_periods) - 1
 
     # Max drawdown
     peak = equity[0]
@@ -62,8 +60,8 @@ def compute_calmar(returns: List[float], equity: List[float], periods_per_year: 
             max_dd = dd
 
     if max_dd == 0:
-        return float("inf") if annualized > 0 else 0.0
-    return round(float(annualized / max_dd), 3)
+        return float("inf") if total_return > 0 else 0.0
+    return round(float(total_return / max_dd), 3)
 
 
 def compute_max_consecutive_losses(trades: List[dict]) -> int:

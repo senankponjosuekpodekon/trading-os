@@ -328,3 +328,72 @@ def risk_evaluate(req: RiskEvaluateRequest):
         }
     except Exception as e:
         return {"error": str(e), "decision": "BLOCKED"}
+
+
+class UpdateCapitalRequest(BaseModel):
+    current_capital: float
+
+
+@router.post("/risk/update-capital")
+def update_capital(req: UpdateCapitalRequest):
+    """Update the DisciplineController's capital after realized PnL."""
+    from risk.engine import get_risk_engine
+    try:
+        engine = get_risk_engine()
+        engine.update_capital(req.current_capital)
+        return {"ok": True, "capital": engine._current_capital}
+    except Exception as e:
+        return {"error": str(e), "ok": False}
+
+
+class RecordTradeRequest(BaseModel):
+    pnl: float
+    symbol: Optional[str] = None
+    direction: Optional[str] = None
+
+
+@router.post("/risk/record-trade")
+def record_trade(req: RecordTradeRequest):
+    """Record a closed trade result (PnL) across all risk tracking modules."""
+    from risk.engine import get_risk_engine
+    try:
+        engine = get_risk_engine()
+        engine.record_trade_result(req.pnl)
+        if req.symbol and req.direction:
+            engine.unregister_position(req.symbol)
+        return {"ok": True, "capital": engine._current_capital}
+    except Exception as e:
+        return {"error": str(e), "ok": False}
+
+
+class RegisterPositionRequest(BaseModel):
+    symbol: str
+    direction: str
+
+
+@router.post("/risk/register-position")
+def register_position(req: RegisterPositionRequest):
+    """Register a newly opened position for correlation tracking."""
+    from risk.engine import get_risk_engine
+    try:
+        engine = get_risk_engine()
+        engine.register_position(req.symbol, req.direction)
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e), "ok": False}
+
+
+class RecordDailyReturnRequest(BaseModel):
+    return_pct: float
+
+
+@router.post("/risk/record-daily-return")
+def record_daily_return(req: RecordDailyReturnRequest):
+    """Record daily portfolio return for tail risk / VaR computation."""
+    from risk.engine import get_risk_engine
+    try:
+        engine = get_risk_engine()
+        engine.record_daily_return(req.return_pct)
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e), "ok": False}

@@ -51,6 +51,7 @@ export class SignalOutcomeService {
           takeProfit2:   r.take_profit_2  ?? null,
           riskReward:    r.risk_reward    ?? null,
           signalId:      r.signalId       ?? null,
+          strategyId:    r.strategy_id    ?? null,
           scoreTrend:    indicators.score_trend    ?? null,
           scorePA:       indicators.score_pa       ?? null,
           scoreSR:       indicators.score_sr       ?? null,

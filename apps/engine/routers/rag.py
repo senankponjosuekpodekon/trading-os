@@ -10,6 +10,7 @@ from typing import Optional
 import hashlib
 
 from config import settings
+from utils.db_pool import get_shared_pool
 
 router = APIRouter()
 
@@ -17,7 +18,6 @@ DATABASE_URL = settings.database_url
 
 # Lazy init des ressources lourdes
 _embed_model = None
-_db_pool     = None
 
 
 def _get_embed_model():
@@ -29,20 +29,12 @@ def _get_embed_model():
 
 
 async def _get_pool():
-    global _db_pool
-    if _db_pool is None:
-        import asyncpg
-        # Convertir URL psycopg2/SQLAlchemy → asyncpg (postgresql+asyncpg:// → postgresql://)
-        url = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
-        _db_pool = await asyncpg.create_pool(url, min_size=1, max_size=5)
-    return _db_pool
+    return await get_shared_pool()
 
 
 async def close_pool():
-    global _db_pool
-    if _db_pool is not None:
-        await _db_pool.close()
-        _db_pool = None
+    # Shared pool is closed centrally on shutdown
+    pass
 
 
 def _embed(text: str) -> list:

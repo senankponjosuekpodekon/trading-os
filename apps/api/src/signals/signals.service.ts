@@ -459,7 +459,7 @@ export class SignalsService {
       if (!strategy) {
         // BRVM signals have no strategy_id — don't mislabel them as 'EMA Trend + RSI'
         // Only use defaultStrategy for crypto/forex signals that should have one
-        const isBrvm = !r.symbol.includes('/') || (r.symbol.length <= 5 && !r.symbol.includes('/'));
+        const isBrvm = asset.market?.name === 'BRVM';
         if (!isBrvm) {
           strategy = defaultStrategy;
         }
@@ -599,7 +599,14 @@ export class SignalsService {
       if (r.signal && r.signal !== 'NEUTRAL' && r.entry_price) {
         Promise.resolve(
           this.prisma.signalLog.updateMany({
-            where: { symbol: r.symbol, timeframe: r.timeframe, signalId: null, signalType: r.signal as any, createdAt: { gte: new Date(Date.now() - 60_000) } },
+            where: {
+              symbol: r.symbol,
+              timeframe: r.timeframe,
+              signalId: null,
+              signalType: r.signal as any,
+              strategyId: strategy.id,
+              createdAt: { gte: new Date(Date.now() - 60_000) },
+            },
             data: { signalId: signal.id },
           }),
         ).catch(() => {});

@@ -70,20 +70,27 @@ class PatternScoreResult:
 # ── Base scores per pattern type ──────────────────────────────
 
 _BASE_SCORES = {
-    "hs_breakdown": 0.35,
-    "ihs_breakout": 0.35,
-    "bull_flag_breakout": 0.30,
-    "bear_flag_breakout": 0.30,
+    # Reversal patterns
+    "head_and_shoulders": 0.35,
+    "inverse_head_and_shoulders": 0.35,
     "double_top": 0.28,
     "double_bottom": 0.28,
+    # Harmonic patterns
+    "abcd": 0.25,
     "gartley": 0.40,
     "bat": 0.38,
     "butterfly": 0.36,
     "crab": 0.42,
     "cypher": 0.36,
     "shark": 0.34,
-    "triangle_breakout": 0.25,
-    "compression_breakout": 0.25,
+    # Continuation patterns
+    "flag": 0.30,
+    "pennant": 0.28,
+    # Triangle / compression breakouts
+    "symmetrical_triangle": 0.25,
+    "ascending_triangle": 0.27,
+    "descending_triangle": 0.27,
+    "range_compression": 0.22,
 }
 
 

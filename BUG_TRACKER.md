@@ -149,3 +149,33 @@
 - **Description**: `np.random.seed()` mute l'état RNG global, risquant une contamination croisée avec d'autres simulations Monte Carlo du même process (`tick_stats.py`, `synthetic_engine.py`).
 - **Fix**: Remplacé par `rng = np.random.default_rng()` (Generator local).
 
+
+## Addendum 5 — Audit Risk Engine & Signal Pipeline (10 août 2026)
+
+### Bugs fixés
+
+| # | Bug | Fichier(s) | Statut | Priorité | Description |
+|---|---|---|---|---|---|
+| 64 | Token Grade TypeError masqué par except:pass | `scan.py:2363` | ✅ | 🔴 Haute | `onchain_score=` et `tokenomics_score=` n'existent pas dans `compute_token_grade` → TypeError avalé par `except Exception: pass`. Token grade jamais calculé. Fix: `onchain_bonus=`, `tokenomics_penalty=`, ajout `technical_confidence=`. |
+| 65 | Fuite pool DB xgboost_shadow | `xgboost_shadow.py:59` | ✅ | 🔴 Haute | `XGBoostSignalScorer()` instancié à chaque appel → nouveau pool asyncpg jamais fermé. Fix: utilise le singleton `xgboost_scorer` + `_ensure_state()`. |
+| 66 | confluence.py sr= jamais passé | `scan.py:1875` | ✅ | 🔴 Haute | `score_pattern_confluence(p, pa, smc, mtf_context=..., regime=...)` — `sr` calculé ligne 1263 mais jamais passé. Critère S/R proximity (5% du score) inactif. Fix: `sr=sr` ajouté. |
+| 67 | AI Defense liquidity=0 faux positifs | `scan.py:2289` | ✅ | 🔴 Haute | `liquidity=0` en dur → `vol_liq_ratio` explose → faux positif "high severity" quasi systématique. Fix: `liquidity=_liquidity if _liquidity else 0`. |
+| 68 | BRVM mislabeling (heuristique fragile) | `signals.service.ts:462` | ✅ | 🔴 Haute | `!r.symbol.includes('/')` matchait V75, BOOM1000 (synthetic sans slash) comme BRVM → signaux silencieusement supprimés. Fix: `asset.market?.name === 'BRVM'`. |
+| 69 | compute_calmar annualisation par trade count | `scientific_backtest.py:52` | ✅ | 🟡 Moyenne | `n_periods = len(equity)` (= nombre de trades) → annualisation `(1+r)^(252/n_trades)` fausse pour fréquence ≠ 1 trade/jour. Fix: ratio brut `total_return / max_dd`. |
+| 70 | scan_multi Phase 0++ non persisté | `scan.py:2789-2870` | ✅ | 🔴 Haute | `scan_multi` appelait `analyze_candles` sans `news_context`, `gold_dxy`, `market_cap_tier`, `liquidity_data`, `red_flags_data`, `fear_greed_value`. Garde-fous (anti-scam, news macro, risk level, DCA) inactifs sur le chemin persisté. Fix: bloc `1c-quinquies` de pré-fetch batch + passage dans les lambdas. |
+| 71 | RegimeFilter stratégies ne matchent jamais | `regime_filter.py:117` | ✅ | 🟡 Moyenne | `"ema_trend_+_rsi"`, `"macd_momentum"` etc. ne matchent aucune clé de `DEFAULT_COMPATIBILITY` → toujours fallback `default` (0.5). Fix: `_STRATEGY_CATEGORY_MAP` normalise les slugs réels vers les catégories. |
+| 72 | SignalLog race condition cross-stratégie | `signals.service.ts:601` | ✅ | 🟡 Moyenne | `updateMany` matche sur `(symbol, timeframe, signalType, createdAt<60s)` sans `strategyId` → 2 stratégies BUY même symbole+TF → même `signal.id`. Fix: `strategyId` ajouté au schéma SignalLog + migration + `where.strategyId`. |
+| 73 | DisciplineController capital/P&L jamais mis à jour | `risk.py`, `positions.service.ts` | ✅ | 🔴 Haute | `update_capital()` et `record_trade_result()` jamais appelés. KillSwitch, DrawdownManager, CooldownManager, PerformanceMonitor, TailRiskManager tous inactifs. Fix: 4 nouveaux endpoints engine (`/risk/update-capital`, `/risk/record-trade`, `/risk/register-position`, `/risk/record-daily-return`) + bridge NestJS depuis `create()`, `close()`, `closeByWatcher()`. |
+| 74 | xgboost_scorer pool non fermé au shutdown | `main.py:91-95` | ✅ | 🟡 Moyenne | Pool asyncpg du singleton `xgboost_scorer` jamais fermé au shutdown. Fix: `close_pool()` ajouté dans le lifespan cleanup. |
+
+### Points ouverts (non traités)
+
+| # | Sujet | Fichier(s) | Statut | Priorité | Description |
+|---|---|---|---|---|---|
+| 75 | CorrelationManager jamais nourri | `correlation_manager.py`, `scan.py` | ✅ | Haute | `update_price_history()` et `register_position()` jamais appelés depuis `scan.py`. Fix: `update_price_history` appelé dans `scan_multi` (batch sur tous les symboles fetchés) et `fetch_and_analyze` (single-symbol). `register_position`/`unregister_position` déjà bridge via endpoints #73 depuis NestJS. |
+| 76 | PositionSizer branche de blocage inatteignable | `position_sizer.py` | ✅ | Moyenne | `effective_risk_pct = min(max(..., min_risk_pct), max_risk_pct)` appliquait le plancher 0.2% avant le test `<= 0` → code mort. Fix: test `below floor` déplacé avant le clamp. Un signal réduit sous 0.2% par les facteurs (vol/score/dd/corr) est maintenant bloqué au lieu de trader au plancher. |
+| 77 | Patterns v2 non branché | `patterns/chart_scoring.py`, `patterns/detector.py` | ✅ | Moyenne | `_BASE_SCORES` utilisait des noms fictifs (`hs_breakdown`, `bull_flag_breakout`, `triangle_breakout`) ne matchant pas les producteurs (`head_and_shoulders`, `flag`, `symmetrical_triangle`). Fix: `_BASE_SCORES` aligné avec les noms réels. `detect_all()` étendu avec `detect_flag`, `detect_pennant`, `detect_all_compression`. `harmonic_v2.py` laissé de côté (structure différente, migration séparée). |
+| 78 | self_learning_feedback_loop / market_memory non branchés | `ml/feedback_loop.py`, `ml/market_memory.py` | ✅ | Basse | **Faux positif** — `market_memory` et `feedback_loop` sont utilisés par `routers/phase_d.py` qui est inclus dans `main.py` (ligne 186). Modules bien branchés via Phase D. |
+| 79 | multi_agent.py — AlphaAgent token_grade bug | `ml/multi_agent.py:237` | ✅ | Basse | `AlphaAgent` lisait `token_grade.get("overall_grade", 0)` mais `TokenGrade` est une dataclass avec champ `.grade` (pas un dict, pas `overall_grade`). Fix: `getattr(token_grade, "grade", 0)`. |
+| 80 | Prolifération pools DB indépendants | `utils/db_pool.py`, `xgboost_scorer.py`, `signal_scorer.py`, `rag.py`, `llm.py` | ✅ | Moyenne | 4 pools asyncpg indépendants (min 4, max 14 connexions). Fix: `utils/db_pool.py` créé avec singleton `get_shared_pool()` (min_size=2, max_size=10). Les 4 modules migrés vers le pool partagé. `close_shared_pool()` appelé au shutdown dans `main.py`. |
+

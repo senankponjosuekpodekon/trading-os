@@ -82,11 +82,11 @@ def dxy_correlation_bonus(
         bonus -= 15
         reasons.append(f"DXY bullish ({dxy_change:+.2f}%) → gold bearish bias (-15)")
     elif dxy_trend == "bearish" and signal == "SELL":
-        bonus += 5  # counter-trend penalty
-        reasons.append("DXY bearish but SELL signal → reduced conviction (+5 penalty)")
+        bonus += 5  # counter-trend: reduced conviction
+        reasons.append("DXY bearish but SELL signal → reduced conviction (+5)")
     elif dxy_trend == "bullish" and signal == "BUY":
         bonus += 5
-        reasons.append("DXY bullish but BUY signal → reduced conviction (+5 penalty)")
+        reasons.append("DXY bullish but BUY signal → reduced conviction (+5)")
 
     return bonus, reasons
 

@@ -217,7 +217,22 @@ export class PositionsService {
       details: { positionId: position.id, symbol: asset.symbol, direction: dto.direction, entryPrice: dto.entryPrice },
     });
 
+    // Notify risk engine of new open position
+    this._notifyRiskEngine('register-position', { symbol: asset.symbol, direction: dto.direction }).catch(() => {});
+
     return position;
+  }
+
+  private async _notifyRiskEngine(path: string, body: Record<string, unknown>): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.http.post(`${this.engineUrl}/risk/${path}`, body, {
+          headers: engineHeaders(this.config),
+        }),
+      );
+    } catch (e: any) {
+      this.logger.warn(`Risk engine sync failed (${path}): ${e?.message}`);
+    }
   }
 
   async findByPortfolio(
@@ -319,6 +334,11 @@ export class PositionsService {
       resource: 'position',
       details: { positionId, symbol: position.asset?.symbol, exitPrice, pnl },
     });
+
+    // Sync risk engine with realized PnL + updated capital
+    const updatedCapital = parseFloat(position.portfolio.currentCapital.toString()) + proceeds;
+    this._notifyRiskEngine('record-trade', { pnl, symbol: position.asset?.symbol, direction: position.direction }).catch(() => {});
+    this._notifyRiskEngine('update-capital', { current_capital: updatedCapital }).catch(() => {});
 
     return { positionId, exitPrice, pnl: pnl.toFixed(2), pnlPercent: pnlPct.toFixed(2) };
   }
@@ -804,6 +824,11 @@ export class PositionsService {
       message: `PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%)`,
       data:    { positionId, exitPrice, pnl, reason },
     });
+
+    // Sync risk engine with realized PnL + updated capital
+    const updatedCapital = parseFloat(pos.portfolio.currentCapital.toString()) + (exitPrice * qty);
+    this._notifyRiskEngine('record-trade', { pnl, symbol: pos.asset.symbol, direction: pos.direction }).catch(() => {});
+    this._notifyRiskEngine('update-capital', { current_capital: updatedCapital }).catch(() => {});
 
     return { positionId, exitPrice, pnl: pnl.toFixed(2), pnlPercent: pnlPct.toFixed(2), reason };
   }

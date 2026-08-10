@@ -234,14 +234,16 @@ class AlphaAgent(BaseAgent):
             confidence = min(85, onchain.get("signal_score", 50))
             reasoning = f"Alpha: whale accumulation detected (score {onchain.get('signal_score')})"
 
-        if token_grade.get("overall_grade", 0) >= 75:
+        # TokenGrade dataclass has .grade (0-100), not "overall_grade"
+        _tg_grade = getattr(token_grade, "grade", 0) if token_grade else 0
+        if _tg_grade >= 75:
             if signal_type == "BUY":
                 confidence = min(90, confidence + 10)
-                reasoning += f" + Token grade {token_grade.get('overall_grade')}"
+                reasoning += f" + Token grade {_tg_grade}"
             else:
                 signal_type = "BUY"
                 confidence = 60.0
-                reasoning = f"Alpha: high token grade ({token_grade.get('overall_grade')})"
+                reasoning = f"Alpha: high token grade ({_tg_grade})"
 
         return AgentSignal(
             self.name, symbol, signal_type, confidence, "1d",

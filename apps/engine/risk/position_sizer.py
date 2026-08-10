@@ -187,19 +187,18 @@ class PositionSizer:
 
         # Effective risk %
         effective_risk_pct = self.base_risk_pct * vol_f * score_f * dd_f * corr_f
-        effective_risk_pct = min(
-            max(effective_risk_pct, self.config.min_risk_pct),
-            self.config.max_risk_pct,
-        )
 
-        # If drawdown or correlation killed it to near-zero
-        if effective_risk_pct <= 0:
+        # Block if factors reduced risk below the floor — don't silently trade at min
+        if effective_risk_pct < self.config.min_risk_pct:
             return SizingResult(
                 size=0.0, risk_amount=0.0, risk_pct_used=0.0,
                 factors=factors,
                 blocked=True,
-                block_reason="Effective risk reduced to 0 by factors",
+                block_reason=f"Effective risk {effective_risk_pct:.3f}% below floor {self.config.min_risk_pct:.1f}% (vol={vol_f}, score={score_f}, dd={dd_f}, corr={corr_f})",
             )
+
+        # Clamp to hard limits
+        effective_risk_pct = min(effective_risk_pct, self.config.max_risk_pct)
 
         risk_amount = self.capital * effective_risk_pct / 100.0
         size = risk_amount / stop_distance
