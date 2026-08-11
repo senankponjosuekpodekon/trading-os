@@ -336,7 +336,7 @@ function PollingTab() {
           <Gauge className="w-5 h-5 text-blue-400" /> Scan Polling
         </h2>
         <p className="text-sm text-gray-400 mb-6">
-          Contrôle le polling automatique de l'historique des scans sur la page Signaux.
+          Contrôle le polling automatique de l&apos;historique des scans sur la page Signaux.
           Désactiver réduit la charge serveur mais les données ne se rafraîchissent plus automatiquement.
         </p>
 
