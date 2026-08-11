@@ -72,6 +72,7 @@ class PatternScoreResult:
 _BASE_SCORES = {
     # Reversal patterns
     "head_and_shoulders": 0.35,
+    "hs_breakdown": 0.35,
     "inverse_head_and_shoulders": 0.35,
     "double_top": 0.28,
     "double_bottom": 0.28,
@@ -85,6 +86,7 @@ _BASE_SCORES = {
     "shark": 0.34,
     # Continuation patterns
     "flag": 0.30,
+    "bull_flag_breakout": 0.30,
     "pennant": 0.28,
     # Triangle / compression breakouts
     "symmetrical_triangle": 0.25,

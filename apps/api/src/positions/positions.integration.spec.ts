@@ -27,7 +27,7 @@ describe('PositionsController (integration)', () => {
     get: jest.fn(),
     post: jest.fn().mockReturnValue(of({ data: {} })),
   };
-  const portfolio = { id: 'p1', userId: 'user-1', currentCapital: 10000 };
+  const portfolio = { id: 'p1', userId: 'user-1', currentCapital: 10000, initialCapital: 10000 };
   const asset = { id: 'a1', symbol: 'BTC/USDT' };
   const position = {
     id: 'pos1',
@@ -82,7 +82,7 @@ describe('PositionsController (integration)', () => {
       .overrideProvider(SystemHealthService)
       .useValue({ check: jest.fn() } as any)
       .overrideProvider(CrossPositionRiskService)
-      .useValue({ check: jest.fn().mockResolvedValue({ allowed: true }) } as any)
+      .useValue({ checkCorrelationRisk: jest.fn().mockResolvedValue({ allowed: true }) } as any)
       .overrideGuard(JwtAuthGuard)
       .useValue(fakeGuard)
       .compile();
