@@ -204,7 +204,12 @@ export default function SignalsPage() {
         </div>
 
         {activeTab === 'scanner' ? (
-          <ScannerView entries={scanHistoryData?.entries ?? []} loading={scanHistoryLoading} />
+          <ScannerView
+            entries={scanHistoryData?.entries ?? []}
+            loading={scanHistoryLoading}
+            pollingEnabled={scanPollingEnabled}
+            pollingInterval={scanPollingInterval}
+          />
         ) : (
         <>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -468,7 +473,12 @@ export default function SignalsPage() {
   );
 }
 
-function ScannerView({ entries, loading }: { entries: any[]; loading: boolean }) {
+function ScannerView({ entries, loading, pollingEnabled, pollingInterval }: {
+  entries: any[];
+  loading: boolean;
+  pollingEnabled: boolean;
+  pollingInterval: number;
+}) {
   const signalColors: Record<string, string> = {
     BUY: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
     SELL: 'text-red-400 bg-red-500/10 border-red-500/30',
@@ -493,7 +503,7 @@ function ScannerView({ entries, loading }: { entries: any[]; loading: boolean })
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-emerald-400" />
           <span className="text-sm text-gray-400">
-            {scanPollingEnabled ? `Temps réel — polling ${scanPollingInterval / 1000}s` : 'Temps réel — polling désactivé'}
+            {pollingEnabled ? `Temps réel — polling ${pollingInterval / 1000}s` : 'Temps réel — polling désactivé'}
           </span>
           {loading && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
         </div>
