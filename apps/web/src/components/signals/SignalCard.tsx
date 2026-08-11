@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   TrendingUp, TrendingDown, Minus, Brain, BarChart2, ChevronUp, ChevronDown,
   Newspaper, ExternalLink, AlertTriangle, CheckCircle2, Target, ShieldAlert, Layers,
-  Waves, Activity, ArrowUpRight, History,
+  Waves, Activity, ArrowUpRight, History, Copy,
 } from 'lucide-react';
 import { ExpectedMoveResponse, Signal } from '@/types';
 import { useModeStore } from '@/store/mode.store';
@@ -61,6 +61,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const [showWhyNot, setShowWhyNot] = useState(false);
   const [showPatterns, setShowPatterns] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const userTz = user?.timezone;
   const safeCreatedAt = signal.createdAt ?? new Date().toISOString();
@@ -113,6 +114,33 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const opportunityScore = useMemo(() => computeOpportunityScore(signal), [signal]);
 
   const deltaVsEntry = livePrice && entry ? ((livePrice - entry) / entry) * 100 : null;
+
+  const copySignalInfo = async () => {
+    const lines: string[] = [];
+    lines.push(`${signal.asset?.symbol ?? '—'} — ${signal.signal} ${Math.round(signal.confidence ?? 0)}%`);
+    if (entry)  lines.push(`Entry: ${entry}`);
+    if (sl)     lines.push(`SL: ${sl}`);
+    if (tp1)    lines.push(`TP1: ${tp1}`);
+    if (tp2)    lines.push(`TP2: ${tp2}`);
+    if (tp3)    lines.push(`TP3: ${tp3}`);
+    if (signal.riskReward) lines.push(`RR: 1:${parseFloat(String(signal.riskReward))}`);
+    lines.push(`Timeframe: ${signal.timeframe}`);
+    const regime = signal.metadata?.regime;
+    if (regime) lines.push(`Regime: ${regime.regime ?? '—'} (ADX ${regime.adx ?? '—'})`);
+    const mtf = signal.metadata?.mtf_context;
+    if (mtf) lines.push(`MTF: ${mtf.confluence ?? '—'} confluence`);
+    const mlConf = (signal.metadata as any)?.ml_confidence;
+    if (mlConf != null) lines.push(`ML: ${Math.round(mlConf)}%`);
+    lines.push(`Généré le ${new Date(safeCreatedAt).toLocaleString('fr-FR')}`);
+    if (livePrice) lines.push(`Prix actuel: ${livePrice} (Δ ${deltaVsEntry?.toFixed(2)}% vs entry)`);
+    if (signal.strategy?.name) lines.push(`Stratégie: ${signal.strategy.name}`);
+    const text = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
 
   const beginnerSummary = useMemo(() => buildBeginnerSummary(signal), [signal]);
   const whyPoints = useMemo(() => buildWhyPoints(signal), [signal]);
@@ -210,7 +238,18 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
-          <SignalBadge signal={signal.signal} />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={copySignalInfo}
+              title="Copier les infos du signal"
+              className={`p-1.5 rounded-lg border transition-colors ${
+                copied ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500'
+              }`}
+            >
+              {copied ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+            <SignalBadge signal={signal.signal} />
+          </div>
           <ConfidenceGauge value={signal.confidence} size="sm" />
         </div>
       </div>
