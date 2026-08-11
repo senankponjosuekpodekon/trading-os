@@ -7,6 +7,10 @@ import { PositionsModule } from './positions.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { JournalService } from '../journal/journal.service';
+import { AuditService } from '../audit/audit.service';
+import { SystemHealthService } from '../system-health/system-health.service';
+import { CrossPositionRiskService } from './cross-position-risk.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 const fakeGuard: CanActivate = {
@@ -18,7 +22,13 @@ const fakeGuard: CanActivate = {
 
 describe('PositionsController (integration)', () => {
   let app: INestApplication;
-  const httpService = { get: jest.fn() };
+  const httpService = {
+    get: jest.fn(),
+    post: jest.fn().mockReturnValue({
+      toPromise: () => Promise.resolve({ data: {} }),
+      pipe: () => ({ toPromise: () => Promise.resolve({ data: {} }) }),
+    }),
+  };
   const portfolio = { id: 'p1', userId: 'user-1', currentCapital: 10000 };
   const asset = { id: 'a1', symbol: 'BTC/USDT' };
   const position = {
@@ -33,6 +43,7 @@ describe('PositionsController (integration)', () => {
     takeProfit: 110,
     pnl: 0,
     asset: { symbol: 'BTC/USDT' },
+    portfolio: { ...portfolio, userId: 'user-1' },
   };
 
   const prismaMock = {
@@ -65,7 +76,15 @@ describe('PositionsController (integration)', () => {
       .overrideProvider(PrismaSystemService)
       .useValue(prismaMock as any)
       .overrideProvider(NotificationsService)
-      .useValue({ send: jest.fn() } as any)
+      .useValue({ push: jest.fn(), pushSignal: jest.fn() } as any)
+      .overrideProvider(JournalService)
+      .useValue({ createAuto: jest.fn().mockResolvedValue({}) } as any)
+      .overrideProvider(AuditService)
+      .useValue({ log: jest.fn().mockResolvedValue({}) } as any)
+      .overrideProvider(SystemHealthService)
+      .useValue({ check: jest.fn() } as any)
+      .overrideProvider(CrossPositionRiskService)
+      .useValue({ check: jest.fn().mockResolvedValue({ allowed: true }) } as any)
       .overrideGuard(JwtAuthGuard)
       .useValue(fakeGuard)
       .compile();

@@ -192,7 +192,7 @@ describe('PositionsService', () => {
         quantity: 5,
         originalQuantity: 10,
         partialPnl: 50,
-        portfolio: { id: 'p1' },
+        portfolio: { id: 'p1', currentCapital: 10000 },
       });
       mockPrisma.position.update.mockResolvedValue({ id: 'pos1' });
       mockPrisma.portfolio.update.mockResolvedValue({ id: 'p1' });
@@ -215,7 +215,7 @@ describe('PositionsService', () => {
         originalQuantity: 10,
         partialPnl: 25,
         asset: { symbol: 'BTC/USDT' },
-        portfolio: { userId: 'u1', id: 'p1', user: {} },
+        portfolio: { userId: 'u1', id: 'p1', currentCapital: 10000, user: {} },
       });
       mockPrisma.position.update.mockResolvedValue({ id: 'pos2' });
       mockPrisma.portfolio.update.mockResolvedValue({ id: 'p1' });
@@ -337,7 +337,7 @@ describe('PositionsService', () => {
         entryPrice: '100',
         quantity: '1',
         asset: { symbol: 'BTC/USDT' },
-        portfolio: { userId: 'u1', id: 'p1', user: {} },
+        portfolio: { userId: 'u1', id: 'p1', currentCapital: 10000, user: {} },
       });
       mockPrisma.position.update.mockResolvedValue({ id: 'pos3' });
       mockPrisma.portfolio.update.mockResolvedValue({ id: 'p1' });
