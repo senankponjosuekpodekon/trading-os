@@ -210,7 +210,7 @@ function ReportDetail({ report }: { report: any }) {
               <tbody>
                 {data.portfolio.positions.map((p: any, i: number) => (
                   <tr key={i} className="border-b border-gray-800/50">
-                    <td className="py-2 text-white">{p.symbol}</td>
+                    <td className="py-2 text-white">{p.asset?.symbol ?? '—'}</td>
                     <td className="text-gray-300">{p.direction}</td>
                     <td className="text-right text-gray-300">{Number(p.entryPrice).toFixed(4)}</td>
                     <td className={`text-right ${(p.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>

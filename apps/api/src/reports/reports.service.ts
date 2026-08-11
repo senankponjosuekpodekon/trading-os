@@ -115,8 +115,9 @@ export class ReportsService {
       this.prisma.position.findMany({
         where: { status: 'OPEN' },
         select: {
-          symbol: true, direction: true, entryPrice: true,
+          direction: true, entryPrice: true,
           pnl: true, pnlPercent: true, quantity: true,
+          asset: { select: { symbol: true } },
         },
       }),
       this.prisma.signal.findMany({
