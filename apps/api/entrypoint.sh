@@ -2,7 +2,19 @@
 set -e
 
 echo "[entrypoint] Running prisma migrate deploy..."
-npx prisma migrate deploy
+npx prisma migrate deploy 2>&1 || {
+  echo "[entrypoint] Migration failed, attempting to resolve failed migrations..."
+  FAILED=$(npx prisma migrate status --schema=./prisma/schema.prisma 2>&1 | grep "failed" | grep -oE '[0-9]{14}_[a-z0-9_]+' | head -1)
+  if [ -n "$FAILED" ]; then
+    echo "[entrypoint] Resolving failed migration: $FAILED"
+    npx prisma migrate resolve --applied "$FAILED" --schema=./prisma/schema.prisma 2>/dev/null || true
+    echo "[entrypoint] Retrying prisma migrate deploy..."
+    npx prisma migrate deploy
+  else
+    echo "[entrypoint] No failed migration found, re-raising error"
+    exit 1
+  fi
+}
 
 echo "[entrypoint] Running prisma db seed..."
 node --experimental-strip-types -e "
