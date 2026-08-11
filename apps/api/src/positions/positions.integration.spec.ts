@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, CanActivate, ExecutionContext, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
+import { of } from 'rxjs';
 import * as request from 'supertest';
 import { PositionsModule } from './positions.module';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -24,10 +25,7 @@ describe('PositionsController (integration)', () => {
   let app: INestApplication;
   const httpService = {
     get: jest.fn(),
-    post: jest.fn().mockReturnValue({
-      toPromise: () => Promise.resolve({ data: {} }),
-      pipe: () => ({ toPromise: () => Promise.resolve({ data: {} }) }),
-    }),
+    post: jest.fn().mockReturnValue(of({ data: {} })),
   };
   const portfolio = { id: 'p1', userId: 'user-1', currentCapital: 10000 };
   const asset = { id: 'a1', symbol: 'BTC/USDT' };

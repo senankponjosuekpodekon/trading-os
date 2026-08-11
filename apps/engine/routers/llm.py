@@ -5,7 +5,6 @@ import os
 import time
 import hashlib
 import json
-import asyncio
 
 from config import settings
 from utils.db_pool import get_shared_pool

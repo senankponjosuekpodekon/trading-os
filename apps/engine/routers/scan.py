@@ -2373,7 +2373,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
                 symbol,
                 technical_score=result.get("confidence", 50),
                 technical_confidence=result.get("confidence", 50),
-                onchain_bonus=onchain.get("context", {}).get("fear_greed") if onchain else None,
+                onchain_bonus=_onchain.get("context", {}).get("fear_greed") if _onchain else None,
                 social_score=_social_score,
                 tokenomics_penalty=_tokenomics_penalty,
             )
@@ -2933,6 +2933,11 @@ async def scan_multi(req: ScanRequest):
             tokenomics_ctx = tokenomics_contexts.get(sym)
             social_ctx = social_contexts.get(sym)
             bias_r = bias_regimes_by_sym.get(sym)
+            _nc = news_contexts.get(sym)
+            _gd = gold_dxy_data.get(sym)
+            _mct = mcap_tiers.get(sym)
+            _ld = liquidity_data.get(sym)
+            _rfd = red_flags_data.get(sym)
             if req.strategies:
                 for strat in req.strategies:
                     etf = strat.get("entryTimeframe") or strat.get("entry_timeframe")
@@ -2943,9 +2948,7 @@ async def scan_multi(req: ScanRequest):
                             lambda s=sym, tf=req.timeframe, d=df, h=htf_r, m=mtf_r, st=strat,
                                    oc=onchain_ctx, ec=entry_ctx, fc=None, tc=tokenomics_ctx,
                                    sc=social_ctx, br=bias_r,
-                                   nc=news_contexts.get(s), gd=gold_dxy_data.get(s),
-                                   mct=mcap_tiers.get(s), ld=liquidity_data.get(s),
-                                   rfd=red_flags_data.get(s), fg=fg_value:
+                                   nc=_nc, gd=_gd, mct=_mct, ld=_ld, rfd=_rfd, fg=fg_value:
                                 analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc,
                                     bias_regimes=br, news_context=nc, gold_dxy=gd,
                                     market_cap_tier=mct, liquidity_data=ld,
@@ -2959,9 +2962,7 @@ async def scan_multi(req: ScanRequest):
                         lambda s=sym, tf=req.timeframe, d=df, h=htf_r, m=mtf_r, st=None,
                                oc=onchain_ctx, ec=None, fc=None, tc=tokenomics_ctx,
                                sc=social_ctx, br=bias_r,
-                               nc=news_contexts.get(s), gd=gold_dxy_data.get(s),
-                               mct=mcap_tiers.get(s), ld=liquidity_data.get(s),
-                               rfd=red_flags_data.get(s), fg=fg_value:
+                               nc=_nc, gd=_gd, mct=_mct, ld=_ld, rfd=_rfd, fg=fg_value:
                             analyze_candles(s, tf, d, h, m, st, oc, ec, fc, tc, sc,
                                 bias_regimes=br, news_context=nc, gold_dxy=gd,
                                 market_cap_tier=mct, liquidity_data=ld,

@@ -15,7 +15,6 @@ Coverage:
   #69  compute_calmar — no annualisation by trade count
 """
 import pytest
-from datetime import datetime
 
 
 # ─── #73: DisciplineController bridge ─────────────────────────────────────────
@@ -304,7 +303,7 @@ class TestComputeCalmar:
         # Peak = 11000, trough = 9000 → max_dd = 2000/11000 ≈ 18.18%
         # calmar = 0.1 / 0.1818 ≈ 0.55
         equity = [10000]
-        for i in range(50):
+        for _i in range(50):
             equity.append(11000)   # peak
             equity.append(9000)    # 18.18% DD from peak
         equity.append(11000)       # end at 10% total return
