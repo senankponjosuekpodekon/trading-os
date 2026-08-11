@@ -4,7 +4,12 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 @Controller('admin/ops')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -13,6 +18,7 @@ export class AdminOpsController {
   constructor(
     private prisma: PrismaService,
     private healthService: SystemHealthService,
+    private config: ConfigService,
   ) {}
 
   @Get('health')
@@ -81,5 +87,52 @@ export class AdminOpsController {
         return acc;
       }, {} as Record<string, number>),
     };
+  }
+
+  @Get('containers')
+  async containers() {
+    const mem = process.memoryUsage();
+    const apiInfo = {
+      name: 'api',
+      pid: process.pid,
+      uptime: Math.floor(process.uptime()),
+      memory: {
+        rss: Math.round(mem.rss / 1024 / 1024),
+        heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+        heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+        external: Math.round(mem.external / 1024 / 1024),
+      },
+      oomRisk: mem.rss > 400 * 1024 * 1024 ? 'high' : mem.rss > 250 * 1024 * 1024 ? 'medium' : 'low',
+    };
+
+    let engineInfo: any = null;
+    try {
+      const engineUrl = this.config.get<string>('ENGINE_URL', 'http://engine:8000');
+      const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
+      const { default: axios } = await import('axios');
+      const resp = await axios.get(`${engineUrl}/health`, {
+        headers: { 'X-Engine-Key': engineKey },
+        timeout: 3000,
+      });
+      engineInfo = resp.data;
+    } catch {
+      engineInfo = { error: 'unreachable' };
+    }
+
+    let dockerStats: any[] = [];
+    try {
+      const { stdout } = await execAsync(
+        'docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep trading-os',
+        { timeout: 3000 },
+      );
+      dockerStats = stdout.trim().split('\n').filter(Boolean).map(line => {
+        const [name, status, ports] = line.split('\t');
+        return { name, status, ports };
+      });
+    } catch {
+      // docker command not available or no containers
+    }
+
+    return { api: apiInfo, engine: engineInfo, containers: dockerStats };
   }
 }

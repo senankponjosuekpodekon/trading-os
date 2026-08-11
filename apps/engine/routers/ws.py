@@ -217,13 +217,17 @@ async def _broadcast_signals(signals: list):
 
 def broadcast_pattern(pattern: dict):
     """Appelé par scan.py quand un pattern chartiste est détecté — diffuse à tous les clients WS connectés
-    et pousse une notification SSE via l'API."""
+    et pousse une notification SSE via l'API. Safe to call from sync context (analyze_candles)."""
     global _last_patterns
     _last_patterns.append(pattern)
     if len(_last_patterns) > 100:
         _last_patterns = _last_patterns[-100:]
-    asyncio.create_task(_broadcast_patterns(pattern))
-    asyncio.create_task(_notify_api_pattern(pattern))
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_broadcast_patterns(pattern))
+        loop.create_task(_notify_api_pattern(pattern))
+    except RuntimeError:
+        pass
 
 
 async def _broadcast_patterns(pattern: dict):
