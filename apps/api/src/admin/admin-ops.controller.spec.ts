@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { AdminOpsController } from './admin-ops.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('AdminOpsController', () => {
   let controller: AdminOpsController;
@@ -32,6 +33,7 @@ describe('AdminOpsController', () => {
       providers: [
         { provide: PrismaService, useValue: prisma },
         { provide: SystemHealthService, useValue: healthService },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('') } },
       ],
     }).compile();
 
