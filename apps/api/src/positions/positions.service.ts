@@ -413,7 +413,7 @@ export class PositionsService {
     return portfolio;
   }
 
-  async openFromSignal(userId: string, signalId: string, portfolioType: 'PAPER' | 'LIVE' = 'PAPER') {
+  async openFromSignal(userId: string, signalId: string, portfolioType: 'PAPER' | 'LIVE' = 'PAPER', livePrice?: number) {
     const signal = await this.prisma.signal.findUnique({
       where: { id: signalId },
       include: { asset: true },
@@ -442,8 +442,13 @@ export class PositionsService {
     const capital    = parseFloat(portfolio.currentCapital.toString());
     const riskPct    = 0.01;  // 1% risque par défaut
     const riskAmt    = capital * riskPct;
-    const entryPrice = signal.entryPrice ? parseFloat(signal.entryPrice.toString()) : null;
-    if (!entryPrice) throw new BadRequestException('Signal has no entry price');
+    // Paper trading: utiliser le prix live du marché si fourni (norme: prix au moment du clic, pas au moment du signal)
+    // Live trading: utiliser le prix du signal (l'exchange exécutera au prix réel du marché)
+    const signalEntry = signal.entryPrice ? parseFloat(signal.entryPrice.toString()) : null;
+    const entryPrice = portfolioType === 'PAPER' && livePrice
+      ? livePrice
+      : signalEntry;
+    if (!entryPrice) throw new BadRequestException('Signal has no entry price and no live price provided');
 
     const slPrice = signal.stopLoss ? parseFloat(signal.stopLoss.toString()) : null;
     const slDist  = slPrice ? Math.abs(entryPrice - slPrice) : entryPrice * 0.015;

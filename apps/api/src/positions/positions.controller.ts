@@ -23,8 +23,9 @@ export class PositionsController {
     @Request() req: any,
     @Param('signalId') signalId: string,
     @Query('type') type?: 'PAPER' | 'LIVE',
+    @Body('livePrice') livePrice?: number,
   ) {
-    return this.positionsService.openFromSignal(req.user.id, signalId, type || 'PAPER');
+    return this.positionsService.openFromSignal(req.user.id, signalId, type || 'PAPER', livePrice);
   }
 
   @Get()

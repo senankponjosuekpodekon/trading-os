@@ -40,10 +40,10 @@ const SYMBOL_TO_PRICE_KEY: Record<string, string> = {
   'EUR/USD': 'EUR/USD', 'GBP/USD': 'GBP/USD', 'USD/JPY': 'USD/JPY',
   'AUD/USD': 'AUD/USD', 'USD/CHF': 'USD/CHF', 'USD/CAD': 'USD/CAD', 'NZD/USD': 'NZD/USD',
   'XAU/USD': 'XAU/USD', 'XAG/USD': 'XAG/USD', 'WTI/USD': 'WTI/USD', 'BRENT/USD': 'BRENT/USD',
-  'V10': 'V10', 'V25': 'V25', 'V50': 'V50', 'V75': 'V75', 'V100': 'V100',
-  'BOOM1000': 'BOOM1000', 'BOOM500': 'BOOM500', 'BOOM300': 'BOOM300',
-  'CRASH1000': 'CRASH1000', 'CRASH500': 'CRASH500', 'CRASH300': 'CRASH300',
-  'JUMP10': 'JUMP10', 'JUMP25': 'JUMP25', 'JUMP50': 'JUMP50', 'JUMP75': 'JUMP75', 'JUMP100': 'JUMP100',
+  'V10': 'VIX10/USD', 'V25': 'VIX25/USD', 'V50': 'VIX50/USD', 'V75': 'VIX75/USD', 'V100': 'VIX100/USD',
+  'BOOM1000': 'BOOM1000/USD', 'BOOM500': 'BOOM500/USD', 'BOOM300': 'BOOM300/USD',
+  'CRASH1000': 'CRASH1000/USD', 'CRASH500': 'CRASH500/USD', 'CRASH300': 'CRASH300/USD',
+  'JUMP10': 'JUMP10/USD', 'JUMP25': 'JUMP25/USD', 'JUMP50': 'JUMP50/USD', 'JUMP75': 'JUMP75/USD', 'JUMP100': 'JUMP100/USD',
 };
 
 
@@ -261,6 +261,26 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
     refetchInterval: 60_000,
   });
 
+  // ── Fusion prix live WebSocket → dernière bougie ─────────────
+  // Le WebSocket pousse les prix toutes les 3s (Binance) à 30s (Forex).
+  // On met à jour le close/high/low de la dernière bougie en temps réel
+  // sans re-fetcher les klines (économise les requêtes API).
+  const priceKey = SYMBOL_TO_PRICE_KEY[symbol] ?? symbol;
+  const livePrice = prices[priceKey];
+
+  const liveKlines = useMemo<OHLCBar[] | undefined>(() => {
+    if (!klines || klines.length === 0) return klines;
+    if (!livePrice) return klines;
+    const updated = klines.slice();
+    const lastIdx = updated.length - 1;
+    const lastBar = { ...updated[lastIdx] };
+    lastBar.close = livePrice;
+    lastBar.high  = Math.max(lastBar.high, livePrice);
+    lastBar.low   = Math.min(lastBar.low, livePrice);
+    updated[lastIdx] = lastBar;
+    return updated;
+  }, [klines, livePrice]);
+
   // Multi-TF preview: determine higher timeframe
   const TF_ORDER = ['5m', '15m', '1h', '4h', '1d'];
   const htfIndex = Math.min(TF_ORDER.indexOf(timeframe) + 1, TF_ORDER.length - 1);
@@ -289,12 +309,12 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
   const signals = useTradingStore(s => s.signals) as Signal[];
 
   const signalMarkers: ChartMarker[] = useMemo(() => {
-    if (!signals || !klines || klines.length === 0) return [];
+    if (!signals || !liveKlines || liveKlines.length === 0) return [];
     return signals
       .filter(s => s.asset?.symbol === symbol)
       .map(s => {
         const ts  = Math.floor(new Date(s.createdAt).getTime() / 1000);
-        const bar = klines.reduce((prev, cur) =>
+        const bar = liveKlines.reduce((prev, cur) =>
           Math.abs((cur.time as number) - ts) < Math.abs((prev.time as number) - ts) ? cur : prev
         );
         return {
@@ -304,22 +324,22 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
           text:  `${s.signal} ${Math.round(s.confidence)}%`,
         } as ChartMarker;
       });
-  }, [signals, klines, symbol]);
+  }, [signals, liveKlines, symbol]);
 
-  const structureMarkers = useStructureAnnotations(klines);
-  const liquidityLevels = useLiquidityLevels(klines);
+  const structureMarkers = useStructureAnnotations(liveKlines);
+  const liquidityLevels = useLiquidityLevels(liveKlines);
 
   const chartPatterns: ChartPattern[] = useMemo(() => {
-    if (!klines || klines.length < 30) return [];
-    return detectChartPatterns(klines);
-  }, [klines]);
+    if (!liveKlines || liveKlines.length < 30) return [];
+    return detectChartPatterns(liveKlines);
+  }, [liveKlines]);
 
   const patternMarkers = useMemo(() => patternsToMarkers(chartPatterns), [chartPatterns]);
 
   const indicators: IndicatorSeries = useMemo(() => {
-    if (!klines || klines.length < 50) return {};
-    const times  = klines.map(b => b.time as number);
-    const closes = klines.map(b => b.close);
+    if (!liveKlines || liveKlines.length < 50) return {};
+    const times  = liveKlines.map(b => b.time as number);
+    const closes = liveKlines.map(b => b.close);
     const result: IndicatorSeries = {};
 
     if (showIndicators) {
@@ -342,7 +362,7 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
     }
 
     return result;
-  }, [klines, showIndicators, showMacd]);
+  }, [liveKlines, showIndicators, showMacd]);
 
   const latestSignal = signals?.find(s => s.asset?.symbol === symbol);
   const signalLevels: PriceLevel[] = useMemo(() => {
@@ -379,8 +399,8 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
   }, [latestSignal, showSmc]);
 
   const scenarioMarkers: ChartMarker[] = useMemo(() => {
-    if (!latestSignal || !klines || klines.length === 0) return [];
-    const lastTime = klines[klines.length - 1].time as number;
+    if (!latestSignal || !liveKlines || liveKlines.length === 0) return [];
+    const lastTime = liveKlines[liveKlines.length - 1].time as number;
     return signalLevels.map(l => ({
       time: lastTime,
       position: l.label === 'SL' ? 'aboveBar' : 'belowBar',
@@ -388,7 +408,7 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
       shape: 'circle',
       text: l.label,
     } as ChartMarker));
-  }, [latestSignal, klines, signalLevels]);
+  }, [latestSignal, liveKlines, signalLevels]);
 
   const allMarkers = useMemo(() => {
     const base = [...signalMarkers];
@@ -404,11 +424,9 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
     return base;
   }, [signalLevels, liquidityLevels, showLevels, showAnnotations]);
 
-  const priceKey = SYMBOL_TO_PRICE_KEY[symbol] ?? symbol;
-  const livePrice = prices[priceKey];
-  const lastBar = klines?.[klines.length - 1];
+  const lastBar = liveKlines?.[liveKlines.length - 1];
   const refPrice = livePrice ?? lastBar?.close;
-  const prevClose = klines?.[klines.length - 2]?.close;
+  const prevClose = liveKlines?.[liveKlines.length - 2]?.close;
   const pctChg = refPrice && prevClose ? ((refPrice - prevClose) / prevClose * 100).toFixed(2) : null;
   const isUp   = pctChg !== null ? parseFloat(pctChg) >= 0 : null;
 
@@ -575,7 +593,7 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
             </div>
           ) : (
             <CandlestickChart
-              data={klines}
+              data={liveKlines}
               markers={allMarkers}
               height={chartHeight}
               showVolume={true}
