@@ -7,12 +7,23 @@ export interface LlmConfig {
   preferred: 'ollama' | 'openai';
 }
 
+export interface PollingConfig {
+  scanPollingEnabled: boolean;
+  scanPollingInterval: number;
+}
+
 const LLM_CONFIG_KEY = 'llm_config';
+const POLLING_CONFIG_KEY = 'polling_config';
 
 const DEFAULT_LLM_CONFIG: LlmConfig = {
   ollamaEnabled: true,
   openaiEnabled: true,
   preferred: 'ollama',
+};
+
+const DEFAULT_POLLING_CONFIG: PollingConfig = {
+  scanPollingEnabled: true,
+  scanPollingInterval: 5_000,
 };
 
 @Injectable()
@@ -32,6 +43,25 @@ export class SystemSettingsService {
     await this.prisma.systemSetting.upsert({
       where: { key: LLM_CONFIG_KEY },
       create: { key: LLM_CONFIG_KEY, value: next as any, updatedBy },
+      update: { value: next as any, updatedBy },
+    });
+
+    return next;
+  }
+
+  async getPollingConfig(): Promise<PollingConfig> {
+    const row = await this.prisma.systemSetting.findUnique({ where: { key: POLLING_CONFIG_KEY } });
+    if (!row) return DEFAULT_POLLING_CONFIG;
+    return { ...DEFAULT_POLLING_CONFIG, ...(row.value as Partial<PollingConfig>) };
+  }
+
+  async setPollingConfig(patch: Partial<PollingConfig>, updatedBy: string): Promise<PollingConfig> {
+    const current = await this.getPollingConfig();
+    const next: PollingConfig = { ...current, ...patch };
+
+    await this.prisma.systemSetting.upsert({
+      where: { key: POLLING_CONFIG_KEY },
+      create: { key: POLLING_CONFIG_KEY, value: next as any, updatedBy },
       update: { value: next as any, updatedBy },
     });
 

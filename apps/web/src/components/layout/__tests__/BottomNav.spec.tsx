@@ -22,7 +22,7 @@ describe('BottomNav', () => {
   it('renders every navigation entry as a link with its href', () => {
     render(<BottomNav />);
 
-    expect(screen.getByRole('link', { name: /Dashboard/i })).toHaveAttribute('href', '/dashboard');
+    expect(screen.getByRole('link', { name: /Home/i })).toHaveAttribute('href', '/dashboard');
     expect(screen.getByRole('link', { name: /Signaux/i })).toHaveAttribute('href', '/signals');
     expect(screen.getByRole('link', { name: /Copilot/i })).toHaveAttribute('href', '/copilot');
   });
@@ -32,6 +32,6 @@ describe('BottomNav', () => {
     render(<BottomNav />);
 
     expect(screen.getByRole('link', { name: /Portfolio/i }).className).toContain('text-emerald-400');
-    expect(screen.getByRole('link', { name: /Dashboard/i }).className).not.toContain('text-emerald-400');
+    expect(screen.getByRole('link', { name: /Home/i }).className).not.toContain('text-emerald-400');
   });
 });

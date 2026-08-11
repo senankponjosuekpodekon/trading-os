@@ -168,7 +168,7 @@ export class SignalsController {
   }
 
   @Get('scan-history')
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   async scanHistory(
     @Query('limit') limit?: string,
     @Query('strategy') strategy?: string,

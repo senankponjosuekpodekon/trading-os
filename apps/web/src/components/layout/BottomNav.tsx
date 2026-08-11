@@ -1,20 +1,15 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, TrendingUp, Briefcase, MessageSquare, Search, Trophy, ShieldAlert, Cpu, Layers, Eye } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Briefcase, MessageSquare, ShieldAlert } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const nav = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/scanner', label: 'Scanner', icon: Search },
+  { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
   { href: '/signals',   label: 'Signaux',  icon: TrendingUp },
   { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
-  { href: '/risk', label: 'Risk', icon: ShieldAlert },
-  { href: '/performance', label: 'Perf', icon: Trophy },
-  { href: '/synthetic', label: 'Synth', icon: Cpu },
-  { href: '/observability', label: 'Obs', icon: Eye },
-  { href: '/phase-b', label: 'Phase B', icon: Layers },
-  { href: '/copilot',  label: 'Copilot',   icon: MessageSquare },
+  { href: '/copilot',   label: 'Copilot',   icon: MessageSquare },
+  { href: '/admin',     label: 'Admin',     icon: ShieldAlert },
 ];
 
 export function BottomNav() {

@@ -146,10 +146,19 @@ export default function SignalsPage() {
     staleTime: 60_000,
   });
 
+  const { data: pollingConfig } = useQuery({
+    queryKey: ['polling-config'],
+    queryFn: async () => (await api.get('/system/polling-config/public')).data,
+    staleTime: 60_000,
+  });
+
+  const scanPollingEnabled = pollingConfig?.scanPollingEnabled ?? true;
+  const scanPollingInterval = pollingConfig?.scanPollingInterval ?? 5_000;
+
   const { data: scanHistoryData, isFetching: scanHistoryLoading } = useQuery({
     queryKey: ['scan-history-realtime'],
     queryFn: async () => (await api.get('/signals/scan-history', { params: { limit: 100 } })).data,
-    refetchInterval: 5_000,
+    refetchInterval: scanPollingEnabled ? scanPollingInterval : false,
     staleTime: 3_000,
   });
 
@@ -483,7 +492,9 @@ function ScannerView({ entries, loading }: { entries: any[]; loading: boolean })
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-emerald-400" />
-          <span className="text-sm text-gray-400">Temps réel — polling 5s</span>
+          <span className="text-sm text-gray-400">
+            {scanPollingEnabled ? `Temps réel — polling ${scanPollingInterval / 1000}s` : 'Temps réel — polling désactivé'}
+          </span>
           {loading && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
         </div>
         <div className="flex items-center gap-3 text-xs">

@@ -1,13 +1,14 @@
 'use client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 import {
   Activity, AlertTriangle, CheckCircle2, XCircle, Clock,
   Database, Cpu, Zap, TrendingUp, TrendingDown, Brain,
-  Server, GitBranch, Layers, BarChart3, RefreshCw,
+  Server, GitBranch, Layers, BarChart3, RefreshCw, Gauge,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useToast } from '@/hooks/useToast';
 
 interface HealthCheck {
   name: string;
@@ -80,7 +81,9 @@ function PipelineStep({ label, value, icon }: { label: string; value: number | s
 }
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<'health' | 'dataflow' | 'strategies'>('health');
+  const [tab, setTab] = useState<'health' | 'dataflow' | 'strategies' | 'polling'>('health');
+  const qc = useQueryClient();
+  const { toast } = useToast();
 
   const { data: health, refetch: refetchHealth } = useQuery<HealthSummary>({
     queryKey: ['system-health'],
@@ -120,6 +123,7 @@ export default function AdminPage() {
             { key: 'health', label: 'Santé système', icon: <Activity className="w-4 h-4" /> },
             { key: 'dataflow', label: 'Data Flow', icon: <GitBranch className="w-4 h-4" /> },
             { key: 'strategies', label: 'Stratégies', icon: <BarChart3 className="w-4 h-4" /> },
+            { key: 'polling', label: 'Polling', icon: <Gauge className="w-4 h-4" /> },
           ].map(t => (
             <button
               key={t.key}
@@ -297,7 +301,89 @@ export default function AdminPage() {
             </table>
           </div>
         )}
+        {/* Polling tab */}
+        {tab === 'polling' && <PollingTab />}
       </div>
     </AppLayout>
+  );
+}
+
+function PollingTab() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const { data: pollingConfig } = useQuery({
+    queryKey: ['polling-config-admin'],
+    queryFn: async () => (await api.get('/system/polling-config')).data,
+  });
+
+  const updatePolling = useMutation({
+    mutationFn: async (patch: { scanPollingEnabled?: boolean; scanPollingInterval?: number }) =>
+      (await api.patch('/system/polling-config', patch)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['polling-config-admin'] });
+      qc.invalidateQueries({ queryKey: ['polling-config'] });
+      toast('Configuration de polling mise à jour', { type: 'success' });
+    },
+  });
+
+  const enabled = pollingConfig?.scanPollingEnabled ?? true;
+  const interval = pollingConfig?.scanPollingInterval ?? 5_000;
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <Gauge className="w-5 h-5 text-blue-400" /> Scan Polling
+        </h2>
+        <p className="text-sm text-gray-400 mb-6">
+          Contrôle le polling automatique de l'historique des scans sur la page Signaux.
+          Désactiver réduit la charge serveur mais les données ne se rafraîchissent plus automatiquement.
+        </p>
+
+        <div className="flex items-center justify-between py-3 border-b border-gray-800">
+          <div>
+            <p className="text-white font-medium">Polling activé</p>
+            <p className="text-xs text-gray-500">Active/désactive le rafraîchissement automatique</p>
+          </div>
+          <button
+            onClick={() => updatePolling.mutate({ scanPollingEnabled: !enabled })}
+            className={`relative w-12 h-6 rounded-full transition ${
+              enabled ? 'bg-emerald-600' : 'bg-gray-700'
+            }`}
+          >
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition ${
+              enabled ? 'left-6' : 'left-0.5'
+            }`} />
+          </button>
+        </div>
+
+        <div className="py-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-white font-medium">Intervalle de polling</p>
+            <span className="text-sm text-gray-400">{interval / 1000}s</span>
+          </div>
+          <input
+            type="range"
+            min={1000}
+            max={60000}
+            step={1000}
+            value={interval}
+            disabled={!enabled}
+            onChange={(e) => updatePolling.mutate({ scanPollingInterval: Number(e.target.value) })}
+            className="w-full accent-blue-500"
+          />
+          <div className="flex justify-between text-xs text-gray-500 mt-1">
+            <span>1s</span>
+            <span>60s</span>
+          </div>
+        </div>
+
+        {updatePolling.isPending && (
+          <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+            <RefreshCw className="w-3 h-3 animate-spin" /> Mise à jour...
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
