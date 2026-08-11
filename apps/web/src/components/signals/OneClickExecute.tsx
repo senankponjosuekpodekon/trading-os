@@ -195,7 +195,7 @@ export function OneClickExecute({ signal }: OneClickExecuteProps) {
               <div className="space-y-3">
                 <div className="p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-400">Prix d'exécution</span>
+                    <span className="text-gray-400">Prix d&rsquo;exécution</span>
                     <span className="text-white font-mono font-bold">
                       ${livePrice ? livePrice.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '—'}
                     </span>
@@ -295,7 +295,7 @@ export function OneClickExecute({ signal }: OneClickExecuteProps) {
                     </div>
 
                     <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <span>⚠ Ordre réel envoyé à l'exchange. Vérifiez la quantité avant de confirmer.</span>
+                      <span>⚠ Ordre réel envoyé à l&rsquo;exchange. Vérifiez la quantité avant de confirmer.</span>
                     </div>
 
                     <div className="flex justify-end gap-2">
@@ -313,7 +313,7 @@ export function OneClickExecute({ signal }: OneClickExecuteProps) {
                         {execute.isPending ? (
                           <><RefreshCw className="w-4 h-4 animate-spin" />Exécution...</>
                         ) : (
-                          <><Zap className="w-4 h-4" />Confirmer l'ordre</>
+                          <><Zap className="w-4 h-4" />Confirmer l&rsquo;ordre</>
                         )}
                       </button>
                     </div>
