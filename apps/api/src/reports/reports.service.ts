@@ -271,4 +271,108 @@ export class ReportsService {
       },
     };
   }
+
+  generateReportHtml(report: any): string {
+    const data = report.data;
+    const date = new Date(report.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const dir = data.signals?.byDirection ?? {};
+    const buy = dir['BUY'] ?? 0;
+    const sell = dir['SELL'] ?? 0;
+    const neutral = dir['NEUTRAL'] ?? 0;
+    const total = data.signals?.total ?? 0;
+    const winRate = data.performance?.winRate;
+    const portfolioValue = data.portfolio?.totalValue;
+
+    const topSignalsRows = (data.signals?.top ?? []).map((s: any) => {
+      const sym = s.asset?.symbol ?? '—';
+      const color = s.signal === 'BUY' ? '#34d399' : '#f87171';
+      return `<tr><td>${sym}</td><td style="color:${color};font-weight:bold">${s.signal}</td><td>${Math.round(s.confidence)}%</td><td>${s.timeframe}</td><td>${s.status ?? ''}</td></tr>`;
+    }).join('');
+
+    const scanRows = (data.scans?.recent ?? []).slice(0, 15).map((s: any) => {
+      const color = s.signal === 'BUY' ? '#34d399' : s.signal === 'SELL' ? '#f87171' : '#9ca3af';
+      return `<tr><td>${s.symbol}</td><td style="color:${color}">${s.signal}</td><td>${s.confidence}%</td><td>${s.timeframe}</td><td>${s.strategyName}</td><td>${new Date(s.scannedAt).toLocaleTimeString('fr-FR')}</td></tr>`;
+    }).join('');
+
+    const positionRows = (data.portfolio?.positions ?? []).map((p: any) => {
+      const sym = p.asset?.symbol ?? '—';
+      const pnlColor = (p.pnl ?? 0) >= 0 ? '#34d399' : '#f87171';
+      return `<tr><td>${sym}</td><td>${p.direction}</td><td>${Number(p.entryPrice).toFixed(4)}</td><td style="color:${pnlColor}">${Number(p.pnl ?? 0).toFixed(2)}</td><td style="color:${pnlColor}">${Number(p.pnlPercent ?? 0).toFixed(1)}%</td></tr>`;
+    }).join('');
+
+    const containerRows = (data.system?.cronHealth ?? []).map((c: any) =>
+      `<tr><td>${c.name}</td><td style="color:${c.status?.includes('Up') ? '#34d399' : '#f87171'}">${c.status}</td></tr>`
+    ).join('');
+
+    return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rapport Trading OS — ${date}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #111827; color: #e5e7eb; padding: 40px; }
+  h1 { color: #fff; font-size: 24px; margin-bottom: 4px; }
+  h2 { color: #9ca3af; font-size: 14px; margin: 24px 0 12px; border-bottom: 1px solid #374151; padding-bottom: 8px; }
+  .meta { color: #6b7280; font-size: 12px; margin-bottom: 24px; }
+  .interpretation { background: #064e3b; border: 1px solid #065f46; border-radius: 8px; padding: 16px; margin: 16px 0; }
+  .interpretation h3 { color: #34d399; font-size: 13px; margin-bottom: 8px; }
+  .interpretation p { color: #d1d5db; font-size: 13px; line-height: 1.6; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+  .stat { background: #1f2937; border: 1px solid #374151; border-radius: 8px; padding: 16px; text-align: center; }
+  .stat .value { font-size: 24px; font-weight: bold; color: #fff; }
+  .stat .label { font-size: 11px; color: #6b7280; margin-top: 4px; }
+  .stat.buy .value { color: #34d399; }
+  .stat.sell .value { color: #f87171; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+  th { text-align: left; color: #6b7280; padding: 8px; border-bottom: 1px solid #374151; font-size: 11px; }
+  td { padding: 8px; border-bottom: 1px solid #1f2937; color: #d1d5db; }
+  .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #374151; color: #4b5563; font-size: 11px; }
+  @media print { body { background: #fff; color: #000; } .stat { border: 1px solid #ccc; } table th { border-bottom: 1px solid #ccc; } }
+</style>
+</head>
+<body>
+  <h1>Rapport Trading OS</h1>
+  <p class="meta">${date} — Période: ${new Date(data.period?.from).toLocaleString('fr-FR')} → ${new Date(data.period?.to).toLocaleString('fr-FR')}</p>
+
+  ${report.interpretation ? `<div class="interpretation"><h3>Interpretation</h3><p>${report.interpretation}</p></div>` : ''}
+
+  <h2>Signaux (24h)</h2>
+  <div class="stats">
+    <div class="stat"><div class="value">${total}</div><div class="label">Total</div></div>
+    <div class="stat buy"><div class="value">${buy}</div><div class="label">BUY</div></div>
+    <div class="stat sell"><div class="value">${sell}</div><div class="label">SELL</div></div>
+    <div class="stat"><div class="value">${neutral}</div><div class="label">NEUTRAL</div></div>
+  </div>
+
+  ${topSignalsRows ? `<h2>Top 10 signaux</h2><table><thead><tr><th>Symbole</th><th>Signal</th><th>Confiance</th><th>TF</th><th>Statut</th></tr></thead><tbody>${topSignalsRows}</tbody></table>` : ''}
+
+  ${winRate !== null && winRate !== undefined ? `<h2>Performance (7j)</h2><div class="stats">
+    <div class="stat"><div class="value" style="color:${winRate >= 50 ? '#34d399' : '#f87171'}">${winRate}%</div><div class="label">Win Rate</div></div>
+    <div class="stat"><div class="value">${data.performance?.wins ?? 0}</div><div class="label">Actifs</div></div>
+    <div class="stat"><div class="value">${data.performance?.losses ?? 0}</div><div class="label">Invalides</div></div>
+  </div>` : ''}
+
+  <h2>Portefeuille</h2>
+  <div class="stats">
+    <div class="stat"><div class="value">$${Number(portfolioValue ?? 0).toFixed(2)}</div><div class="label">Valeur totale</div></div>
+    <div class="stat"><div class="value">${data.portfolio?.openPositions ?? 0}</div><div class="label">Positions ouvertes</div></div>
+  </div>
+  ${positionRows ? `<table><thead><tr><th>Symbole</th><th>Direction</th><th>Entrée</th><th>PnL</th><th>PnL %</th></tr></thead><tbody>${positionRows}</tbody></table>` : ''}
+
+  ${scanRows ? `<h2>Scans récents (24h)</h2><table><thead><tr><th>Symbole</th><th>Signal</th><th>Confiance</th><th>TF</th><th>Stratégie</th><th>Heure</th></tr></thead><tbody>${scanRows}</tbody></table>` : ''}
+
+  <h2>Système</h2>
+  <div class="stats">
+    <div class="stat"><div class="value">${data.system?.users ?? 0}</div><div class="label">Utilisateurs</div></div>
+    <div class="stat"><div class="value">${data.system?.activeStrategies ?? 0}</div><div class="label">Stratégies actives</div></div>
+    ${data.system?.containers?.api ? `<div class="stat"><div class="value">${data.system.containers.api.rss} MB</div><div class="label">API RSS</div></div>` : ''}
+  </div>
+  ${containerRows ? `<table><thead><tr><th>Conteneur</th><th>Statut</th></tr></thead><tbody>${containerRows}</tbody></table>` : ''}
+
+  <div class="footer">Généré automatiquement par Trading OS — ${new Date().toISOString()}</div>
+</body>
+</html>`;
+  }
 }

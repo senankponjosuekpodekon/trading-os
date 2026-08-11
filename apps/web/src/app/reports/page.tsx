@@ -127,6 +127,22 @@ function ReportDetail({ report }: { report: any }) {
   const winRate = data.performance?.winRate;
   const portfolioValue = data.portfolio?.totalValue;
 
+  const handleDownload = () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('trading_os_token') : null;
+    const url = `${api.defaults.baseURL}/reports/${report.id}/export`;
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(res => res.text())
+      .then(html => {
+        const blob = new Blob([html], { type: 'text/html' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `report-${new Date(report.date).toISOString().slice(0, 10)}.html`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      })
+      .catch(err => console.error('Download failed:', err));
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -139,13 +155,22 @@ function ReportDetail({ report }: { report: any }) {
             Période: {new Date(data.period?.from).toLocaleString('fr-FR')} — {new Date(data.period?.to).toLocaleString('fr-FR')}
           </p>
         </div>
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg transition-colors"
-        >
-          <Download className="w-4 h-4" />
-          Exporter PDF
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownload}
+            className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Télécharger
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            Imprimer / PDF
+          </button>
+        </div>
       </div>
 
       {/* Interpretation */}

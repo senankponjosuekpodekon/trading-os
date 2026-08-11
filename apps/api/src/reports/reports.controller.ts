@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -24,6 +25,19 @@ export class ReportsController {
   @Get(':id')
   get(@Param('id') id: string) {
     return this.reports.getReport(id);
+  }
+
+  @Get(':id/export')
+  async exportHtml(@Param('id') id: string, @Res() res: Response) {
+    const report = await this.reports.getReport(id);
+    if (!report) {
+      res.status(404).send('Report not found');
+      return;
+    }
+    const html = this.reports.generateReportHtml(report);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="report-${new Date(report.date).toISOString().slice(0, 10)}.html"`);
+    res.send(html);
   }
 
   @Post('generate')
