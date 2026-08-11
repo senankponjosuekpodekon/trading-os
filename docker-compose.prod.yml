@@ -60,12 +60,12 @@ services:
       - "${API_PORT_HOST:-3002}:3001"
     depends_on:
       engine:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/api/health"]
       interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 10
       start_period: 60s
 
   web:
@@ -89,7 +89,7 @@ services:
       - "${WEB_PORT_HOST:-3000}:3000"
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
       interval: 15s

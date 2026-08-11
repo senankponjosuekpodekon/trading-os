@@ -34,7 +34,7 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/prisma ./prisma
 COPY entrypoint.sh ./entrypoint.sh
 
-RUN chmod +x entrypoint.sh
+RUN chmod +x entrypoint.sh && apk add --no-cache wget
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=30s \
   CMD wget -qO- http://localhost:3001/api/health || exit 1

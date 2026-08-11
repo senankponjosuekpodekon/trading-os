@@ -47,6 +47,8 @@ ENV NODE_ENV=production
 COPY --from=builder /repo/node_modules ./node_modules
 COPY --from=builder /repo/apps/web ./apps/web
 
+RUN apk add --no-cache wget
+
 WORKDIR /repo/apps/web
 
 EXPOSE 3000
