@@ -154,14 +154,15 @@ def gold_atr_adjustment(
     vol_mult = session_info.get("vol_multiplier", 1.0)
 
     # Base multipliers for gold (wider than forex due to higher volatility)
+    # Plafond R:R = tp1_mult / sl_mult = 3.8 / 2.0 = 1.9 — garantit R:R ≥ 1.5 après ajustement SL
     sl_mult = 2.0 * vol_mult
-    tp1_mult = 2.5 * vol_mult
-    tp2_mult = 4.0 * vol_mult
+    tp1_mult = 3.8 * vol_mult
+    tp2_mult = 5.5 * vol_mult
 
     # Cap the multipliers to reasonable bounds
     sl_mult = min(max(sl_mult, 1.0), 4.0)
-    tp1_mult = min(max(tp1_mult, 1.5), 6.0)
-    tp2_mult = min(max(tp2_mult, 2.5), 8.0)
+    tp1_mult = min(max(tp1_mult, 2.5), 8.0)
+    tp2_mult = min(max(tp2_mult, 3.5), 10.0)
 
     return sl_mult, tp1_mult, tp2_mult
 

@@ -246,8 +246,8 @@ def evaluate_synthetic_strategy(
     min_confidence = rules.get("min_confidence", 55)
     min_dps = rules.get("min_dps", 50)
     sl_mult = rules.get("sl_atr_mult", 1.5)
-    tp1_mult = rules.get("tp1_atr_mult", 1.5)
-    tp2_mult = rules.get("tp2_atr_mult", 2.5)
+    tp1_mult = rules.get("tp1_atr_mult", 2.8)
+    tp2_mult = rules.get("tp2_atr_mult", 4.5)
 
     if len(close) < 30 or stats.get("state") == "UNKNOWN":
         return {
@@ -346,9 +346,10 @@ def evaluate_synthetic_strategy(
 
     # ── Price levels ──
     stop_loss = take_profit_1 = take_profit_2 = risk_reward = None
+    scale_out_tp = None
 
     if signal != "NEUTRAL" and entry and atr_val:
-        # Use Monte Carlo p10/p90 as additional TP guidance
+        # Use Monte Carlo p10/p90 as scale-out guidance (not TP1 override)
         mc_p10 = mc.get("p10")
         mc_p90 = mc.get("p90")
 
@@ -356,22 +357,32 @@ def evaluate_synthetic_strategy(
             stop_loss = round(entry - atr_val * sl_mult, 6)
             take_profit_1 = round(entry + atr_val * tp1_mult, 6)
             take_profit_2 = round(entry + atr_val * tp2_mult, 6)
-            # Refine TP1 with MC p90 if closer (more conservative)
+            # Use MC p90 as scale-out level if closer than TP1
             if mc_p90 and mc_p90 > entry:
                 mc_tp = round(mc_p90, 6)
                 if abs(mc_tp - entry) < abs(take_profit_1 - entry):
-                    take_profit_1 = mc_tp
-                    reasons.append(f"TP1 refined to MC p90={mc_tp}")
+                    mc_rr = abs(mc_tp - entry) / abs(entry - stop_loss) if abs(entry - stop_loss) > 0 else 0
+                    if mc_rr >= 1.5:
+                        take_profit_1 = mc_tp
+                        reasons.append(f"TP1 refined to MC p90={mc_tp} (R:R {mc_rr:.2f})")
+                    else:
+                        scale_out_tp = mc_tp
+                        reasons.append(f"Scale-out TP at MC p90={mc_tp} (R:R {mc_rr:.2f} < 1.5, keeping ATR TP1)")
         elif signal == "SELL":
             stop_loss = round(entry + atr_val * sl_mult, 6)
             take_profit_1 = round(entry - atr_val * tp1_mult, 6)
             take_profit_2 = round(entry - atr_val * tp2_mult, 6)
-            # Refine TP1 with MC p10 if closer
+            # Use MC p10 as scale-out level if closer than TP1
             if mc_p10 and mc_p10 < entry:
                 mc_tp = round(mc_p10, 6)
                 if abs(mc_tp - entry) < abs(take_profit_1 - entry):
-                    take_profit_1 = mc_tp
-                    reasons.append(f"TP1 refined to MC p10={mc_tp}")
+                    mc_rr = abs(mc_tp - entry) / abs(entry - stop_loss) if abs(entry - stop_loss) > 0 else 0
+                    if mc_rr >= 1.5:
+                        take_profit_1 = mc_tp
+                        reasons.append(f"TP1 refined to MC p10={mc_tp} (R:R {mc_rr:.2f})")
+                    else:
+                        scale_out_tp = mc_tp
+                        reasons.append(f"Scale-out TP at MC p10={mc_tp} (R:R {mc_rr:.2f} < 1.5, keeping ATR TP1)")
 
         if stop_loss and take_profit_1 and abs(entry - stop_loss) > 0:
             from utils.risk_reward import compute_rr
@@ -395,6 +406,7 @@ def evaluate_synthetic_strategy(
         "stop_loss": stop_loss,
         "take_profit_1": take_profit_1,
         "take_profit_2": take_profit_2,
+        "scale_out_tp": scale_out_tp,
         "risk_reward": risk_reward,
         "dps": dps,
         "trigger": "SYNTHETIC_STATISTICAL",

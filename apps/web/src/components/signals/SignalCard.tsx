@@ -11,7 +11,6 @@ import { useModeStore } from '@/store/mode.store';
 import { RegimeBadge } from '@/components/ui/RegimeBadge';
 import { AssetTypeBadge } from '@/components/ui/AssetTypeBadge';
 import { RiskLevelBadge } from '@/components/ui/RiskLevelBadge';
-import { ProbabilityBar } from '@/components/ui/ProbabilityBar';
 import { OpportunityScore } from '@/components/ui/OpportunityScore';
 import { ConfidenceGauge } from '@/components/ui/ConfidenceGauge';
 import { RRRatioBadge } from '@/components/ui/RRRatioBadge';
@@ -112,6 +111,8 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const entryZone = useMemo(() => computeEntryZone(signal), [signal]);
   const tpProbs = useMemo(() => computeTpProbs(signal), [signal]);
   const opportunityScore = useMemo(() => computeOpportunityScore(signal), [signal]);
+  const qualityScore = (signal.metadata as any)?.quality_score ?? null;
+  const qualityFlags = (signal.metadata as any)?.quality_flags ?? null;
 
   const deltaVsEntry = livePrice && entry ? ((livePrice - entry) / entry) * 100 : null;
 
@@ -250,7 +251,21 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
             </button>
             <SignalBadge signal={signal.signal} />
           </div>
-          <ConfidenceGauge value={signal.confidence} size="sm" />
+          <div className="flex items-center gap-2">
+            <ConfidenceGauge value={signal.confidence} size="sm" />
+            {qualityScore != null && qualityScore > 0 && (
+              <span
+                className={`text-xs px-2 py-1 rounded-lg font-medium border ${
+                  qualityScore >= 70 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                  qualityScore >= 40 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' :
+                  'bg-red-500/10 text-red-400 border-red-500/30'
+                }`}
+                title={qualityFlags?.join(' | ') ?? ''}
+              >
+                Q{qualityScore}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -301,9 +316,17 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="text-gray-300 font-mono">${entryZone.low.toFixed(2)}</span>
-            <ProbabilityBar value={entryZone.fillPct} max={100} showValue size="sm" className="flex-1" />
+            <div className="flex-1 h-1.5 bg-gray-700 rounded-full relative">
+              <div className="absolute left-1/2 top-0 h-full w-0.5 bg-emerald-400" />
+            </div>
             <span className="text-gray-300 font-mono">${entryZone.high.toFixed(2)}</span>
           </div>
+          {entryZone.scaleOutTp && (
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-700/30">
+              <span className="text-xs text-gray-500 flex items-center gap-1"><Crosshair className="w-3 h-3" /> Scale-out TP</span>
+              <span className="text-xs font-mono text-amber-400">${entryZone.scaleOutTp.toFixed(2)}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -739,28 +762,27 @@ function computeTpProbs(s: Signal) {
 function computeEntryZone(s: Signal) {
   const entry = s.entryPrice ? parseFloat(s.entryPrice) : null;
   const sl = s.stopLoss ? parseFloat(s.stopLoss) : null;
-  if (!entry || !sl) return null;
+  const tp1 = s.takeProfit1 ? parseFloat(s.takeProfit1) : null;
+  if (!entry || !sl || !tp1) return null;
   const isBuy = s.signal === 'BUY';
-  const dist = Math.abs(entry - sl);
-  const smc = s.metadata?.smc ?? {};
-  const fvg = smc.fvg ?? {};
-  const ob = smc.ob ?? {};
-  let low = isBuy ? entry - dist * 0.15 : entry;
-  let high = isBuy ? entry : entry + dist * 0.15;
+  const MIN_RR = 1.0;
+  const slDist = Math.abs(entry - sl);
+  const tpDist = Math.abs(tp1 - entry);
+  const noiseFloor = slDist * 0.15;
 
-  const bullFvg = fvg.near_bullish_fvg;
-  const bearFvg = fvg.near_bearish_fvg;
-  const bullOb = ob.near_bullish_ob;
-  const bearOb = ob.near_bearish_ob;
-
-  if (isBuy && bullFvg) { low = bullFvg.bottom; high = bullFvg.top; }
-  if (!isBuy && bearFvg) { low = bearFvg.bottom; high = bearFvg.top; }
-  if (isBuy && bullOb && !bullFvg) { low = Math.min(low, bullOb.bottom); high = Math.max(high, bullOb.top); }
-  if (!isBuy && bearOb && !bearFvg) { low = Math.min(low, bearOb.bottom); high = Math.max(high, bearOb.top); }
-
+  let low: number, high: number;
+  if (isBuy) {
+    low = entry - noiseFloor;
+    high = sl + tpDist / MIN_RR;
+    high = Math.min(high, entry + noiseFloor);
+  } else {
+    low = sl - tpDist / MIN_RR;
+    low = Math.max(low, entry - noiseFloor);
+    high = entry + noiseFloor;
+  }
   const optimal = (low + high) / 2;
-  const fillPct = s.metadata?.smc?.ob?.displacement_ratio ? Math.round(s.metadata.smc.ob.displacement_ratio * 100) : 50;
-  return { low, high, optimal, fillPct };
+  const scaleOutTp = (s.metadata as any)?.scale_out_tp ?? null;
+  return { low, high, optimal, scaleOutTp };
 }
 
 function computeOpportunityScore(s: Signal): number {

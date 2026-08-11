@@ -53,6 +53,7 @@ from risk.engine import get_risk_engine
 from risk.discipline_controller import TradeDecision
 from risk.market_cap import fetch_market_cap_tier, get_market_cap_tier_sync
 from risk.liquidity import compute_liquidity_score, estimate_liquidity_score_sync
+from risk.signal_quality_filter import apply_quality_gate
 from risk.risk_level import compute_risk_level, get_max_position_pct
 from risk.red_flags import check_red_flags
 from risk.dca_tranches import compute_dca_tranches, compute_scale_out
@@ -96,6 +97,8 @@ async def _persist_scan_redis(result: dict, timeframe: str) -> None:
             "signal_pending": result.get("signal_pending", False),
             "persistence_score": result.get("persistence_score", 0),
             "asset_type": result.get("asset_type"),
+            "quality_score": result.get("quality_score", 0),
+            "quality_flags": result.get("quality_flags", []),
             "scanned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         key = "scan_history:recent"
@@ -120,6 +123,7 @@ async def _queue_scan_for_batch(result: dict, timeframe: str) -> None:
         "signal_pending": bool(result.get("signal_pending", False)),
         "persistence_score": float(result.get("persistence_score", 0)),
         "asset_type": result.get("asset_type"),
+        "quality_score": int(result.get("quality_score", 0)),
     }
     async with _scan_batch_lock:
         _scan_batch.append(entry)
@@ -938,6 +942,7 @@ def _analyze_synthetic_candles(symbol: str, timeframe: str, df: pd.DataFrame, st
         "stop_loss": stop_loss,
         "take_profit_1": take_profit_1,
         "take_profit_2": take_profit_2,
+        "scale_out_tp": ev.get("scale_out_tp"),
         "risk_reward": risk_reward,
         "trigger": trigger,
         "signal_pending": ev["signal_pending"],
@@ -1015,11 +1020,33 @@ def analyze_candles(
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "not enough data", "correlation_id": corr_id}
 
     asset_type = get_asset_type(symbol)
+    session_info = get_session_info()
 
     # Synthetic assets (Deriv indices) use a dedicated statistical engine
     # — no EMA/RSI/MACD trend-following, only spike/mean-reversion stats
     if asset_type == "SYNTHETIC":
-        return _analyze_synthetic_candles(symbol, timeframe, df, strategy=strategy)
+        _syn_result = _analyze_synthetic_candles(symbol, timeframe, df, strategy=strategy)
+        # Apply quality gate (session=None for synthetics, volume from df)
+        _syn_gate = apply_quality_gate(
+            signal=_syn_result.get("signal", "NEUTRAL"),
+            asset_type="SYNTHETIC",
+            symbol=symbol,
+            entry=_syn_result.get("entry_price"),
+            tp1=_syn_result.get("take_profit_1"),
+            df=df,
+            session_info=session_info,
+            liquidity_data=estimate_liquidity_score_sync(symbol, "SYNTHETIC", df),
+        )
+        _syn_result["quality_score"] = _syn_gate.get("quality_score", 0)
+        _syn_result["quality_flags"] = _syn_gate.get("quality_flags", [])
+        if not _syn_gate["passed"]:
+            _syn_result["signal"] = "NEUTRAL"
+            _syn_result["confidence"] = 0
+            _syn_result["stop_loss"] = None
+            _syn_result["take_profit_1"] = None
+            _syn_result["take_profit_2"] = None
+            _syn_result["risk_reward"] = None
+        return _syn_result
 
     # Synthetic assets: compute statistical bonus alongside standard indicators
     synthetic_stats = None
@@ -1234,8 +1261,7 @@ def analyze_candles(
         if bb_bw_v and bb_bw_v < 0.02:
             reasons.append(f"BB squeeze (bw={bb_bw_v:.3f}) — breakout imminent")
 
-    # ── Session context ──
-    session_info = get_session_info()
+    # ── Session context (already initialized above) ──
 
     # ── Price Action Phase 1 : Structure ──
     pa = detect_market_structure(high, low, close, volume=df["volume"])
@@ -1521,23 +1547,24 @@ def analyze_candles(
         reasons.append("Tokenomics: unlock >20% supply <30j — signal désactivé")
 
     # Price levels — multiplicateurs ATR adaptés au régime
-    # RANGING      : TP serré (objectif souvent irréaliste au-delà de 2×ATR)
-    # TRENDING      : TP élargi (tendance peut porter plus loin)
-    # VOLATILE      : SL élargi pour absorber le bruit, TP conservateur
+    # Plafond R:R = tp1_mult / sl_mult. Objectif: R:R ≥ 1.5 après ajustement SL.
+    # RANGING      : SL serré, TP modéré (range limité)
+    # TRENDING     : SL standard, TP élargi (tendance porte plus loin)
+    # VOLATILE     : SL élargi pour absorber le bruit, TP suffisamment élargi
     # UNKNOWN/other : valeurs par défaut
     _reg = regime.get("regime", "UNKNOWN")
     if _reg == "RANGING":
-        _sl_mult, _tp1_mult, _tp2_mult = 1.2, 1.5, 2.5
+        _sl_mult, _tp1_mult, _tp2_mult = 1.2, 2.2, 3.5
     elif _reg in ("TRENDING_BULL", "TRENDING_BEAR"):
         _ts = regime.get("trend_strength", "MODERATE")
         if _ts == "STRONG":
-            _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.5, 4.5
+            _sl_mult, _tp1_mult, _tp2_mult = 1.5, 3.5, 5.5
         else:
-            _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.0, 3.5
+            _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.8, 4.5
     elif _reg == "VOLATILE":
-        _sl_mult, _tp1_mult, _tp2_mult = 2.0, 2.0, 3.0
+        _sl_mult, _tp1_mult, _tp2_mult = 2.0, 3.2, 4.5
     else:
-        _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.0, 3.5
+        _sl_mult, _tp1_mult, _tp2_mult = 1.5, 2.8, 4.5
 
     entry = round(c_val, 6)
     sl  = round(c_val - atr_v * _sl_mult,  6) if atr_v and signal == "BUY"  else (
@@ -1568,21 +1595,34 @@ def analyze_candles(
                     sl = round(cluster_max + sl_buffer, 6)
                     reasons.append(f"SL moved above equal-high cluster {cluster_max:.2f}")
 
-    # ── TP market-adaptive : TP1 = prochaine zone de liquidité (EQH/EQL) ──
+    # ── TP scale-out : utiliser la zone de liquidité comme sortie partielle, pas TP1 ──
+    scale_out_tp = None
     if tp1 is not None and atr_v:
         liq = smc.get("liquidity", {})
         if signal == "BUY":
             eqh_zones = [z for z in liq.get("equal_highs", []) if z["price"] > entry]
             if eqh_zones:
                 nearest = min(eqh_zones, key=lambda z: z["price"])
-                tp1 = round(nearest["price"], 6)
-                reasons.append(f"TP1 set to next equal-high {tp1:.2f}")
+                liq_tp = round(nearest["price"], 6)
+                liq_rr = abs(liq_tp - entry) / abs(entry - sl) if sl and abs(entry - sl) > 0 else 0
+                if liq_rr >= 1.5:
+                    tp1 = liq_tp
+                    reasons.append(f"TP1 set to next equal-high {tp1:.2f} (R:R {liq_rr:.2f})")
+                else:
+                    scale_out_tp = liq_tp
+                    reasons.append(f"Scale-out TP at equal-high {liq_tp:.2f} (R:R {liq_rr:.2f} < 1.5, keeping ATR TP1)")
         elif signal == "SELL":
             eql_zones = [z for z in liq.get("equal_lows", []) if z["price"] < entry]
             if eql_zones:
                 nearest = max(eql_zones, key=lambda z: z["price"])
-                tp1 = round(nearest["price"], 6)
-                reasons.append(f"TP1 set to next equal-low {tp1:.2f}")
+                liq_tp = round(nearest["price"], 6)
+                liq_rr = abs(liq_tp - entry) / abs(entry - sl) if sl and abs(entry - sl) > 0 else 0
+                if liq_rr >= 1.5:
+                    tp1 = liq_tp
+                    reasons.append(f"TP1 set to next equal-low {tp1:.2f} (R:R {liq_rr:.2f})")
+                else:
+                    scale_out_tp = liq_tp
+                    reasons.append(f"Scale-out TP at equal-low {liq_tp:.2f} (R:R {liq_rr:.2f} < 1.5, keeping ATR TP1)")
 
     rr  = round(abs(tp1 - entry) / abs(entry - sl), 2) if sl and tp1 and abs(entry - sl) > 0 else None
 
@@ -1802,14 +1842,26 @@ def analyze_candles(
                 _eqh = [z for z in _liq.get("equal_highs", []) if z["price"] > entry]
                 if _eqh:
                     _nearest = min(_eqh, key=lambda z: z["price"])
-                    tp1 = round(_nearest["price"], 6)
-                    reasons.append(f"TP1 set to next equal-high {tp1:.2f}")
+                    _liq_tp = round(_nearest["price"], 6)
+                    _liq_rr = abs(_liq_tp - entry) / abs(entry - sl) if sl and abs(entry - sl) > 0 else 0
+                    if _liq_rr >= 1.5:
+                        tp1 = _liq_tp
+                        reasons.append(f"TP1 set to next equal-high {tp1:.2f} (R:R {_liq_rr:.2f})")
+                    else:
+                        scale_out_tp = _liq_tp
+                        reasons.append(f"Scale-out TP at equal-high {_liq_tp:.2f} (R:R {_liq_rr:.2f} < 1.5, keeping ATR TP1)")
             elif signal == "SELL":
                 _eql = [z for z in _liq.get("equal_lows", []) if z["price"] < entry]
                 if _eql:
                     _nearest = max(_eql, key=lambda z: z["price"])
-                    tp1 = round(_nearest["price"], 6)
-                    reasons.append(f"TP1 set to next equal-low {tp1:.2f}")
+                    _liq_tp = round(_nearest["price"], 6)
+                    _liq_rr = abs(_liq_tp - entry) / abs(entry - sl) if sl and abs(entry - sl) > 0 else 0
+                    if _liq_rr >= 1.5:
+                        tp1 = _liq_tp
+                        reasons.append(f"TP1 set to next equal-low {tp1:.2f} (R:R {_liq_rr:.2f})")
+                    else:
+                        scale_out_tp = _liq_tp
+                        reasons.append(f"Scale-out TP at equal-low {_liq_tp:.2f} (R:R {_liq_rr:.2f} < 1.5, keeping ATR TP1)")
 
         # ── Recalculate rr + predictive metrics after liquidity-aware refinement ──
         # sl and tp1 may have changed from ATR-based to liquidity zone-based,
@@ -2012,6 +2064,44 @@ def analyze_candles(
         rr = None
         reasons.append(f"[RED FLAGS] {_red_flags.get('warning', 'Projet à risque extrême')}")
 
+    # ── Signal Quality Gate (6-layer filter) ──────────────────────
+    _quality_gate = apply_quality_gate(
+        signal=signal,
+        asset_type=asset_type,
+        symbol=symbol,
+        entry=entry,
+        tp1=tp1,
+        df=df,
+        session_info=session_info,
+        liquidity_data=_final_liquidity,
+    )
+    if not _quality_gate["passed"]:
+        _reject_reasons = [r["reason"] for r in _quality_gate["rejected_layers"]]
+        logger.info(
+            "quality_gate.rejected",
+            symbol=symbol,
+            asset_type=asset_type,
+            signal=signal,
+            layers=[r["layer"] for r in _quality_gate["rejected_layers"]],
+            reasons=_reject_reasons,
+        )
+        signal = "NEUTRAL"
+        confidence = 0
+        sl = None
+        tp1 = None
+        tp2 = None
+        rr = None
+        reasons.append(f"[QUALITY GATE] {' | '.join(_reject_reasons)}")
+    else:
+        if _quality_gate["confidence_penalty"] > 0:
+            confidence = int(confidence * (1.0 - _quality_gate["confidence_penalty"]))
+            if confidence < 40:
+                signal = "NEUTRAL"
+                confidence = 0
+                reasons.append("[QUALITY GATE] Confidence trop basse après pénalité qualité")
+        if _quality_gate["quality_flags"]:
+            reasons.append(f"[QUALITY] {' | '.join(_quality_gate['quality_flags'])}")
+
     result = {
         "symbol":       symbol,
         "strategy_id":  strategy_id,
@@ -2037,6 +2127,7 @@ def analyze_candles(
         "stop_loss":    sl,
         "take_profit_1": tp1,
         "take_profit_2": tp2,
+        "scale_out_tp": scale_out_tp,
         "risk_reward":  rr,
         "explanation":  " | ".join(reasons) or "No clear setup",
         "indicators": {
@@ -2164,6 +2255,8 @@ def analyze_candles(
         "moonshot_tp": _compute_moonshot_tp(signal, entry, tp1, tp2, _final_mcap_tier) if signal != "NEUTRAL" else None,
         "dca_tranches": compute_dca_tranches(signal, entry if signal != "NEUTRAL" else None, fear_greed_value) if signal != "NEUTRAL" else None,
         "scale_out": compute_scale_out(signal, entry if signal != "NEUTRAL" else None, fear_greed_value) if signal != "NEUTRAL" else None,
+        "quality_score": _quality_gate.get("quality_score", 0),
+        "quality_flags": _quality_gate.get("quality_flags", []),
         "correlation_id": corr_id,
     }
 

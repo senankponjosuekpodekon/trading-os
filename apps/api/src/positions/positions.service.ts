@@ -413,6 +413,142 @@ export class PositionsService {
     return portfolio;
   }
 
+  // ── Execution Gate ──────────────────────────────────────────────
+  // Validates that a signal is still executable at the current live price.
+  // Checks: expiration, entry zone, SL/TP coherence, minimum R:R.
+  // MIN_RR is warn-only initially — logs but does not block.
+  private _validateExecutionGate(
+    signal: any,
+    livePrice: number,
+    portfolioType: 'PAPER' | 'LIVE',
+  ): { ok: boolean; reason?: string; zone?: { lower: number; upper: number; optimal: number } } {
+    const MIN_RR = 1.0;
+    const MIN_RR_BLOCK = 1.5;
+    const isBuy = signal.signal === 'BUY';
+    const signalEntry = signal.entryPrice ? parseFloat(signal.entryPrice.toString()) : null;
+    const sl = signal.stopLoss ? parseFloat(signal.stopLoss.toString()) : null;
+    const tp1 = signal.takeProfit1 ? parseFloat(signal.takeProfit1.toString()) : null;
+
+    // 1. Expiration check
+    if (signal.expiresAt && new Date(signal.expiresAt) < new Date()) {
+      this.logger.warn(
+        `GATE REJECT [EXPIRED] signal=${signal.id} symbol=${signal.asset?.symbol} ` +
+        `expiresAt=${signal.expiresAt} now=${new Date().toISOString()} ` +
+        `tf=${signal.timeframe} type=${portfolioType}`,
+      );
+      return { ok: false, reason: `Signal expired at ${signal.expiresAt}` };
+    }
+
+    if (!signalEntry || !sl || !tp1) {
+      // Not enough data to gate — allow through but log
+      this.logger.warn(
+        `GATE SKIP [MISSING_DATA] signal=${signal.id} ` +
+        `entry=${signalEntry} sl=${sl} tp1=${tp1} type=${portfolioType}`,
+      );
+      return { ok: true };
+    }
+
+    // 2. Compute entry zone from SL, TP1, MIN_RR
+    //    Zone lower bound = signalEntry - ATR_noise (adverse side)
+    //    Zone upper bound derived from MIN_RR: maxEntry such that R:R >= MIN_RR
+    //    For BUY: R:R = (tp1 - entry) / (entry - sl) >= MIN_RR
+    //      => entry <= tp1 - MIN_RR * (signalEntry - sl)  [upper bound from TP1]
+    //      => entry >= sl + (tp1 - signalEntry) / MIN_RR  [lower bound from SL coherence]
+    //    For SELL: mirrored
+    const slDist = Math.abs(signalEntry - sl);
+    const tpDist = Math.abs(tp1 - signalEntry);
+    const noiseFloor = slDist * 0.15; // 15% of SL distance as noise tolerance
+
+    let zoneLower: number, zoneUpper: number;
+    if (isBuy) {
+      zoneLower = signalEntry - noiseFloor;
+      zoneUpper = sl + tpDist / MIN_RR; // max entry where R:R >= MIN_RR
+      // Also cap upper bound at signalEntry + noiseFloor (don't accept too favorable either)
+      zoneUpper = Math.min(zoneUpper, signalEntry + noiseFloor);
+    } else {
+      zoneLower = sl - tpDist / MIN_RR;
+      zoneLower = Math.max(zoneLower, signalEntry - noiseFloor);
+      zoneUpper = signalEntry + noiseFloor;
+    }
+
+    const zone = { lower: zoneLower, upper: zoneUpper, optimal: (zoneLower + zoneUpper) / 2 };
+
+    // 3. Validate livePrice within entry zone
+    if (livePrice < zoneLower || livePrice > zoneUpper) {
+      this.logger.warn(
+        `GATE REJECT [OUT_OF_ZONE] signal=${signal.id} symbol=${signal.asset?.symbol} ` +
+        `livePrice=${livePrice} zone=[${zoneLower.toFixed(6)}, ${zoneUpper.toFixed(6)}] ` +
+        `signalEntry=${signalEntry} sl=${sl} tp1=${tp1} ` +
+        `isBuy=${isBuy} type=${portfolioType}`,
+      );
+      return { ok: false, reason: `Price ${livePrice} outside entry zone [${zoneLower.toFixed(4)}, ${zoneUpper.toFixed(4)}]`, zone };
+    }
+
+    // 4. SL/TP coherence relative to livePrice
+    if (isBuy && livePrice >= sl) {
+      this.logger.warn(
+        `GATE REJECT [SL_ABOVE_ENTRY] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
+      );
+      return { ok: false, reason: `Live price ${livePrice} is at or above stop loss ${sl} for BUY`, zone };
+    }
+    if (!isBuy && livePrice <= sl) {
+      this.logger.warn(
+        `GATE REJECT [SL_BELOW_ENTRY] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
+      );
+      return { ok: false, reason: `Live price ${livePrice} is at or below stop loss ${sl} for SELL`, zone };
+    }
+
+    // 5. R:R check at livePrice (warn-only for now)
+    const liveRR = isBuy
+      ? (tp1 - livePrice) / (livePrice - sl)
+      : (livePrice - tp1) / (sl - livePrice);
+
+    if (liveRR < MIN_RR_BLOCK) {
+      this.logger.warn(
+        `GATE WARN [LOW_RR] signal=${signal.id} symbol=${signal.asset?.symbol} ` +
+        `liveRR=${liveRR.toFixed(2)} threshold=${MIN_RR_BLOCK} ` +
+        `livePrice=${livePrice} sl=${sl} tp1=${tp1} type=${portfolioType}`,
+      );
+      // Warn-only: do not block yet
+    }
+
+    this.logger.log(
+      `GATE PASS signal=${signal.id} symbol=${signal.asset?.symbol} ` +
+      `livePrice=${livePrice} zone=[${zoneLower.toFixed(6)}, ${zoneUpper.toFixed(6)}] ` +
+      `liveRR=${liveRR.toFixed(2)} type=${portfolioType}`,
+    );
+
+    return { ok: true, zone };
+  }
+
+  async checkGate(signalId: string, livePrice?: number) {
+    const signal = await this.prisma.signal.findUnique({
+      where: { id: signalId },
+      include: { asset: true },
+    });
+    if (!signal) throw new NotFoundException('Signal not found');
+
+    const signalEntry = signal.entryPrice ? parseFloat(signal.entryPrice.toString()) : null;
+    const price = livePrice ?? signalEntry;
+    if (!price) {
+      return { signalId, valid: false, reason: 'No entry price available', zone: null };
+    }
+
+    const result = this._validateExecutionGate(signal, price, 'PAPER');
+    return {
+      signalId,
+      symbol: signal.asset?.symbol,
+      signal: signal.signal,
+      valid: result.ok,
+      reason: result.reason ?? null,
+      zone: result.zone ?? null,
+      livePrice: price,
+      signalEntry,
+      expiresAt: signal.expiresAt,
+      timeframe: signal.timeframe,
+    };
+  }
+
   async openFromSignal(userId: string, signalId: string, portfolioType: 'PAPER' | 'LIVE' = 'PAPER', livePrice?: number) {
     const signal = await this.prisma.signal.findUnique({
       where: { id: signalId },
@@ -449,6 +585,12 @@ export class PositionsService {
       ? livePrice
       : signalEntry;
     if (!entryPrice) throw new BadRequestException('Signal has no entry price and no live price provided');
+
+    // ── Execution Gate: validate signal is still executable at current price ──
+    const gateResult = this._validateExecutionGate(signal, entryPrice, portfolioType);
+    if (!gateResult.ok) {
+      throw new BadRequestException(`Execution gate rejected: ${gateResult.reason}`);
+    }
 
     const slPrice = signal.stopLoss ? parseFloat(signal.stopLoss.toString()) : null;
     const slDist  = slPrice ? Math.abs(entryPrice - slPrice) : entryPrice * 0.015;

@@ -34,6 +34,17 @@ export class SignalsService {
     private expectedMove: ExpectedMoveService,
   ) {}
 
+  private _ttlForTimeframe(tf: string | undefined | null): number {
+    const TTL_MAP: Record<string, number> = {
+      '5m':  10,
+      '15m': 25,
+      '1h':  90,
+      '4h':  360,
+      '1d':  720,
+    };
+    return TTL_MAP[tf ?? ''] ?? 240;
+  }
+
   private async predictMlRegime(symbol?: string, timeframe?: string): Promise<string | null> {
     // Fetch real historical closes from the engine instead of fabricating prices
     const sym = symbol ?? 'BTC/USDT';
@@ -537,9 +548,12 @@ export class SignalsService {
             moonshot_tp:       r.moonshot_tp ?? null,
             dca_tranches:      r.dca_tranches ?? null,
             scale_out:         r.scale_out ?? null,
+            scale_out_tp:      r.scale_out_tp ?? null,
+            quality_score:     r.quality_score ?? null,
+            quality_flags:     r.quality_flags ?? null,
           },
           explanation: r.explanation,
-          expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + this._ttlForTimeframe(r.timeframe) * 60 * 1000),
         },
         include: {
           asset: { select: { symbol: true, name: true } },

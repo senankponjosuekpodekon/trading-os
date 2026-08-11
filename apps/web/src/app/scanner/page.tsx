@@ -317,6 +317,15 @@ export default function ScannerPage() {
                         EN CONFIRMATION
                       </span>
                     )}
+                    {entry.quality_score != null && entry.quality_score > 0 && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium border ${
+                        entry.quality_score >= 70 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                        entry.quality_score >= 40 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' :
+                        'bg-red-500/10 text-red-400 border-red-500/30'
+                      }`} title={entry.quality_flags?.join(' | ') ?? ''}>
+                        Q{entry.quality_score}
+                      </span>
+                    )}
                     {entry.explanation && (
                       <span className="text-xs text-gray-500 truncate flex-1" title={entry.explanation}>{entry.explanation}</span>
                     )}

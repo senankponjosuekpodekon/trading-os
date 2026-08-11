@@ -28,6 +28,16 @@ export class PositionsController {
     return this.positionsService.openFromSignal(req.user.id, signalId, type || 'PAPER', livePrice);
   }
 
+  @Get('gate/:signalId')
+  checkGate(
+    @Request() req: any,
+    @Param('signalId') signalId: string,
+    @Query('livePrice') livePrice?: string,
+  ) {
+    const price = livePrice ? parseFloat(livePrice) : undefined;
+    return this.positionsService.checkGate(signalId, price);
+  }
+
   @Get()
   findByPortfolio(
     @Request() req: any,
