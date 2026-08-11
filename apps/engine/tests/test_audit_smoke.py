@@ -34,37 +34,45 @@ class TestDisciplineControllerBridge:
         from risk.discipline_controller import DisciplineController
         dc = DisciplineController(capital=10_000)
         dc.update_capital(8_000)
-        ks = dc.kill_switch.update(8_000)
-        # KillSwitch should see the updated capital
-        assert ks is not None
+        # Check internal state directly — do NOT re-call .update() which would
+        # overwrite regardless of whether update_capital propagated.
+        assert dc.kill_switch.current_capital == 8_000
 
     def test_update_capital_propagates_to_drawdown(self):
         from risk.discipline_controller import DisciplineController
         dc = DisciplineController(capital=10_000)
         dc.update_capital(8_000)
-        dd = dc.drawdown.update(8_000)
-        assert dd is not None
+        # Check internal state directly — do NOT re-call .update()
+        assert dc.drawdown.current_capital == 8_000
 
     def test_record_trade_result_calls_all_modules(self):
         from risk.discipline_controller import DisciplineController
         dc = DisciplineController(capital=10_000)
-        # Should not raise
         dc.record_trade_result(500)
         dc.record_trade_result(-200)
+        # Verify performance monitor actually recorded both trades
+        assert dc.performance._all_trades == [500, -200]
+        # Verify kill_switch saw the loss (consecutive_losses incremented)
+        assert dc.kill_switch.consecutive_losses == 1
+        # Verify cooldown saw the loss
+        assert dc.cooldown.consecutive_losses == 1
 
     def test_record_daily_return_calls_tail_risk(self):
         from risk.discipline_controller import DisciplineController
         dc = DisciplineController(capital=10_000)
         dc.record_daily_return(2.5)
-        tr = dc.tail_risk.update()
-        assert tr is not None
+        # Verify tail_risk actually stored the return value
+        assert 2.5 in dc.tail_risk._returns or len(dc.tail_risk._returns) > 0
 
     def test_register_unregister_position(self):
         from risk.discipline_controller import DisciplineController
         dc = DisciplineController(capital=10_000)
         dc.register_position("BTC/USDT", "BUY")
+        # Verify position is actually tracked in correlation manager
+        assert "BTC/USDT" in dc.correlation._open_positions
         dc.unregister_position("BTC/USDT")
-        # Should not raise
+        # Verify position was removed
+        assert "BTC/USDT" not in dc.correlation._open_positions
 
     def test_endpoints_exist_in_risk_router(self):
         """Verify the 4 FastAPI endpoints are registered."""
@@ -87,8 +95,11 @@ class TestCorrelationManagerFeeding:
         cm = CorrelationManager()
         prices = pd.Series([100, 102, 101, 103, 104, 102, 105, 106, 104, 107])
         cm.update_price_history("BTC/USDT", prices)
-        # Internal history should now contain the symbol
-        assert "BTC/USDT" in cm._price_history or len(cm._price_history) > 0
+        # Internal history must contain the exact symbol and the exact data
+        assert "BTC/USDT" in cm._price_history
+        stored = cm._price_history["BTC/USDT"]
+        assert len(stored) == 10
+        assert stored.iloc[0] == 100
 
     def test_update_price_history_multiple_symbols(self):
         import pandas as pd
@@ -98,8 +109,20 @@ class TestCorrelationManagerFeeding:
         eth = pd.Series([50 + i * 0.5 for i in range(20)])
         cm.update_price_history("BTC/USDT", btc)
         cm.update_price_history("ETH/USDT", eth)
-        # Both should be stored
-        assert len(cm._price_history) >= 2
+        # Both must be stored under their exact keys
+        assert "BTC/USDT" in cm._price_history
+        assert "ETH/USDT" in cm._price_history
+        assert len(cm._price_history) == 2
+
+    def test_scan_py_calls_update_price_history_in_fetch_and_analyze(self):
+        """Verify scan.py source contains update_price_history calls in both paths."""
+        import inspect
+        from routers import scan
+        source = inspect.getsource(scan)
+        # Both the single-symbol path and scan_multi must call update_price_history
+        assert source.count("update_price_history") >= 2, (
+            "scan.py must call update_price_history at least twice (fetch_and_analyze + scan_multi)"
+        )
 
 
 # ─── #79: AlphaAgent token_grade ──────────────────────────────────────────────
@@ -164,11 +187,11 @@ class TestRegimeFilterStrategyMap:
         "ema_trend_+_rsi",
         "macd_momentum",
         "swing_trend_follow",
+        "bollinger_squeeze_breakout",
         "smc_retest_ob/fvg",
         "scalper_rsi_reversal",
         "brvm_value_swing",
         "synthetic_mean_reversion",
-        # 8th: a strategy not in the map should still work via "default"
     ]
 
     def test_all_mapped_strategies_resolve(self):
@@ -273,15 +296,21 @@ class TestComputeCalmar:
         # total_return = 0.2, max_dd = 0.1 → calmar = 2.0
         assert calmar == pytest.approx(2.0, abs=0.1)
 
-    def test_calmar_no_trades_does_not_inflate(self):
-        """If there were many trades, calmar should NOT be multiplied by trade count."""
+    def test_calmar_with_drawdown_not_inflated_by_trade_count(self):
+        """Calmar with many trades and a real drawdown must NOT be multiplied by N trades."""
         from ml.scientific_backtest import compute_calmar
-        # Same equity curve but we simulate many periods
+        # Equity: 10000 → dip to 9000 → recover to 11000 (10% total return)
+        # Repeat this pattern 50 times to simulate many trades
+        # Peak = 11000, trough = 9000 → max_dd = 2000/11000 ≈ 18.18%
+        # calmar = 0.1 / 0.1818 ≈ 0.55
         equity = [10000]
-        for i in range(100):
-            equity.append(equity[-1] * 1.002)  # tiny growth each step
-        returns = [0.2] * 100
+        for i in range(50):
+            equity.append(11000)   # peak
+            equity.append(9000)    # 18.18% DD from peak
+        equity.append(11000)       # end at 10% total return
+        returns = [10.0, -20.0] * 50
         calmar = compute_calmar(returns, equity)
-        # total_return ≈ 22%, max_dd ≈ 0 → inf or very large
-        # The key assertion: it should NOT be 22% * 100 = 2200 (which would be annualised by count)
-        assert calmar != pytest.approx(22.0 * 100, abs=1.0)
+        # If annualised by trade count (100 trades), it would be ~55.0
+        assert calmar == pytest.approx(0.55, abs=0.1), (
+            f"Calmar should be ~0.55 (raw ratio), got {calmar} — may be annualised by trade count"
+        )

@@ -119,6 +119,7 @@ class RegimeFilter:
         "ema_trend_+_rsi": "trend_follow",
         "macd_momentum": "trend_follow",
         "swing_trend_follow": "trend_follow",
+        "bollinger_squeeze_breakout": "breakout",
         "smc_retest_ob/fvg": "reversal",
         "scalper_rsi_reversal": "scalp",
         "brvm_value_swing": "trend_follow",
