@@ -7,7 +7,7 @@ import {
   Settings, LogOut, Zap, FlaskConical, LineChart, Brain, Globe, Activity, Beaker, MessageSquare,
   ShieldAlert, Trophy, Search, Cpu, Calendar, Database, SlidersHorizontal, DatabaseBackup, BarChart3, Eye,
   Radio, Key, Send, Newspaper,
-  Gem, Scale, Youtube, Rocket, Users,
+  Gem, Scale, Youtube, Rocket, Users, FileText,
   ChevronDown, type LucideIcon,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
@@ -57,6 +57,7 @@ const groups: NavGroup[] = [
       { href: '/scientific-backtest', label: 'Scientific',  icon: BarChart3 },
       { href: '/lab',                 label: 'Lab',         icon: Beaker },
       { href: '/phase-b',             label: 'Phase B',     icon: Layers },
+      { href: '/reports',             label: 'Rapports',    icon: FileText },
     ],
   },
   {

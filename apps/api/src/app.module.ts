@@ -42,6 +42,7 @@ import { ExecutionModule } from './execution/execution.module';
 import { SignalChannelsModule } from './signal-channels/signal-channels.module';
 import { SignalDistributionModule } from './signal-distribution/signal-distribution.module';
 import { AdminModule } from './admin/admin.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { AdminModule } from './admin/admin.module';
     SignalDistributionModule,
     SecurityModule,
     AdminModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [

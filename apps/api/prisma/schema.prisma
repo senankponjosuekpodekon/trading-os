@@ -706,3 +706,15 @@ model ScanHistory {
   @@index([scannedAt])
   @@map("scan_history")
 }
+
+model DailyReport {
+  id           String   @id @default(cuid())
+  date         DateTime @map("report_date")
+  data         Json     @map("report_data")
+  summary      String
+  interpretation String? @map("interpretation")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([date])
+  @@map("daily_reports")
+}
