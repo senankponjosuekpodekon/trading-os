@@ -7,10 +7,12 @@ import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { OHLCBar, ChartMarker, Drawing, IndicatorSeries, PriceLevel, SmcZone } from '@/components/chart/CandlestickChart';
 import { DrawingToolbar, DrawingTool } from '@/components/chart/DrawingToolbar';
+import { SignalDetailPanel } from '@/components/chart/SignalDetailPanel';
+import { detectChartPatterns, patternsToMarkers, ChartPattern } from '@/components/chart/patternDetection';
 import { Signal } from '@/types';
 import { useTradingStore } from '@/store/trading.store';
 import { api } from '@/lib/api';
-import { RefreshCw, TrendingUp, TrendingDown, Minus, BarChart2, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, Minus, BarChart2, Eye, EyeOff, ArrowLeft, Shapes } from 'lucide-react';
 
 const CandlestickChart = dynamic(
   () => import('@/components/chart/CandlestickChart').then(mod => mod.CandlestickChart),
@@ -218,6 +220,8 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
   const [showMacd,      setShowMacd]      = useState(false);
   const [showSmc,       setShowSmc]       = useState(false);
   const [showMtf,       setShowMtf]       = useState(false);
+  const [showPatterns,  setShowPatterns]  = useState(true);
+  const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [activeGroup, setActiveGroup] = useState(
     SYMBOL_GROUPS.find(g => g.symbols.includes(symbol))?.label ?? SYMBOL_GROUPS[0].label
   );
@@ -305,6 +309,13 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
   const structureMarkers = useStructureAnnotations(klines);
   const liquidityLevels = useLiquidityLevels(klines);
 
+  const chartPatterns: ChartPattern[] = useMemo(() => {
+    if (!klines || klines.length < 30) return [];
+    return detectChartPatterns(klines);
+  }, [klines]);
+
+  const patternMarkers = useMemo(() => patternsToMarkers(chartPatterns), [chartPatterns]);
+
   const indicators: IndicatorSeries = useMemo(() => {
     if (!klines || klines.length < 50) return {};
     const times  = klines.map(b => b.time as number);
@@ -382,9 +393,10 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
   const allMarkers = useMemo(() => {
     const base = [...signalMarkers];
     if (showAnnotations) base.push(...structureMarkers);
+    if (showPatterns) base.push(...patternMarkers);
     base.push(...scenarioMarkers);
     return base;
-  }, [signalMarkers, structureMarkers, scenarioMarkers, showAnnotations]);
+  }, [signalMarkers, structureMarkers, scenarioMarkers, showAnnotations, patternMarkers, showPatterns]);
 
   const allLevels = useMemo(() => {
     const base = showLevels ? signalLevels : [];
@@ -505,6 +517,13 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
             </button>
           )}
 
+          <button onClick={() => setShowPatterns(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${showPatterns ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'}`}>
+            {showPatterns ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            <Shapes className="w-3.5 h-3.5" />
+            Figures
+          </button>
+
           <button onClick={() => setShowMtf(v => !v)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${showMtf ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'}`}>
             {showMtf ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
@@ -614,10 +633,11 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
 
         {signals && signals.filter(s => s.asset?.symbol === symbol).length > 0 && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <p className="text-xs text-gray-500 mb-3 font-medium">Signaux récents — {symbol}</p>
+            <p className="text-xs text-gray-500 mb-3 font-medium">Signaux récents — {symbol} (cliquez pour détails)</p>
             <div className="space-y-2">
               {signals.filter(s => s.asset?.symbol === symbol).slice(0, 5).map(s => (
-                <div key={s.id} className="flex items-center justify-between">
+                <button key={s.id} onClick={() => setSelectedSignal(s)}
+                  className={`w-full flex items-center justify-between p-2 rounded-lg transition-colors ${selectedSignal?.id === s.id ? 'bg-emerald-950 border border-emerald-800' : 'hover:bg-gray-800'}`}>
                   <div className="flex items-center gap-2">
                     <SignalBadge signal={s.signal} />
                     <span className="text-gray-500 text-xs">{s.timeframe}</span>
@@ -631,12 +651,36 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
                   <span className="text-gray-600 text-xs">
                     {new Date(s.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                   </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Chart patterns detected */}
+        {showPatterns && chartPatterns.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-xs text-gray-500 mb-3 font-medium flex items-center gap-1.5"><Shapes className="w-3.5 h-3.5 text-purple-400" /> Figures chartistes détectées</p>
+            <div className="space-y-2">
+              {chartPatterns.map((p, i) => (
+                <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-gray-800/50">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                      p.direction === 'bullish' ? 'bg-emerald-500/10 text-emerald-400' :
+                      p.direction === 'bearish' ? 'bg-red-500/10 text-red-400' :
+                      'bg-gray-600 text-gray-300'
+                    }`}>{p.type}</span>
+                    <span className="text-xs text-gray-500">{p.confidence}%</span>
+                  </div>
+                  <span className="text-xs text-gray-600">{p.description}</span>
                 </div>
               ))}
             </div>
           </div>
         )}
       </div>
+
+      <SignalDetailPanel signal={selectedSignal} onClose={() => setSelectedSignal(null)} />
     </AppLayout>
   );
 }
