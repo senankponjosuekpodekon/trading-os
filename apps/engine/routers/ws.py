@@ -47,8 +47,10 @@ DERIV_WS_URL = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
 
 _price_clients:  Set[WebSocket] = set()
 _signal_clients: Set[WebSocket] = set()
+_pattern_clients: Set[WebSocket] = set()
 _last_prices:    dict = {}
 _last_signals:   list = []
+_last_patterns:  list = []
 
 
 async def broadcast(clients: Set[WebSocket], payload: dict):
@@ -213,6 +215,38 @@ async def _broadcast_signals(signals: list):
         await broadcast(_signal_clients, {"type": "signals", "data": signals})
 
 
+def broadcast_pattern(pattern: dict):
+    """Appelé par scan.py quand un pattern chartiste est détecté — diffuse à tous les clients WS connectés
+    et pousse une notification SSE via l'API."""
+    global _last_patterns
+    _last_patterns.append(pattern)
+    if len(_last_patterns) > 100:
+        _last_patterns = _last_patterns[-100:]
+    asyncio.create_task(_broadcast_patterns(pattern))
+    asyncio.create_task(_notify_api_pattern(pattern))
+
+
+async def _broadcast_patterns(pattern: dict):
+    if _pattern_clients:
+        await broadcast(_pattern_clients, {"type": "pattern_detected", "data": pattern})
+
+
+async def _notify_api_pattern(pattern: dict):
+    """Push pattern alert to API /api/notifications/internal/pattern (fire-and-forget)."""
+    import os
+    api_url = os.environ.get("API_URL", "http://api:3001")
+    engine_key = os.environ.get("ENGINE_API_KEY", "")
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            await client.post(
+                f"{api_url}/api/notifications/internal/pattern",
+                json=pattern,
+                headers={"X-Engine-Key": engine_key},
+            )
+    except Exception:
+        pass
+
+
 @router.get("/prices/latest")
 async def prices_latest(symbols: str = ""):
     """
@@ -257,3 +291,18 @@ async def ws_signals(websocket: WebSocket):
         pass
     finally:
         _signal_clients.discard(websocket)
+
+
+@router.websocket("/ws/patterns")
+async def ws_patterns(websocket: WebSocket):
+    await websocket.accept()
+    _pattern_clients.add(websocket)
+    if _last_patterns:
+        await websocket.send_text(json.dumps({"type": "patterns", "data": _last_patterns[-20:]}))
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        pass
+    finally:
+        _pattern_clients.discard(websocket)

@@ -12,7 +12,7 @@ import { WebSocket as WsClient, WebSocketServer } from 'ws';
  * partagée (broadcast) entre tous les clients frontend — évite de multiplier
  * les connexions vers l'engine.
  */
-type Channel = 'prices' | 'signals';
+type Channel = 'prices' | 'signals' | 'patterns';
 
 class ChannelProxy {
   private wss?: WebSocketServer;
@@ -120,6 +120,7 @@ export class PricesProxyService implements OnModuleDestroy {
     this.channels = [
       new ChannelProxy('prices', `${wsBase}/ws/prices`, allowedOrigins, this.logger),
       new ChannelProxy('signals', `${wsBase}/ws/signals`, allowedOrigins, this.logger),
+      new ChannelProxy('patterns', `${wsBase}/ws/patterns`, allowedOrigins, this.logger),
     ];
 
     const wssByPath = new Map<string, WebSocketServer>();

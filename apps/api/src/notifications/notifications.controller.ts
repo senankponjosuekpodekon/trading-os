@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Query, Sse, UseGuards, Request, MessageEvent, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Query, Headers, Sse, UseGuards, Request, MessageEvent, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -80,5 +80,26 @@ export class NotificationsController {
   @Post('preferences/test-discord')
   testDiscord(@Request() req: any) {
     return this.prefService.sendTestDiscord(req.user.id);
+  }
+
+  @Post('internal/pattern')
+  internalPatternAlert(@Body() body: any, @Headers() headers: any) {
+    const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
+    const providedKey = headers['x-engine-key'] || '';
+    if (!engineKey || providedKey !== engineKey) {
+      throw new UnauthorizedException('Invalid engine key');
+    }
+    if (!body?.symbol || !body?.name) {
+      throw new BadRequestException('symbol and name are required');
+    }
+    const direction = body.direction || 'NEUTRAL';
+    const timeframe = body.timeframe || 'unknown';
+    return this.notificationsService.push({
+      userId: '*',
+      type: 'ALERT',
+      title: `Pattern détecté: ${body.name} (${direction})`,
+      message: `${body.symbol} — ${body.name} ${direction} sur ${timeframe}${body.confluenceScore ? ` — Confluence: ${body.confluenceScore}%` : ''}`,
+      data: body,
+    });
   }
 }

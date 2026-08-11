@@ -1272,6 +1272,20 @@ def analyze_candles(
     chart_patterns = detect_chart_patterns(df) if len(df) >= 15 else []
     if chart_patterns:
         reasons.append(f"Pattern chartiste détecté: {chart_patterns[0]['name']} ({chart_patterns[0]['direction']})")
+        from routers.ws import broadcast_pattern
+        for p in chart_patterns:
+            broadcast_pattern({
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "name": p.get("name"),
+                "category": p.get("category"),
+                "direction": p.get("direction"),
+                "confidence": p.get("confidence"),
+                "entry": p.get("entry"),
+                "stop_loss": p.get("stop_loss"),
+                "targets": p.get("targets"),
+                "prz": p.get("prz"),
+            })
     if temp_signal != "NEUTRAL":
         b, r = patterns_bonus(pats, temp_signal)
         score += b
@@ -1878,6 +1892,24 @@ def analyze_candles(
             scored_patterns.append(p)
         scored_patterns.sort(key=lambda x: x.get("confluenceScore", 0), reverse=True)
         chart_patterns = scored_patterns
+
+        # ── Broadcast pattern alerts via WebSocket ──
+        from routers.ws import broadcast_pattern
+        for p in chart_patterns:
+            broadcast_pattern({
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "name": p.get("name"),
+                "category": p.get("category"),
+                "direction": p.get("direction"),
+                "confidence": p.get("confidence"),
+                "confluenceScore": p.get("confluenceScore"),
+                "confluenceTags": p.get("confluenceTags"),
+                "entry": p.get("entry"),
+                "stop_loss": p.get("stop_loss"),
+                "targets": p.get("targets"),
+                "prz": p.get("prz"),
+            })
 
     # --- Predictive metrics for default hardcoded path (Sprint 4) ---
     if not strategy:
