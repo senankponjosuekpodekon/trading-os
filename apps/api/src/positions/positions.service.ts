@@ -577,7 +577,11 @@ export class PositionsService {
 
     const capital    = parseFloat(portfolio.currentCapital.toString());
     const riskPct    = 0.01;  // 1% risque par défaut
-    const riskAmt    = capital * riskPct;
+    // Quality-based sizing: reduce position size for lower-quality signals
+    const qualityMultiplier = (signal as any).metadata?.quality_size_multiplier
+      ? parseFloat((signal as any).metadata.quality_size_multiplier)
+      : 1.0;
+    const riskAmt    = capital * riskPct * qualityMultiplier;
     // Paper trading: utiliser le prix live du marché si fourni (norme: prix au moment du clic, pas au moment du signal)
     // Live trading: utiliser le prix du signal (l'exchange exécutera au prix réel du marché)
     const signalEntry = signal.entryPrice ? parseFloat(signal.entryPrice.toString()) : null;

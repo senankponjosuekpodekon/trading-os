@@ -53,7 +53,7 @@ from risk.engine import get_risk_engine
 from risk.discipline_controller import TradeDecision
 from risk.market_cap import fetch_market_cap_tier, get_market_cap_tier_sync
 from risk.liquidity import compute_liquidity_score, estimate_liquidity_score_sync
-from risk.signal_quality_filter import apply_quality_gate
+from risk.signal_quality_filter import apply_quality_gate, get_quality_size_multiplier
 from risk.risk_level import compute_risk_level, get_max_position_pct
 from risk.red_flags import check_red_flags
 from risk.dca_tranches import compute_dca_tranches, compute_scale_out
@@ -99,6 +99,7 @@ async def _persist_scan_redis(result: dict, timeframe: str) -> None:
             "asset_type": result.get("asset_type"),
             "quality_score": result.get("quality_score", 0),
             "quality_flags": result.get("quality_flags", []),
+            "quality_size_multiplier": result.get("quality_size_multiplier", 0),
             "scanned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         key = "scan_history:recent"
@@ -124,6 +125,7 @@ async def _queue_scan_for_batch(result: dict, timeframe: str) -> None:
         "persistence_score": float(result.get("persistence_score", 0)),
         "asset_type": result.get("asset_type"),
         "quality_score": int(result.get("quality_score", 0)),
+        "quality_size_multiplier": float(result.get("quality_size_multiplier", 0)),
     }
     async with _scan_batch_lock:
         _scan_batch.append(entry)
@@ -1026,7 +1028,7 @@ def analyze_candles(
     # — no EMA/RSI/MACD trend-following, only spike/mean-reversion stats
     if asset_type == "SYNTHETIC":
         _syn_result = _analyze_synthetic_candles(symbol, timeframe, df, strategy=strategy)
-        # Apply quality gate (session=None for synthetics, volume from df)
+        # Apply quality gate (14-layer filter) for synthetics
         _syn_gate = apply_quality_gate(
             signal=_syn_result.get("signal", "NEUTRAL"),
             asset_type="SYNTHETIC",
@@ -1036,6 +1038,10 @@ def analyze_candles(
             df=df,
             session_info=session_info,
             liquidity_data=estimate_liquidity_score_sync(symbol, "SYNTHETIC", df),
+            regime=None,
+            atr_value=_syn_result.get("atr_value"),
+            onchain_context=None,
+            dxy_data=None,
         )
         _syn_result["quality_score"] = _syn_gate.get("quality_score", 0)
         _syn_result["quality_flags"] = _syn_gate.get("quality_flags", [])
@@ -2064,7 +2070,7 @@ def analyze_candles(
         rr = None
         reasons.append(f"[RED FLAGS] {_red_flags.get('warning', 'Projet à risque extrême')}")
 
-    # ── Signal Quality Gate (6-layer filter) ──────────────────────
+    # ── Signal Quality Gate (14-layer filter) ─────────────────────
     _quality_gate = apply_quality_gate(
         signal=signal,
         asset_type=asset_type,
@@ -2074,6 +2080,11 @@ def analyze_candles(
         df=df,
         session_info=session_info,
         liquidity_data=_final_liquidity,
+        news_context=news_context if news_context else (forex_context if forex_context else None),
+        regime=regime,
+        atr_value=atr_v,
+        onchain_context=onchain.get("context") if onchain else None,
+        dxy_data=gold_dxy,
     )
     if not _quality_gate["passed"]:
         _reject_reasons = [r["reason"] for r in _quality_gate["rejected_layers"]]
@@ -2257,6 +2268,7 @@ def analyze_candles(
         "scale_out": compute_scale_out(signal, entry if signal != "NEUTRAL" else None, fear_greed_value) if signal != "NEUTRAL" else None,
         "quality_score": _quality_gate.get("quality_score", 0),
         "quality_flags": _quality_gate.get("quality_flags", []),
+        "quality_size_multiplier": get_quality_size_multiplier(_quality_gate.get("quality_score", 0)) if signal != "NEUTRAL" else 0,
         "correlation_id": corr_id,
     }
 

@@ -551,6 +551,7 @@ export class SignalsService {
             scale_out_tp:      r.scale_out_tp ?? null,
             quality_score:     r.quality_score ?? null,
             quality_flags:     r.quality_flags ?? null,
+            quality_size_multiplier: r.quality_size_multiplier ?? null,
           },
           explanation: r.explanation,
           expiresAt: new Date(Date.now() + this._ttlForTimeframe(r.timeframe) * 60 * 1000),
