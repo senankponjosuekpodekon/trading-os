@@ -43,10 +43,12 @@ export class ExecutionService {
       );
     }
 
-    // ── Pre-execution validation (if signal-based order) ──────────────
+    // ── Pre-execution validation ──────────────────────────────────────
     let signalData: any = null;
     let gateZone: any = null;
-    if (dto.signalId && dto.portfolioId) {
+
+    // Anti-doublon + correlation risk: apply to ALL orders (manual + signal-based)
+    if (dto.portfolioId) {
       const portfolio = await this.prisma.portfolio.findFirst({
         where: { id: dto.portfolioId, userId },
       });
@@ -54,25 +56,34 @@ export class ExecutionService {
         throw new NotFoundException('Portfolio not found');
       }
 
-      const fillPrice = dto.price ?? (await this._estimateFillPrice(dto.symbol, connector, creds));
-      if (!fillPrice) {
-        throw new BadRequestException('Cannot estimate fill price for gate validation');
+      const asset = await this.prisma.asset.findUnique({ where: { symbol: dto.symbol } });
+      if (asset) {
+        await this.gate.checkDuplicate(dto.portfolioId, asset.id);
       }
+      await this.gate.checkCorrelationRisk(dto.portfolioId, dto.symbol, dto.side as 'BUY' | 'SELL');
 
-      const portfolioType = portfolio.type as 'PAPER' | 'LIVE';
-      const { signal, gateResult } = await this.gate.validateSignalExecution(
-        dto.signalId,
-        portfolio.id,
-        fillPrice,
-        portfolioType,
-      );
-      signalData = signal;
-      gateZone = gateResult.zone ?? null;
+      // Execution gate: only for signal-based orders (needs signal SL/TP/zone)
+      if (dto.signalId) {
+        const fillPrice = dto.price ?? (await this._estimateFillPrice(dto.symbol, connector, creds));
+        if (!fillPrice) {
+          throw new BadRequestException('Cannot estimate fill price for gate validation');
+        }
 
-      this.logger.log(
-        `Pre-execution gate passed: signal=${dto.signalId} symbol=${dto.symbol} ` +
-        `fillPrice=${fillPrice} zone=${gateZone ? `[${gateZone.lower}, ${gateZone.upper}]` : 'N/A'}`,
-      );
+        const portfolioType = portfolio.type as 'PAPER' | 'LIVE';
+        const { signal, gateResult } = await this.gate.validateSignalExecution(
+          dto.signalId,
+          portfolio.id,
+          fillPrice,
+          portfolioType,
+        );
+        signalData = signal;
+        gateZone = gateResult.zone ?? null;
+
+        this.logger.log(
+          `Pre-execution gate passed: signal=${dto.signalId} symbol=${dto.symbol} ` +
+          `fillPrice=${fillPrice} zone=${gateZone ? `[${gateZone.lower}, ${gateZone.upper}]` : 'N/A'}`,
+        );
+      }
     }
 
     this.logger.log(`Executing order: user=${userId} exchange=${creds.exchange} symbol=${dto.symbol} side=${dto.side} type=${dto.type} qty=${dto.quantity}`);

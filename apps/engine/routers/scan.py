@@ -1029,9 +1029,10 @@ def analyze_candles(
     if asset_type == "SYNTHETIC":
         _syn_result = _analyze_synthetic_candles(symbol, timeframe, df, strategy=strategy)
         # Apply quality gate (14-layer filter) for synthetics
+        _syn_qg_asset_type = "GOLD" if is_gold_symbol(symbol) else "SYNTHETIC"
         _syn_gate = apply_quality_gate(
             signal=_syn_result.get("signal", "NEUTRAL"),
-            asset_type="SYNTHETIC",
+            asset_type=_syn_qg_asset_type,
             symbol=symbol,
             entry=_syn_result.get("entry_price"),
             tp1=_syn_result.get("take_profit_1"),
@@ -2072,9 +2073,10 @@ def analyze_candles(
         reasons.append(f"[RED FLAGS] {_red_flags.get('warning', 'Projet à risque extrême')}")
 
     # ── Signal Quality Gate (14-layer filter) ─────────────────────
+    _qg_asset_type = "GOLD" if is_gold_symbol(symbol) else asset_type
     _quality_gate = apply_quality_gate(
         signal=signal,
-        asset_type=asset_type,
+        asset_type=_qg_asset_type,
         symbol=symbol,
         entry=entry,
         tp1=tp1,

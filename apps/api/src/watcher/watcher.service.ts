@@ -300,9 +300,36 @@ export class WatcherService {
 
         // Auto-confirm if live price is within 2% of expected entry (fill likely occurred)
         if (slippagePct < 2.0) {
+          // Recalculate SL/TP relative to the actual fill price, preserving original distances
+          const updateData: any = { status: 'OPEN', entryPrice: livePrice };
+          if (pos.stopLoss) {
+            const slDist = entry - parseFloat(pos.stopLoss.toString());
+            updateData.stopLoss = pos.direction === 'BUY'
+              ? livePrice - Math.abs(slDist)
+              : livePrice + Math.abs(slDist);
+          }
+          if (pos.takeProfit) {
+            const tpDist = parseFloat(pos.takeProfit.toString()) - entry;
+            updateData.takeProfit = pos.direction === 'BUY'
+              ? livePrice + Math.abs(tpDist)
+              : livePrice - Math.abs(tpDist);
+          }
+          if (pos.takeProfit2) {
+            const tp2Dist = parseFloat(pos.takeProfit2.toString()) - entry;
+            updateData.takeProfit2 = pos.direction === 'BUY'
+              ? livePrice + Math.abs(tp2Dist)
+              : livePrice - Math.abs(tp2Dist);
+          }
+          if (pos.trailingStop) {
+            const tsDist = entry - parseFloat(pos.trailingStop.toString());
+            updateData.trailingStop = pos.direction === 'BUY'
+              ? livePrice - Math.abs(tsDist)
+              : livePrice + Math.abs(tsDist);
+          }
+
           await this.prisma.position.update({
             where: { id: pos.id },
-            data: { status: 'OPEN', entryPrice: livePrice },
+            data: updateData,
           });
           confirmed++;
           this.logger.log(
