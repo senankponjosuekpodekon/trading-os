@@ -273,3 +273,37 @@ async def fetch_brvm_history(symbol: str, period: str = "2y") -> list[dict]:
 
     # 3. Retourner ce qu'on a en DB (même si < 20 rows)
     return db_rows
+
+
+async def batch_fetch_brvm_history(symbols: list[str], period: str = "2y") -> dict[str, list[dict]]:
+    """Batch fetch: 1 SELECT pour tous les symboles au lieu de N requêtes.
+    Retourne {symbol: [{date, open, high, low, close, volume}, ...], ...}"""
+    from utils.db_pool import get_shared_pool
+    limit = 500 if period == "2y" else 250
+    result: dict[str, list[dict]] = {s: [] for s in symbols}
+    try:
+        pool = await get_shared_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT symbol, date, open, high, low, close, volume
+                   FROM brvm_daily_candles
+                   WHERE symbol = ANY($1)
+                   ORDER BY symbol, date ASC""",
+                symbols,
+            )
+        for r in rows:
+            sym = r["symbol"]
+            if sym not in result:
+                result[sym] = []
+            if len(result[sym]) < limit:
+                result[sym].append({
+                    "date": r["date"].isoformat(),
+                    "open": float(r["open"] or r["close"]),
+                    "high": float(r["high"] or r["close"]),
+                    "low": float(r["low"] or r["close"]),
+                    "close": float(r["close"]),
+                    "volume": int(r["volume"] or 0),
+                })
+    except Exception:
+        pass
+    return result

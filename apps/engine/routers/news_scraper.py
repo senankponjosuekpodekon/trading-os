@@ -138,6 +138,52 @@ SYMBOL_KEYWORDS: dict[str, list[str]] = {
     "WTI/USD":    ["oil", "wti", "crude", "opec"],
     "crypto":     ["crypto", "bitcoin", "ethereum", "blockchain", "defi", "web3"],
     "brvm":       ["brvm", "west africa", "waemu", "bourse abidjan", "afrique"],
+    "ONTBF":      ["onatel", "burkina"],
+    "SNTS":       ["sonatel", "senegal"],
+    "ORGT":       ["oragroup", "togo"],
+    "ORAC":       ["orange", "cote d'ivoire", "ivoire"],
+    "ETIT":       ["ecobank", "etit"],
+    "BOABF":      ["bank of africa", "burkina"],
+    "BOAC":       ["bank of africa", "cote d'ivoire", "ivoire"],
+    "SGBC":       ["societe generale", "cote d'ivoire", "ivoire"],
+    "ABJC":       ["servair", "abidjan"],
+    "CIEC":       ["cie", "cote d'ivoire", "ivoire", "electricite"],
+    "BICC":       ["bici", "cote d'ivoire", "ivoire"],
+    "CBIBF":      ["coris", "burkina"],
+    "STAC":       ["setao", "cote d'ivoire", "ivoire"],
+    "LNBB":       ["loterie", "benin"],
+    "PALC":       ["palm", "cote d'ivoire", "ivoire"],
+    "SOGC":       ["sogb", "palm"],
+    "SIVC":       ["sicogi", "erium"],
+    "NSBC":       ["nsia", "banque"],
+    "TTLC":       ["totalenergies", "cote d'ivoire", "ivoire"],
+    "NTLC":       ["nestle", "cote d'ivoire", "ivoire"],
+    "UNLC":       ["unilever", "cote d'ivoire", "ivoire"],
+    "FTSC":       ["filtisac", "cote d'ivoire", "ivoire"],
+    "SAFC":       ["safca", "cote d'ivoire", "ivoire"],
+    "SCRC":       ["sucrivoire", "cote d'ivoire", "ivoire"],
+    "SDSC":       ["africa global logistics", "cote d'ivoire", "ivoire"],
+    "CFAC":       ["cfao", "cote d'ivoire", "ivoire"],
+    "SHEC":       ["vivo energy", "cote d'ivoire", "ivoire"],
+    "SPHC":       ["saph", "cote d'ivoire", "ivoire"],
+    "SDCC":       ["sode", "cote d'ivoire", "ivoire"],
+    "SEMC":       ["siem", "eviosys", "cote d'ivoire", "ivoire"],
+    "SLBC":       ["solibra", "cote d'ivoire", "ivoire"],
+    "SMBC":       ["smb", "cote d'ivoire", "ivoire"],
+    "STBC":       ["sitab", "cote d'ivoire", "ivoire"],
+    "PRSC":       ["tractafric", "cote d'ivoire", "ivoire"],
+    "CABC":       ["sicable", "cote d'ivoire", "ivoire"],
+    "BNBC":       ["bernabe", "cote d'ivoire", "ivoire"],
+    "BICB":       ["bicec", "benin"],
+    "NEIC":       ["nei-ceda", "cote d'ivoire", "ivoire"],
+    "BOAB":       ["bank of africa", "benin"],
+    "BOAM":       ["bank of africa", "mali"],
+    "BOAN":       ["bank of africa", "niger"],
+    "BOAS":       ["bank of africa", "senegal"],
+    "TTLS":       ["totalenergies", "senegal"],
+    "UNXC":       ["uniwax", "cote d'ivoire", "ivoire"],
+    "SICC":       ["sicor", "cote d'ivoire", "ivoire"],
+    "ECOC":       ["ecobank", "cote d'ivoire", "ivoire"],
 }
 
 # Reddit subreddits par marché
@@ -151,6 +197,7 @@ REDDIT_SUBS: dict[str, list[str]] = {
     "GBP/USD":    ["Forex", "investing"],
     "forex":      ["Forex", "investing", "economics"],
     "XAU/USD":    ["Gold", "investing", "wallstreetbets"],
+    "brvm":       [],
 }
 
 # Nitter instances publiques (Twitter sans clé API)
@@ -167,6 +214,7 @@ TWITTER_ACCOUNTS: dict[str, list[str]] = {
     "ETH/USDT": ["VitalikButerin", "sassal0x"],
     "forex":   ["ForexLive", "kgreifeld", "FXStreetNews"],
     "XAU/USD": ["Kitco_News", "goldsilver_com"],
+    "brvm":    [],
 }
 
 
@@ -194,7 +242,8 @@ def _symbol_to_source_category(symbol: str) -> str:
         if "XAU" in symbol:
             return "gold"
         return "forex"
-    if "BRVM" in symbol or symbol in ("ONTBV", "ETIT", "SGBCI"):
+    from scrapers.brvm_scraper import is_brvm_symbol
+    if is_brvm_symbol(symbol) or "BRVM" in symbol:
         return "brvm"
     return "crypto"
 
@@ -494,8 +543,9 @@ async def scrape_all_sources(symbol: str) -> list[ScrapedArticle]:
             tasks.append(asyncio.wait_for(_fetch_nitter(account, symbol, client), timeout=5.0))
             source_names.append(f"nitter:{account}")
 
-        tasks.append(asyncio.wait_for(_fetch_cryptopanic(symbol, client), timeout=5.0))
-        source_names.append("cryptopanic")
+        if cat == "crypto":
+            tasks.append(asyncio.wait_for(_fetch_cryptopanic(symbol, client), timeout=5.0))
+            source_names.append("cryptopanic")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 

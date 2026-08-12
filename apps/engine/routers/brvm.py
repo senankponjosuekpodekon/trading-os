@@ -14,6 +14,7 @@ from scrapers.brvm_scraper import (
     _mock_brvm_quotes,
     is_brvm_symbol,
     fetch_brvm_history,
+    batch_fetch_brvm_history,
 )
 from scrapers.brvm_fundamentals import fetch_fundamental_scores, fetch_fundamental_metrics
 
@@ -176,13 +177,19 @@ async def analyze_brvm_symbols(symbols: Optional[List[str]] = None) -> List[dict
     # Use the existing BRVM-specific analysis for momentum + fundamental scoring
     analyzed = _analyze_brvm_signal(quotes, fundamental_scores, fundamental_metrics)
 
+    # Batch fetch all history in 1 query instead of N individual queries
+    all_symbols = [q["symbol"] for q in analyzed]
+    history_map = await batch_fetch_brvm_history(all_symbols, "2y")
+
     results = []
     for q in analyzed:
         price = q["price"]
         chg = q["change_pct"]
 
-        # Fetch historical OHLCV for real indicator computation
-        history = await fetch_brvm_history(q["symbol"], "2y")
+        # Use batch-fetched history, fallback to individual fetch if empty
+        history = history_map.get(q["symbol"], [])
+        if not history or len(history) < 20:
+            history = await fetch_brvm_history(q["symbol"], "2y")
         if history and len(history) >= 20:
             import pandas as pd
             hdf = pd.DataFrame(history)

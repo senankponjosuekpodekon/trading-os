@@ -3120,6 +3120,14 @@ async def scan_multi(req: ScanRequest):
                     )
                 )
 
+    # Launch BRVM analysis in parallel with crypto analysis
+    brvm_task = None
+    if brvm_symbols:
+        brvm_task = asyncio.wait_for(
+            analyze_brvm_symbols(brvm_symbols),
+            timeout=20.0,
+        )
+
     computed_results = list(await asyncio.gather(*analyze_tasks))
     for r in computed_results:
         cache_key = f"scan:{r['symbol']}:{req.timeframe}"
@@ -3128,12 +3136,9 @@ async def scan_multi(req: ScanRequest):
         await set_cached(cache_key, r, ttl=WARMUP_TTL_SECONDS)
 
     brvm_results = []
-    if brvm_symbols:
+    if brvm_task:
         try:
-            brvm_results = await asyncio.wait_for(
-                analyze_brvm_symbols(brvm_symbols),
-                timeout=30.0,
-            )
+            brvm_results = await brvm_task
         except asyncio.TimeoutError:
             logger.warning("brvm_scan_timeout", symbols=len(brvm_symbols))
             brvm_results = [
@@ -3218,11 +3223,14 @@ async def scan_multi(req: ScanRequest):
             symbols_missing_cache.append(r["symbol"])
 
     # Fire-and-forget pour les symboles sans cache — le résultat sera dispo au prochain scan
+    # Skip BRVM: les sources RSS africaines sont lentes et le sentiment est peu pertinent
     if symbols_missing_cache:
-        async def _warm_scraper_cache(syms: list[str]):
-            tasks = [scrape_all_sources(s) for s in syms]
-            await asyncio.gather(*tasks, return_exceptions=True)
-        asyncio.create_task(_warm_scraper_cache(symbols_missing_cache))
+        scraper_syms = [s for s in symbols_missing_cache if not is_brvm_symbol(s)]
+        if scraper_syms:
+            async def _warm_scraper_cache(syms: list[str]):
+                tasks = [scrape_all_sources(s) for s in syms]
+                await asyncio.gather(*tasks, return_exceptions=True)
+            asyncio.create_task(_warm_scraper_cache(scraper_syms))
 
     # 4b. Contexte macro + on-chain pour les signaux actifs
     active_symbols = [r["symbol"] for r in results if r.get("signal") in ("BUY", "SELL")]
