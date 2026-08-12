@@ -1039,12 +1039,13 @@ def analyze_candles(
             session_info=session_info,
             liquidity_data=estimate_liquidity_score_sync(symbol, "SYNTHETIC", df),
             regime=None,
-            atr_value=_syn_result.get("atr_value"),
+            atr_value=_syn_result.get("indicators", {}).get("atr"),
             onchain_context=None,
             dxy_data=None,
         )
         _syn_result["quality_score"] = _syn_gate.get("quality_score", 0)
         _syn_result["quality_flags"] = _syn_gate.get("quality_flags", [])
+        _syn_result["quality_size_multiplier"] = get_quality_size_multiplier(_syn_gate.get("quality_score", 0)) if _syn_result.get("signal") != "NEUTRAL" else 0
         if not _syn_gate["passed"]:
             _syn_result["signal"] = "NEUTRAL"
             _syn_result["confidence"] = 0
@@ -2386,6 +2387,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     # ── Phase 0++: Market cap tier + Liquidity score (async) ──
     _mcap_tier = None
     _liquidity = None
+    _onchain_ctx = None
     _asset_type_for_risk = get_asset_type(symbol)
     if _asset_type_for_risk == "CRYPTO":
         try:
@@ -2413,6 +2415,14 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             _fg_value = _fg.get("value") if isinstance(_fg, dict) else None
         except Exception:
             _fg_value = None
+
+    # ── On-chain context for crypto (funding rate gate) ──
+    if _asset_type_for_risk == "CRYPTO":
+        try:
+            _oc_ctx = await asyncio.wait_for(onchain_context(symbol), timeout=3.0)
+            _onchain_ctx = {"context": _oc_ctx, "fear_greed": _fg_value}
+        except Exception:
+            _onchain_ctx = None
 
     # ── Phase L: AI Defense pre-filter for crypto ──
     if get_asset_type(symbol) == "CRYPTO" and df is not None and len(df) >= 2:
@@ -2452,6 +2462,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             symbol, timeframe, df,
             htf_regime=htf_regime,
             strategy=strategy,
+            onchain=_onchain_ctx,
             forex_context=forex_context,
             tokenomics_context=tokenomics_context,
             social_context=social_context,
