@@ -21,10 +21,10 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml",
 }
 
-# Symboles BRVM les plus liquides
+# Symboles BRVM les plus liquides (alignés sur brvm.org 2026)
 BRVM_SYMBOLS = [
-    "ONTBF", "SGBF", "BOABF", "ETIT", "SIVC",
-    "PALC", "SOGC", "SNTS", "CIEC", "NSIC",
+    "ONTBF", "SGBC", "BOABF", "ETIT", "SIVC",
+    "PALC", "SOGC", "SNTS", "CIEC", "NSBC",
     "ORGT", "BICC", "CBIBF", "ABJC", "STAC",
 ]
 
@@ -69,9 +69,12 @@ async def _fetch_westbourse_quotes() -> List[dict]:
 
 
 async def _fetch_scraped_brvm_quotes() -> List[dict]:
-    """Scrape la page des cours actions de la BRVM (fallback)."""
+    """Scrape la page des cours actions de la BRVM (fallback).
+    Structure HTML (2026): table avec 7 colonnes:
+    Symbole | Nom | Volume | Cours veille | Cours Ouverture | Cours Clôture | Variation (%)
+    """
     try:
-        async with httpx.AsyncClient(timeout=8, headers=HEADERS, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=10, headers=HEADERS, follow_redirects=True) as client:
             r = await client.get(BRVM_ACTIONS)
             r.raise_for_status()
     except Exception:
@@ -80,30 +83,41 @@ async def _fetch_scraped_brvm_quotes() -> List[dict]:
     soup = BeautifulSoup(r.text, "lxml")
     quotes = []
 
-    table = soup.find("table", {"id": "table-sm"}) or soup.find("table", class_=lambda c: c and "cours" in c.lower())
-    if not table:
-        tables = soup.find_all("table")
-        table = tables[0] if tables else None
+    # La table principale contient toutes les actions (48+ rows, 7 colonnes)
+    # Les tables top-five/flop-five n'ont que 3 colonnes — on les ignore
+    tables = soup.find_all("table")
+    table = None
+    for t in tables:
+        header_cols = t.find("tr")
+        if header_cols:
+            ths = header_cols.find_all("th")
+            if len(ths) >= 6:
+                table = t
+                break
 
     if not table:
         return []
 
     for row in table.find_all("tr")[1:]:
         cols = row.find_all("td")
-        if len(cols) < 5:
+        if len(cols) < 6:
             continue
         try:
             symbol  = cols[0].get_text(strip=True)
-            name    = cols[1].get_text(strip=True) if len(cols) > 1 else symbol
-            price   = float(cols[2].get_text(strip=True).replace(" ", "").replace(",", ".") or 0)
-            change  = float(cols[3].get_text(strip=True).replace(" ", "").replace(",", ".").replace("%", "") or 0)
-            volume  = int(cols[4].get_text(strip=True).replace(" ", "") or 0)
+            name    = cols[1].get_text(strip=True)
+            volume  = int(cols[2].get_text(strip=True).replace(" ", "").replace("\u202f", "") or 0)
+            open_p  = float(cols[4].get_text(strip=True).replace(" ", "").replace("\u202f", "").replace(",", ".") or 0)
+            close_p = float(cols[5].get_text(strip=True).replace(" ", "").replace("\u202f", "").replace(",", ".") or 0)
+            chg_pct = float(cols[6].get_text(strip=True).replace(" ", "").replace("\u202f", "").replace(",", ".").replace("%", "") or 0)
+            price   = close_p if close_p > 0 else open_p
+            if not symbol or price <= 0:
+                continue
             quotes.append({
                 "symbol":     symbol,
                 "name":       name,
                 "price":      price,
-                "change":     change * price / 100 if abs(change) < 100 else change,
-                "change_pct": change if abs(change) < 100 else round(change / price * 100, 2),
+                "change":     round(price * chg_pct / 100, 2),
+                "change_pct": chg_pct,
                 "volume":     volume,
                 "market":     "BRVM",
                 "currency":   "XOF",
@@ -115,12 +129,12 @@ async def _fetch_scraped_brvm_quotes() -> List[dict]:
 
 
 async def fetch_brvm_quotes() -> List[dict]:
-    """Cours BRVM : Westbourse en priorité, scraping en fallback.
+    """Cours BRVM : brvm.org en priorité, Westbourse en fallback.
     Persiste les cotations du jour dans brvm_daily_candles pour construire
     un historique OHLCV local au fil du temps."""
-    quotes = await _fetch_westbourse_quotes()
+    quotes = await _fetch_scraped_brvm_quotes()
     if not quotes:
-        quotes = await _fetch_scraped_brvm_quotes()
+        quotes = await _fetch_westbourse_quotes()
     if quotes:
         await _persist_daily_candles(quotes)
     return quotes
@@ -132,17 +146,17 @@ def _mock_brvm_quotes() -> List[dict]:
     random.seed(42)
     mock = []
     prices = {
-        "ONTBF": 2150, "SGBF": 8500, "BOABF": 6200, "ETIT": 24, "SIVC": 755,
-        "PALC": 7200, "SOGC": 1050, "SNTS": 4800, "CIEC": 680, "NSIC": 3200,
-        "ORGT": 9100, "BICC": 530, "CBIBF": 3700, "ABJC": 1850, "STAC": 11500,
+        "ONTBF": 2150, "SGBC": 8500, "BOABF": 6200, "ETIT": 24, "SIVC": 755,
+        "PALC": 7200, "SOGC": 1050, "SNTS": 28500, "CIEC": 680, "NSBC": 3200,
+        "ORGT": 9100, "BICC": 29000, "CBIBF": 3700, "ABJC": 3180, "STAC": 11500,
     }
     names = {
-        "ONTBF": "ONATEL Burkina Faso", "SGBF": "Société Générale BF",
+        "ONTBF": "ONATEL Burkina Faso", "SGBC": "Société Générale BF",
         "BOABF": "Bank of Africa BF", "ETIT": "Ecobank Transnational",
         "SIVC": "SICOGI", "PALC": "Palm CI", "SOGC": "SOGB",
-        "SNTS": "Sonatel", "CIEC": "CIE", "NSIC": "NSIA Banque CI",
+        "SNTS": "Sonatel", "CIEC": "CIE", "NSBC": "NSIA Banque CI",
         "ORGT": "Orange CI", "BICC": "BICI CI", "CBIBF": "Coris Bank",
-        "ABJC": "Abidjan.net", "STAC": "SOLIBRA",
+        "ABJC": "Servair Abidjan", "STAC": "SOLIBRA",
     }
     for sym in TOP_SYMBOLS:
         p = prices.get(sym, 1000)
