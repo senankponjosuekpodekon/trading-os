@@ -56,4 +56,16 @@ export class ExecuteOrderDto {
   @IsOptional()
   @IsString()
   signalId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  stopLoss?: number;
+
+  @IsOptional()
+  @IsNumber()
+  takeProfit?: number;
+
+  @IsOptional()
+  @IsNumber()
+  takeProfit2?: number;
 }

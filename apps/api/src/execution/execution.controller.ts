@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { ExecutionService } from './execution.service';
 import { ExecuteOrderDto } from './dto/execute-order.dto';
+import { ConfirmOrderDto } from './dto/confirm-order.dto';
 
 @Controller('execution')
 @UseGuards(JwtAuthGuard)
@@ -28,5 +29,11 @@ export class ExecutionController {
   @Get('balance/:connectionId')
   getBalance(@Request() req: any, @Param('connectionId') connectionId: string) {
     return this.service.getBalance(req.user.id, connectionId);
+  }
+
+  @Post('confirm')
+  @Throttle({ short: { ttl: 1_000, limit: 5 }, medium: { ttl: 10_000, limit: 20 } })
+  confirmOrder(@Request() req: any, @Body() dto: ConfirmOrderDto) {
+    return this.service.confirmOrder(req.user.id, dto);
   }
 }
