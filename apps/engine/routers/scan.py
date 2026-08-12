@@ -2864,6 +2864,7 @@ async def scan_multi(req: ScanRequest):
     tokenomics_contexts: dict[str, dict] = {}
     social_contexts: dict[str, dict] = {}
     crypto_symbols = [s for s in missing_symbols if is_crypto_symbol(s)]
+    fg_value = None
     if crypto_symbols:
         try:
             fg = await asyncio.wait_for(fear_greed(), timeout=3.0)
