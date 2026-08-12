@@ -182,8 +182,8 @@ async def analyze_brvm_symbols(symbols: Optional[List[str]] = None) -> List[dict
         chg = q["change_pct"]
 
         # Fetch historical OHLCV for real indicator computation
-        history = fetch_brvm_history(q["symbol"], "2y")
-        if history and len(history) >= 50:
+        history = await fetch_brvm_history(q["symbol"], "2y")
+        if history and len(history) >= 20:
             import pandas as pd
             hdf = pd.DataFrame(history)
             close = hdf["close"].astype(float)

@@ -1,10 +1,13 @@
 """
 BRVM scraper — Bourse Régionale des Valeurs Mobilières (UEMOA)
 Récupère les cours de marché depuis brvm.org / Westbourse avec fallback.
+Historique OHLCV accumulé en DB (brvm_daily_candles) car brvm-package
+ne retourne des données que pour ~3 symboles sur 47.
 """
 import httpx
 from typing import List
 from bs4 import BeautifulSoup
+from datetime import date as _date
 
 BRVM_BASE    = "https://www.brvm.org"
 BRVM_ACTIONS = f"{BRVM_BASE}/fr/cours-actions/0"
@@ -112,11 +115,15 @@ async def _fetch_scraped_brvm_quotes() -> List[dict]:
 
 
 async def fetch_brvm_quotes() -> List[dict]:
-    """Cours BRVM : Westbourse en priorité, scraping en fallback."""
+    """Cours BRVM : Westbourse en priorité, scraping en fallback.
+    Persiste les cotations du jour dans brvm_daily_candles pour construire
+    un historique OHLCV local au fil du temps."""
     quotes = await _fetch_westbourse_quotes()
+    if not quotes:
+        quotes = await _fetch_scraped_brvm_quotes()
     if quotes:
-        return quotes
-    return await _fetch_scraped_brvm_quotes()
+        await _persist_daily_candles(quotes)
+    return quotes
 
 
 def _mock_brvm_quotes() -> List[dict]:
@@ -157,29 +164,96 @@ def is_brvm_symbol(symbol: str) -> bool:
     return symbol in BRVM_SYMBOLS
 
 
-def fetch_brvm_history(symbol: str, period: str = "2y") -> "list[dict]":
+async def _persist_daily_candles(quotes: List[dict]) -> None:
+    """Upsert les cotations du jour dans brvm_daily_candles."""
+    from utils.db_pool import get_shared_pool
+    today = _date.today()
+    try:
+        pool = await get_shared_pool()
+        async with pool.acquire() as conn:
+            for q in quotes:
+                sym = q.get("symbol", "")
+                price = float(q.get("price", 0) or 0)
+                if not sym or price <= 0:
+                    continue
+                vol = int(q.get("volume", 0) or 0)
+                await conn.execute(
+                    """INSERT INTO brvm_daily_candles (symbol, date, open, high, low, close, volume)
+                       VALUES ($1, $2, $3, $3, $3, $3, $4)
+                       ON CONFLICT (symbol, date) DO UPDATE SET
+                         high   = GREATEST(brvm_daily_candles.high,  EXCLUDED.high),
+                         low    = LEAST(brvm_daily_candles.low,     EXCLUDED.low),
+                         close  = EXCLUDED.close,
+                         volume = brvm_daily_candles.volume + EXCLUDED.volume""",
+                    sym, today, price, vol,
+                )
+    except Exception:
+        pass
+
+
+async def _fetch_db_history(symbol: str, limit: int = 500) -> list[dict]:
+    """Récupère l'historique OHLCV depuis brvm_daily_candles (accumulation locale)."""
+    from utils.db_pool import get_shared_pool
+    try:
+        pool = await get_shared_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT date, open, high, low, close, volume
+                   FROM brvm_daily_candles
+                   WHERE symbol = $1
+                   ORDER BY date ASC
+                   LIMIT $2""",
+                symbol, limit,
+            )
+        return [
+            {
+                "date": r["date"].isoformat(),
+                "open": float(r["open"] or r["close"]),
+                "high": float(r["high"] or r["close"]),
+                "low": float(r["low"] or r["close"]),
+                "close": float(r["close"]),
+                "volume": int(r["volume"] or 0),
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
+async def fetch_brvm_history(symbol: str, period: str = "2y") -> list[dict]:
     """
-    Fetch historical OHLCV for a BRVM symbol using brvm-package.
+    Fetch historical OHLCV for a BRVM symbol.
+    Source 1: brvm_daily_candles (DB locale, accumulée au fil du temps)
+    Source 2: brvm-package (fallback, ne marche que pour ~3 symboles)
     Returns list of dicts: [{date, open, high, low, close, volume}, ...]
-    Returns empty list on failure.
     """
+    # 1. DB locale d'abord
+    limit = 500 if period == "2y" else 250
+    db_rows = await _fetch_db_history(symbol, limit)
+    if len(db_rows) >= 20:
+        return db_rows
+
+    # 2. Fallback brvm-package
     try:
         import brvm as brvm_pkg
         ticker = brvm_pkg.Ticker(symbol)
         df = ticker.history(period)
-        if df is None or len(df) == 0:
-            return []
-        df.columns = [c.lower() for c in df.columns]
-        records = []
-        for idx, row in df.iterrows():
-            records.append({
-                "date": idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx),
-                "open": float(row.get("open", 0)),
-                "high": float(row.get("high", 0)),
-                "low": float(row.get("low", 0)),
-                "close": float(row.get("close", 0)),
-                "volume": int(row.get("volume", 0) or 0),
-            })
-        return records
+        if df is not None and len(df) > 0:
+            df.columns = [c.lower() for c in df.columns]
+            records = []
+            for idx, row in df.iterrows():
+                records.append({
+                    "date": idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx),
+                    "open": float(row.get("open", 0)),
+                    "high": float(row.get("high", 0)),
+                    "low": float(row.get("low", 0)),
+                    "close": float(row.get("close", 0)),
+                    "volume": int(row.get("volume", 0) or 0),
+                })
+            if records:
+                return records
     except Exception:
-        return []
+        pass
+
+    # 3. Retourner ce qu'on a en DB (même si < 20 rows)
+    return db_rows
