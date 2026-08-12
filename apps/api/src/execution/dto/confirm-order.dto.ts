@@ -2,7 +2,7 @@ import { IsString, IsNumber, IsOptional } from 'class-validator';
 
 export class ConfirmOrderDto {
   @IsString()
-  positionId: string;
+  positionId!: string;
 
   @IsOptional()
   @IsNumber()

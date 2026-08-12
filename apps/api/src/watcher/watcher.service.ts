@@ -258,4 +258,66 @@ export class WatcherService {
       this.logger.warn(`Watcher: watchPendingSignals failed — ${e?.message}`);
     }
   }
+
+  /** Auto-transition PENDING positions → OPEN (exchange fill confirmed) or expire after 24h. */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async watchPendingPositions() {
+    try {
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h ago
+
+      // Expire old PENDING positions (no fill confirmation within 24h)
+      const expired = await this.prisma.position.updateMany({
+        where: {
+          status: 'PENDING',
+          openedAt: { lt: cutoff },
+        },
+        data: { status: 'CLOSED', closedAt: new Date() },
+      });
+      if (expired.count > 0) {
+        this.logger.log(`Watcher: ${expired.count} PENDING position(s) expired (>24h no confirmation)`);
+      }
+
+      // Check remaining PENDING positions for potential auto-confirmation
+      const pending = await this.prisma.position.findMany({
+        where: { status: 'PENDING' },
+        include: { asset: { select: { symbol: true } }, portfolio: { select: { userId: true } } },
+      });
+      if (pending.length === 0) {
+        this.health.recordCronRun('watch-pending-positions', 'ok');
+        return;
+      }
+
+      const symbols = [...new Set(pending.map(p => p.asset.symbol))];
+      const prices = await this._fetchAllPrices(symbols);
+
+      let confirmed = 0;
+      for (const pos of pending) {
+        const livePrice = prices[pos.asset.symbol];
+        if (!livePrice || !pos.entryPrice) continue;
+
+        const entry = parseFloat(pos.entryPrice.toString());
+        const slippagePct = Math.abs((livePrice - entry) / entry) * 100;
+
+        // Auto-confirm if live price is within 2% of expected entry (fill likely occurred)
+        if (slippagePct < 2.0) {
+          await this.prisma.position.update({
+            where: { id: pos.id },
+            data: { status: 'OPEN', entryPrice: livePrice },
+          });
+          confirmed++;
+          this.logger.log(
+            `Watcher: PENDING position ${pos.id} auto-confirmed (${pos.asset.symbol} @ ${livePrice}, slippage ${slippagePct.toFixed(2)}%)`,
+          );
+        }
+      }
+
+      if (confirmed > 0) {
+        this.logger.log(`Watcher: ${confirmed} PENDING position(s) auto-confirmed`);
+      }
+      this.health.recordCronRun('watch-pending-positions', 'ok');
+    } catch (e: any) {
+      this.health.recordCronRun('watch-pending-positions', 'error', e?.message);
+      this.logger.warn(`Watcher: watchPendingPositions failed — ${e?.message}`);
+    }
+  }
 }

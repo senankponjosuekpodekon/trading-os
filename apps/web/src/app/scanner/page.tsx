@@ -326,6 +326,12 @@ export default function ScannerPage() {
                         Q{entry.quality_score}
                       </span>
                     )}
+                    {entry.quality_size_multiplier != null && entry.quality_size_multiplier > 0 && (
+                      <span className="text-xs px-1.5 py-0.5 rounded font-medium border bg-blue-500/10 text-blue-400 border-blue-500/30"
+                        title={`Size multiplier: ${entry.quality_size_multiplier}x`}>
+                        {entry.quality_size_multiplier}x
+                      </span>
+                    )}
                     {entry.explanation && (
                       <span className="text-xs text-gray-500 truncate flex-1" title={entry.explanation}>{entry.explanation}</span>
                     )}

@@ -113,6 +113,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const opportunityScore = useMemo(() => computeOpportunityScore(signal), [signal]);
   const qualityScore = (signal.metadata as any)?.quality_score ?? null;
   const qualityFlags = (signal.metadata as any)?.quality_flags ?? null;
+  const qualitySizeMultiplier = (signal.metadata as any)?.quality_size_multiplier ?? null;
 
   const deltaVsEntry = livePrice && entry ? ((livePrice - entry) / entry) * 100 : null;
 
@@ -263,6 +264,14 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
                 title={qualityFlags?.join(' | ') ?? ''}
               >
                 Q{qualityScore}
+              </span>
+            )}
+            {qualitySizeMultiplier != null && qualitySizeMultiplier > 0 && (
+              <span
+                className="text-xs px-2 py-1 rounded-lg font-medium border bg-blue-500/10 text-blue-400 border-blue-500/30"
+                title={`Position size multiplier: ${qualitySizeMultiplier}x`}
+              >
+                {qualitySizeMultiplier}x
               </span>
             )}
           </div>

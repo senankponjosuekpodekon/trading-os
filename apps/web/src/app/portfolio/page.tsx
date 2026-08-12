@@ -192,6 +192,15 @@ export default function PortfolioPage() {
     },
   });
 
+  const confirmPosition = useMutation({
+    mutationFn: ({ positionId, fillPrice }: { positionId: string; fillPrice?: number }) =>
+      api.post('/execution/confirm', { positionId, fillPrice }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions-live'] });
+      qc.invalidateQueries({ queryKey: ['positions-summary'] });
+    },
+  });
+
   const openFromSignal = useMutation({
     mutationFn: (signalId: string) => api.post(`/positions/from-signal/${signalId}`, {}),
     onSuccess: () => {
@@ -446,7 +455,14 @@ export default function PortfolioPage() {
                     return (
                       <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
                         <td className="px-4 py-3">
-                          <span className="text-white font-semibold">{p.asset?.symbol}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-semibold">{p.asset?.symbol}</span>
+                            {p.status === 'PENDING' && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-orange-500/10 text-orange-400 border border-orange-500/30">
+                                PENDING
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           {p.direction === 'BUY'
@@ -533,16 +549,29 @@ export default function PortfolioPage() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1">
-                            <input type="number" step="any" placeholder="Exit"
-                              value={closePrice[p.id] ?? ''}
-                              onChange={e => setClosePrice(v => ({ ...v, [p.id]: e.target.value }))}
-                              className="w-20 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-white text-xs focus:outline-none focus:border-red-500" />
-                            <button
-                              disabled={!closePrice[p.id] || closePosition.isPending}
-                              onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
-                              className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
-                              <X className="w-4 h-4" />
-                            </button>
+                            {p.status === 'PENDING' ? (
+                              <button
+                                disabled={confirmPosition.isPending}
+                                onClick={() => confirmPosition.mutate({ positionId: p.id, fillPrice: live ?? undefined })}
+                                className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                              >
+                                <Zap className="w-3 h-3" />
+                                Confirmer
+                              </button>
+                            ) : (
+                              <>
+                                <input type="number" step="any" placeholder="Exit"
+                                  value={closePrice[p.id] ?? ''}
+                                  onChange={e => setClosePrice(v => ({ ...v, [p.id]: e.target.value }))}
+                                  className="w-20 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-white text-xs focus:outline-none focus:border-red-500" />
+                                <button
+                                  disabled={!closePrice[p.id] || closePosition.isPending}
+                                  onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
+                                  className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -581,6 +610,11 @@ export default function PortfolioPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-white font-semibold">{p.asset?.symbol}</span>
+                        {p.status === 'PENDING' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-orange-500/10 text-orange-400 border border-orange-500/30">
+                            PENDING
+                          </span>
+                        )}
                         {p.direction === 'BUY'
                           ? <span className="text-emerald-400 text-xs font-bold flex items-center gap-1"><TrendingUp className="w-3 h-3" />BUY</span>
                           : <span className="text-red-400 text-xs font-bold flex items-center gap-1"><TrendingDown className="w-3 h-3" />SELL</span>}
@@ -590,12 +624,23 @@ export default function PortfolioPage() {
                           </span>
                         )}
                       </div>
-                      <button
-                        disabled={!closePrice[p.id] || closePosition.isPending}
-                        onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
-                        className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
-                        <X className="w-4 h-4" />
-                      </button>
+                      {p.status === 'PENDING' ? (
+                        <button
+                          disabled={confirmPosition.isPending}
+                          onClick={() => confirmPosition.mutate({ positionId: p.id, fillPrice: live ?? undefined })}
+                          className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                        >
+                          <Zap className="w-3 h-3" />
+                          Confirmer
+                        </button>
+                      ) : (
+                        <button
+                          disabled={!closePrice[p.id] || closePosition.isPending}
+                          onClick={() => closePosition.mutate({ id: p.id, exitPrice: parseFloat(closePrice[p.id]) })}
+                          className="p-1.5 text-gray-500 hover:text-red-400 disabled:opacity-30 transition-colors rounded hover:bg-red-400/10">
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div>

@@ -82,23 +82,32 @@ export class ExecutionGateService {
     }
 
     // 4. SL/TP coherence relative to livePrice
-    if (isBuy && livePrice >= sl) {
+    if (isBuy && livePrice <= sl) {
       this.logger.warn(
-        `GATE REJECT [SL_ABOVE_ENTRY] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
+        `GATE REJECT [SL_HIT] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
       );
-      return { ok: false, reason: `Live price ${livePrice} is at or above stop loss ${sl} for BUY`, zone };
+      return { ok: false, reason: `Live price ${livePrice} is at or below stop loss ${sl} for BUY`, zone };
     }
-    if (!isBuy && livePrice <= sl) {
+    if (!isBuy && livePrice >= sl) {
       this.logger.warn(
-        `GATE REJECT [SL_BELOW_ENTRY] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
+        `GATE REJECT [SL_HIT] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
       );
-      return { ok: false, reason: `Live price ${livePrice} is at or below stop loss ${sl} for SELL`, zone };
+      return { ok: false, reason: `Live price ${livePrice} is at or above stop loss ${sl} for SELL`, zone };
     }
 
     // 5. R:R check at livePrice
     const liveRR = isBuy
       ? (tp1 - livePrice) / (livePrice - sl)
       : (livePrice - tp1) / (sl - livePrice);
+
+    if (liveRR < this.MIN_RR) {
+      this.logger.warn(
+        `GATE REJECT [RR_TOO_LOW] signal=${signal.id} symbol=${signal.asset?.symbol} ` +
+        `liveRR=${liveRR.toFixed(2)} threshold=${this.MIN_RR} ` +
+        `livePrice=${livePrice} sl=${sl} tp1=${tp1} type=${portfolioType}`,
+      );
+      return { ok: false, reason: `R:R ${liveRR.toFixed(2)} below minimum ${this.MIN_RR}`, zone };
+    }
 
     if (liveRR < this.MIN_RR_BLOCK) {
       this.logger.warn(

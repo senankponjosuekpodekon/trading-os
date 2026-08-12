@@ -22,20 +22,20 @@ export enum TimeInForce {
 
 export class ExecuteOrderDto {
   @IsString()
-  connectionId: string;
+  connectionId!: string;
 
   @IsString()
-  symbol: string;
+  symbol!: string;
 
   @IsEnum(OrderSide)
-  side: OrderSide;
+  side!: OrderSide;
 
   @IsEnum(OrderType)
-  type: OrderType;
+  type!: OrderType;
 
   @IsNumber()
   @Min(0.00000001)
-  quantity: number;
+  quantity!: number;
 
   @IsOptional()
   @IsNumber()

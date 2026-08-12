@@ -24,7 +24,7 @@ export interface Position {
   id: string;
   portfolioId: string;
   assetId: string;
-  status: 'OPEN' | 'PARTIAL' | 'CLOSED' | 'CANCELLED';
+  status: 'OPEN' | 'PENDING' | 'PARTIAL' | 'PARTIAL_2' | 'CLOSED' | 'CANCELLED';
   direction: 'BUY' | 'SELL';
   entryPrice: string;
   exitPrice?: string;
@@ -171,6 +171,9 @@ export interface Signal {
       above_ema200?: boolean;
       description?: string;
     };
+    quality_score?: number;
+    quality_flags?: string[];
+    quality_size_multiplier?: number;
     mtf_context?: {
       ltf?: string;
       mtf?: string;
