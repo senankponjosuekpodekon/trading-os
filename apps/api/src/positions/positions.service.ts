@@ -74,7 +74,7 @@ export class PositionsService {
       const { data } = await firstValueFrom(
         this.http.get<{ candles: Array<{ close: number }> }>(
           `${this.engineUrl}/candles/${encodeURIComponent(symbol)}`,
-          { params: { timeframe: '1m', limit: 1 } },
+          { params: { timeframe: '1m', limit: 1 }, headers: engineHeaders(this.config) },
         ),
       );
       if (data.candles && data.candles.length > 0) {

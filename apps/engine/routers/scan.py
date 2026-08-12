@@ -3129,7 +3129,20 @@ async def scan_multi(req: ScanRequest):
 
     brvm_results = []
     if brvm_symbols:
-        brvm_results = await analyze_brvm_symbols(brvm_symbols)
+        try:
+            brvm_results = await asyncio.wait_for(
+                analyze_brvm_symbols(brvm_symbols),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("brvm_scan_timeout", symbols=len(brvm_symbols))
+            brvm_results = [
+                {"symbol": s, "signal": "NEUTRAL", "confidence": 0, "reason": "BRVM data timeout"}
+                for s in brvm_symbols
+            ]
+        except Exception as e:
+            logger.warning("brvm_scan_failed", error=str(e))
+            brvm_results = []
 
     results = cached_results + computed_results + brvm_results
 
