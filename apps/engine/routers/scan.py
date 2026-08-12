@@ -414,7 +414,7 @@ TWELVE_DATA_API_KEY = config.settings.twelve_data_api_key
 DERIV_API_TOKEN     = config.settings.deriv_api_token
 
 _CACHE_TTL_YF    = 300  # yfinance : cache 5 min
-_CACHE_TTL_DERIV = 60   # Deriv : cache 1 min
+_CACHE_TTL_DERIV = 60   # Deriv : défaut 1 min (overridé par _get_cache_ttl)
 
 # Mapping symboles internes → identifiants API Deriv
 SYMBOL_TO_DERIV = {
@@ -514,8 +514,24 @@ def bollinger(s: pd.Series, p: int = 20, k: float = 2.0):
 
 _http_client: Optional[httpx.AsyncClient] = None
 _klines_cache: dict = {}  # key -> (timestamp, df)
-_CACHE_TTL = 60  # secondes
+_CACHE_TTL = 60  # secondes (défaut, utilisé par fetch_binance_klines pour TF < 1h)
 _CACHE_TTL_TD = 300  # Twelve Data: 5min (limite 800 req/jour sur plan gratuit)
+
+# TTL dynamique selon le timeframe — une bougie 1h change peu en 5 min
+_TF_CACHE_TTL = {
+    "1m": 30,      # 30s — très volatil
+    "5m": 60,      # 1 min
+    "15m": 120,    # 2 min
+    "1h": 300,     # 5 min
+    "4h": 600,     # 10 min
+    "1d": 1800,    # 30 min
+    "1w": 3600,    # 1h
+}
+
+
+def _get_cache_ttl(interval: str) -> int:
+    """Retourne le TTL de cache adapté au timeframe."""
+    return _TF_CACHE_TTL.get(interval, _CACHE_TTL)
 _TD_SEMAPHORE   = asyncio.Semaphore(1)  # Twelve Data : un appel à la fois pour éviter le 429
 _TD_MIN_DELAY   = 1.2   # secondes entre 2 appels Twelve Data (~50 req/min sur plan gratuit)
 _td_last_call   = 0.0   # timestamp monotonic du dernier appel
@@ -599,7 +615,7 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
         return None
 
 
-@rate_limit(max_concurrent=8, min_delay=0.1)
+@rate_limit(max_concurrent=15, min_delay=0.05)
 async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV depuis l'API Deriv WebSocket — pour les indices synthétiques (V75, Boom/Crash, Jump)."""
     import websockets
@@ -613,7 +629,7 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
     now = time.monotonic()
     if cache_key in _klines_cache:
         ts, df = _klines_cache[cache_key]
-        if now - ts < _CACHE_TTL_DERIV:
+        if now - ts < _get_cache_ttl(interval):
             return df
 
     ws_url = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
@@ -629,7 +645,7 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
     try:
         async with websockets.connect(ws_url, ping_interval=None) as ws:
             await ws.send(_json.dumps(payload))
-            raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+            raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
             data = _json.loads(raw)
 
         if "error" in data or "candles" not in data:
@@ -758,7 +774,7 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
     now = _time.monotonic()
     if cache_key in _klines_cache:
         ts, df = _klines_cache[cache_key]
-        if now - ts < _CACHE_TTL:
+        if now - ts < _get_cache_ttl(interval):
             return df
 
     url = f"https://api.binance.com/api/v3/klines?symbol={binance_sym}&interval={interval}&limit={limit}"
@@ -2538,22 +2554,30 @@ async def warmup_fast():
     """Boucle rapide — actifs Binance prioritaires, cycle 60s.
     Binance REST est gratuit et sans limite raisonnable.
     Couvre 15m et 1h pour le day trading.
+    Parallélisé : tous les symboles scannés en un seul asyncio.gather.
     """
     logger.info("warmup_fast_start", symbols=len(BINANCE_PRIORITY_SYMBOLS), interval=WARMUP_INTERVAL_FAST)
     while True:
         t0 = time.monotonic()
         strategies = await _load_active_strategies()
+
+        async def _scan_one(sym: str, timeframe: str, strat):
+            try:
+                res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                if res and not isinstance(res, Exception):
+                    suffix = f":{strat['id']}" if strat else ""
+                    await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_FAST)
+                    await _persist_scan(res, timeframe)
+            except Exception as e:
+                logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(e))
+
         for timeframe in WARMUP_TIMEFRAMES_FAST:
-            for sym in BINANCE_PRIORITY_SYMBOLS:
-                for strat in strategies or [None]:
-                    try:
-                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
-                        if res and not isinstance(res, Exception):
-                            suffix = f":{strat['id']}" if strat else ""
-                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_FAST)
-                            await _persist_scan(res, timeframe)
-                    except Exception as e:
-                        logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(e))
+            tasks = [
+                _scan_one(sym, timeframe, strat)
+                for sym in BINANCE_PRIORITY_SYMBOLS
+                for strat in (strategies or [None])
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_fast_done", timeframe=timeframe,
                         symbols=len(BINANCE_PRIORITY_SYMBOLS), strategies=len(strategies),
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
@@ -2566,24 +2590,31 @@ async def warmup_fast():
 async def warmup_medium():
     """Boucle medium — actifs Deriv (synthétiques), cycle 2 min.
     Les indices de volatilité bougent vite et nécessitent un scan plus fréquent.
+    Parallélisé : tous les symboles scannés en un seul asyncio.gather.
     """
     logger.info("warmup_medium_start", symbols=len(DERIV_SYMBOLS), interval=WARMUP_INTERVAL_MEDIUM)
     await asyncio.sleep(5)
     while True:
         t0 = time.monotonic()
         strategies = await _load_active_strategies()
+
+        async def _scan_one(sym: str, timeframe: str, strat):
+            try:
+                res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                if res:
+                    suffix = f":{strat['id']}" if strat else ""
+                    await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_MEDIUM)
+                    await _persist_scan(res, timeframe)
+            except Exception as e:
+                logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe, error=str(e))
+
         for timeframe in WARMUP_TIMEFRAMES_MEDIUM:
-            for sym in DERIV_SYMBOLS:
-                for strat in strategies or [None]:
-                    try:
-                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
-                        if res:
-                            suffix = f":{strat['id']}" if strat else ""
-                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_MEDIUM)
-                            await _persist_scan(res, timeframe)
-                    except Exception as e:
-                        logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe, error=str(e))
-                await asyncio.sleep(0.3)
+            tasks = [
+                _scan_one(sym, timeframe, strat)
+                for sym in DERIV_SYMBOLS
+                for strat in (strategies or [None])
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(0, WARMUP_INTERVAL_MEDIUM - elapsed)
@@ -2592,7 +2623,7 @@ async def warmup_medium():
 
 async def warmup_slow():
     """Boucle lente — Forex et Commodités, cycle 5 min.
-    Séquentiel avec pause pour respecter les limites yfinance/TwelveData.
+    Parallélisé : yfinance n'a pas de rate limit strict pour 9 symboles.
     """
     logger.info("warmup_slow_start", symbols=len(FOREX_COMMODITY_SYMBOLS), interval=WARMUP_INTERVAL_SLOW)
     # Décalage initial pour ne pas surcharger au démarrage
@@ -2600,18 +2631,24 @@ async def warmup_slow():
     while True:
         t0 = time.monotonic()
         strategies = await _load_active_strategies()
+
+        async def _scan_one(sym: str, timeframe: str, strat):
+            try:
+                res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                if res:
+                    suffix = f":{strat['id']}" if strat else ""
+                    await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_SLOW)
+                    await _persist_scan(res, timeframe)
+            except Exception as e:
+                logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
+
         for timeframe in WARMUP_TIMEFRAMES_SLOW:
-            for sym in FOREX_COMMODITY_SYMBOLS:
-                for strat in strategies or [None]:
-                    try:
-                        res = await fetch_and_analyze(sym, timeframe, strategy=strat)
-                        if res:
-                            suffix = f":{strat['id']}" if strat else ""
-                            await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_SLOW)
-                            await _persist_scan(res, timeframe)
-                    except Exception as e:
-                        logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
-                await asyncio.sleep(0.5)  # respecter rate limits Twelve Data / yfinance
+            tasks = [
+                _scan_one(sym, timeframe, strat)
+                for sym in FOREX_COMMODITY_SYMBOLS
+                for strat in (strategies or [None])
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(0, WARMUP_INTERVAL_SLOW - elapsed)
@@ -2667,8 +2704,43 @@ async def warmup_brvm():
         await asyncio.sleep(wait)
 
 
+async def prefetch_klines():
+    """Pré-fetch parallèle de toutes les klines au démarrage.
+    Remplit le cache en mémoire pour que le premier scan utilisateur soit instantané.
+    Timeout global de 15s — les symboles non fetchés seront récupérés par les boucles warmup.
+    """
+    t0 = time.monotonic()
+    all_symbols = BINANCE_PRIORITY_SYMBOLS + DERIV_SYMBOLS + FOREX_COMMODITY_SYMBOLS
+    tf = "1h"
+
+    async def _safe_fetch(sym: str):
+        try:
+            df = await fetch_binance_klines(sym, tf)
+            if df is None:
+                df = await fetch_deriv_klines(sym, tf)
+            if df is None:
+                df = await fetch_yfinance_klines(sym, tf)
+            return sym, df is not None
+        except Exception:
+            return sym, False
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*[_safe_fetch(s) for s in all_symbols], return_exceptions=True),
+            timeout=15.0,
+        )
+        ok = sum(1 for r in results if isinstance(r, tuple) and r[1])
+        logger.info("prefetch_klines_done", total=len(all_symbols), cached=ok,
+                    elapsed_ms=round((time.monotonic() - t0) * 1000))
+    except asyncio.TimeoutError:
+        logger.warning("prefetch_klines_timeout", elapsed_ms=round((time.monotonic() - t0) * 1000))
+
+
 async def warmup_features():
-    """Point d'entrée — lance les 4 boucles de scan + le batch flusher en parallèle."""
+    """Point d'entrée — pré-fetch klines au démarrage puis lance les 4 boucles + batch flusher."""
+    # Pré-fetch parallèle : remplit le cache klines en un seul asyncio.gather
+    # pour que le premier scan utilisateur soit instantané
+    await prefetch_klines()
     await asyncio.gather(
         warmup_fast(),
         warmup_medium(),
