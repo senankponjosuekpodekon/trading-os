@@ -1,5 +1,7 @@
 -- RAG tables: rag_documents (pgvector embeddings) + rag_cache (LLM answer cache)
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS rag_documents (
     id          SERIAL PRIMARY KEY,
     category    VARCHAR(100)   NOT NULL DEFAULT 'general',

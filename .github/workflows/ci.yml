@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: trading_user
           POSTGRES_PASSWORD: trading_pass
