@@ -21,11 +21,13 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml",
 }
 
-# Symboles BRVM les plus liquides (alignés sur brvm.org 2026)
+# Tous les symboles BRVM cotés (alignés sur brvm.org 2026)
 BRVM_SYMBOLS = [
-    "ONTBF", "SGBC", "BOABF", "ETIT", "SIVC",
-    "PALC", "SOGC", "SNTS", "CIEC", "NSBC",
-    "ORGT", "BICC", "CBIBF", "ABJC", "STAC",
+    "ABJC", "BICB", "BICC", "BNBC", "BOAB", "BOABF", "BOAC", "BOAM", "BOAN", "BOAS",
+    "CABC", "CBIBF", "CFAC", "CIEC", "ECOC", "ETIT", "FTSC", "LNBB", "NEIC", "NSBC",
+    "NTLC", "ONTBF", "ORAC", "ORGT", "PALC", "PRSC", "SAFC", "SCRC", "SDCC", "SDSC",
+    "SEMC", "SGBC", "SHEC", "SIBC", "SICC", "SIVC", "SLBC", "SMBC", "SNTS", "SOGC",
+    "SPHC", "STAC", "STBC", "TTLC", "TTLS", "UNLC", "UNXC",
 ]
 
 # Alias legacy
