@@ -1,5 +1,5 @@
 """
-Unit tests for the 14-layer signal quality filter.
+Unit tests for the 17-layer signal quality filter.
 Covers each layer individually + integration test for apply_quality_gate.
 """
 import pandas as pd
@@ -21,6 +21,8 @@ from risk.signal_quality_filter import (
     _check_seasonal,
     _check_funding_rate,
     _check_dxy_macro,
+    _check_correlation_breakdown,
+    _check_vol_term_structure,
 )
 
 
@@ -395,6 +397,137 @@ class TestApplyQualityGate:
             news_context={"macro_risk": False, "post_news_volatility": True},
         )
         assert penalized["quality_score"] <= clean["quality_score"]
+
+
+# ── Layer 16: Correlation breakdown ─────────────────────────────────
+class TestCorrelationBreakdown:
+    def test_insufficient_data_passes(self):
+        df = _make_df(n=20)
+        result = _check_correlation_breakdown(df, "BUY")
+        assert result["passed"] is True
+
+    def test_no_data_passes(self):
+        result = _check_correlation_breakdown(None, "BUY")
+        assert result["passed"] is True
+
+    def test_external_correlation_breakdown_rejects(self):
+        onchain = {"correlation_data": {
+            "current_correlation": 0.1,
+            "historical_correlation": 0.85,
+        }}
+        df = _make_df(n=60)
+        result = _check_correlation_breakdown(df, "BUY", onchain_context=onchain)
+        assert result["passed"] is False
+        assert "breakdown" in result["reason"].lower()
+
+    def test_external_correlation_mild_penalty(self):
+        onchain = {"correlation_data": {
+            "current_correlation": 0.45,
+            "historical_correlation": 0.85,
+        }}
+        df = _make_df(n=60)
+        result = _check_correlation_breakdown(df, "BUY", onchain_context=onchain)
+        assert result["passed"] is True
+        assert result.get("correlation_penalty", 0) > 0
+
+    def test_external_correlation_healthy_passes(self):
+        onchain = {"correlation_data": {
+            "current_correlation": 0.8,
+            "historical_correlation": 0.85,
+        }}
+        df = _make_df(n=60)
+        result = _check_correlation_breakdown(df, "BUY", onchain_context=onchain)
+        assert result["passed"] is True
+        assert result.get("correlation_penalty", 0) == 0
+
+    def test_autocorr_breakdown_rejects(self):
+        """Build a df where prior autocorr is positive but recent flips negative."""
+        # Prior: smooth uptrend (high positive autocorr)
+        prior_closes = np.linspace(100, 130, 40)
+        # Recent: sharp alternating pattern (strong negative autocorr)
+        recent_closes = np.array([130, 125, 132, 123, 133, 122, 134, 121,
+                                  135, 120, 136, 119, 137, 118, 138, 117,
+                                  139, 116, 140, 115, 141, 114, 142, 113,
+                                  143, 112, 144, 111, 145, 110], dtype=float)
+        closes = np.concatenate([prior_closes, recent_closes])
+        n = len(closes)
+        df = pd.DataFrame({
+            "open": closes - 0.1,
+            "high": closes + 0.5,
+            "low": closes - 0.5,
+            "close": closes,
+            "volume": np.full(n, 1000.0),
+        })
+        result = _check_correlation_breakdown(df, "BUY")
+        assert result["passed"] is False
+
+
+# ── Layer 17: Vol term structure ─────────────────────────────────────
+class TestVolTermStructure:
+    def test_insufficient_data_passes(self):
+        df = _make_df(n=20)
+        result = _check_vol_term_structure(df, "BUY")
+        assert result["passed"] is True
+
+    def test_no_data_passes(self):
+        result = _check_vol_term_structure(None, "BUY")
+        assert result["passed"] is True
+
+    def test_normal_vol_passes_no_penalty(self):
+        df = _make_df(n=120)
+        result = _check_vol_term_structure(df, "BUY")
+        assert result["passed"] is True
+        assert result.get("vol_term_penalty", 0) == 0
+
+    def test_contango_penalty(self):
+        """Short-term vol much higher than long-term → contango penalty."""
+        n = 120
+        rng = np.random.RandomState(42)
+        base = 100.0
+        # Long period: low volatility
+        long_closes = base + np.cumsum(rng.randn(100) * 0.1)
+        # Recent 20 bars: high volatility (spike)
+        recent_closes = long_closes[-1] + np.cumsum(rng.randn(20) * 3.0)
+        closes = np.concatenate([long_closes, recent_closes])
+        df = pd.DataFrame({
+            "open": closes - 0.1,
+            "high": closes + np.abs(rng.randn(n)) * 0.5,
+            "low": closes - np.abs(rng.randn(n)) * 0.5,
+            "close": closes,
+            "volume": np.full(n, 1000.0),
+        })
+        # Make recent bars have much wider high-low range
+        df.loc[df.index[-20:], "high"] = df.loc[df.index[-20:], "close"] + 5.0
+        df.loc[df.index[-20:], "low"] = df.loc[df.index[-20:], "close"] - 5.0
+        result = _check_vol_term_structure(df, "BUY")
+        assert result["passed"] is True
+        assert result.get("vol_term_penalty", 0) > 0
+        assert result.get("vol_term_ratio", 0) > 2.0
+
+    def test_backwardation_penalty(self):
+        """Short-term vol much lower than long-term → backwardation penalty."""
+        n = 120
+        rng = np.random.RandomState(42)
+        base = 100.0
+        # Long period: high volatility
+        long_closes = base + np.cumsum(rng.randn(100) * 2.0)
+        # Recent 20 bars: very low volatility (flat)
+        recent_closes = np.full(20, long_closes[-1])
+        closes = np.concatenate([long_closes, recent_closes])
+        df = pd.DataFrame({
+            "open": closes - 0.1,
+            "high": closes + 1.0,
+            "low": closes - 1.0,
+            "close": closes,
+            "volume": np.full(n, 1000.0),
+        })
+        # Make recent bars have very tight range
+        df.loc[df.index[-20:], "high"] = df.loc[df.index[-20:], "close"] + 0.01
+        df.loc[df.index[-20:], "low"] = df.loc[df.index[-20:], "close"] - 0.01
+        result = _check_vol_term_structure(df, "BUY")
+        assert result["passed"] is True
+        assert result.get("vol_term_penalty", 0) > 0
+        assert result.get("vol_term_ratio", 1.0) < 0.5
 
 
 # ── Sizing multiplier ────────────────────────────────────────────────

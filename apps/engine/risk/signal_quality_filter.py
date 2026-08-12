@@ -17,6 +17,8 @@ Layers (from filt.md architecture):
  13. Funding rate gate      — crypto: reject extreme funding rates
  14. DXY macro gate         — gold: penalize when DXY momentum conflicts
  15. Volume normalization   — BRVM: per-symbol relative volume
+ 16. Correlation breakdown  — detect when historically correlated assets diverge
+ 17. Vol term structure     — short vs long ATR ratio (VIX proxy), penalize stress/complacency
 
 Usage:
     from risk.signal_quality_filter import apply_quality_gate
@@ -81,6 +83,18 @@ MAX_WICK_BODY_RATIO = 2.0
 EXTREME_FUNDING_RATE = 0.1
 DXY_CONFLICT_THRESHOLD = 0.3
 DIVERGENCE_LOOKBACK = 20
+
+# ── Correlation breakdown thresholds ────────────────────────────────
+CORRELATION_LOOKBACK = 30          # bars to compute rolling correlation
+CORRELATION_BREAKDOWN_THRESHOLD = 0.3  # below this = breakdown (was ~0.7+)
+CORRELATION_BREAKDOWN_PENALTY = 0.10
+
+# ── Vol term structure thresholds ───────────────────────────────────
+VOL_TERM_SHORT_WINDOW = 5         # short-term ATR window (bars)
+VOL_TERM_LONG_WINDOW = 50         # long-term ATR window (bars)
+VOL_TERM_CONTANGO_RATIO = 2.0     # short > long * 2.0 = contango (vol spiking)
+VOL_TERM_BACKWARDATION_RATIO = 0.5  # short < long * 0.5 = backwardation (vol collapsing)
+VOL_TERM_PENALTY = 0.08
 
 # ── Seasonal patterns: (month, day_start, day_end, asset_types, desc, penalty) ─
 SEASONAL_PATTERNS = [
@@ -531,6 +545,140 @@ def _check_dxy_macro(asset_type: str, dxy_data: Optional[dict], signal: str) -> 
 
 
 # ════════════════════════════════════════════════════════════════════
+# LAYER 16 — Correlation breakdown detection
+# ════════════════════════════════════════════════════════════════════
+def _check_correlation_breakdown(
+    df,
+    signal: str,
+    onchain_context: Optional[dict] = None,
+) -> dict:
+    """
+    Detect when a historically correlated asset pair diverges.
+    Uses onchain_context['correlation_data'] if available (precomputed),
+    otherwise falls back to internal price/volume proxy.
+    """
+    if df is None or len(df) < CORRELATION_LOOKBACK + 5:
+        return {"passed": True, "reason": None, "layer": "correlation_breakdown"}
+
+    # If correlation data is provided externally (from scan.py multi-symbol context)
+    if onchain_context and onchain_context.get("correlation_data"):
+        corr_data = onchain_context["correlation_data"]
+        current_corr = corr_data.get("current_correlation", 1.0)
+        historical_corr = corr_data.get("historical_correlation", 1.0)
+
+        if historical_corr > 0.6 and current_corr < CORRELATION_BREAKDOWN_THRESHOLD:
+            return {
+                "passed": False,
+                "reason": f"Correlation breakdown: {historical_corr:.2f} → {current_corr:.2f}",
+                "layer": "correlation_breakdown",
+                "correlation_penalty": CORRELATION_BREAKDOWN_PENALTY,
+            }
+        if historical_corr > 0.6 and current_corr < 0.5:
+            return {
+                "passed": True, "reason": None, "layer": "correlation_breakdown",
+                "correlation_penalty": min(0.05, (0.5 - current_corr) * 0.1),
+            }
+        return {"passed": True, "reason": None, "layer": "correlation_breakdown"}
+
+    # Fallback: detect internal price/volume correlation breakdown
+    # Compare last N bars vs previous N bars — if price direction flips but volume pattern continues,
+    # it suggests a breakdown in the underlying correlation structure
+    recent = df.tail(CORRELATION_LOOKBACK)
+    prior = df.iloc[-(CORRELATION_LOOKBACK * 2):-CORRELATION_LOOKBACK]
+
+    if len(prior) < 10:
+        return {"passed": True, "reason": None, "layer": "correlation_breakdown"}
+
+    recent_price_corr = recent["close"].pct_change().dropna()
+    prior_price_corr = prior["close"].pct_change().dropna()
+
+    # Compute rolling autocorrelation as a proxy
+    recent_autocorr = recent_price_corr.autocorr(lag=1) if len(recent_price_corr) > 2 else 0
+    prior_autocorr = prior_price_corr.autocorr(lag=1) if len(prior_price_corr) > 2 else 0
+
+    # If autocorrelation flips sign significantly, structure has broken down
+    if prior_autocorr > 0.3 and recent_autocorr < -0.3:
+        return {
+            "passed": False,
+            "reason": f"Structure breakdown: autocorr {prior_autocorr:.2f} → {recent_autocorr:.2f}",
+            "layer": "correlation_breakdown",
+            "correlation_penalty": CORRELATION_BREAKDOWN_PENALTY,
+        }
+
+    if prior_autocorr > 0.3 and recent_autocorr < 0:
+        return {
+            "passed": True, "reason": None, "layer": "correlation_breakdown",
+            "correlation_penalty": min(0.05, abs(recent_autocorr) * 0.1),
+        }
+
+    return {"passed": True, "reason": None, "layer": "correlation_breakdown"}
+
+
+# ════════════════════════════════════════════════════════════════════
+# LAYER 17 — Volatility term structure
+# ════════════════════════════════════════════════════════════════════
+def _check_vol_term_structure(
+    df,
+    signal: str,
+    atr_value: Optional[float] = None,
+) -> dict:
+    """
+    Compare short-term vs long-term volatility (ATR-based proxy for VIX term structure).
+    - Contango: short vol >> long vol → market stress, penalize
+    - Backwardation: short vol << long vol → complacency, mild penalty
+    """
+    if df is None or len(df) < VOL_TERM_LONG_WINDOW + 5:
+        return {"passed": True, "reason": None, "layer": "vol_term_structure"}
+
+    try:
+        high = df["high"].astype(float)
+        low = df["low"].astype(float)
+        close = df["close"].astype(float)
+
+        # Compute True Range
+        tr = (high - low).combine(
+            (high - close.shift(1)).abs(), max
+        ).combine(
+            (low - close.shift(1)).abs(), max
+        )
+
+        short_atr = tr.tail(VOL_TERM_SHORT_WINDOW).mean()
+        long_atr = tr.tail(VOL_TERM_LONG_WINDOW).mean()
+
+        if long_atr == 0 or long_atr != long_atr:  # NaN check
+            return {"passed": True, "reason": None, "layer": "vol_term_structure"}
+
+        ratio = short_atr / long_atr
+
+        # Contango: short-term vol spiking vs long-term → market stress
+        if ratio > VOL_TERM_CONTANGO_RATIO:
+            return {
+                "passed": True,  # Don't hard-reject, just penalize
+                "reason": None,
+                "layer": "vol_term_structure",
+                "vol_term_penalty": VOL_TERM_PENALTY,
+                "vol_term_ratio": round(ratio, 2),
+            }
+
+        # Backwardation: short-term vol collapsing → complacency (mild penalty)
+        if ratio < VOL_TERM_BACKWARDATION_RATIO:
+            return {
+                "passed": True,
+                "reason": None,
+                "layer": "vol_term_structure",
+                "vol_term_penalty": VOL_TERM_PENALTY * 0.5,
+                "vol_term_ratio": round(ratio, 2),
+            }
+
+        return {
+            "passed": True, "reason": None, "layer": "vol_term_structure",
+            "vol_term_ratio": round(ratio, 2),
+        }
+    except Exception:
+        return {"passed": True, "reason": None, "layer": "vol_term_structure"}
+
+
+# ════════════════════════════════════════════════════════════════════
 # MAIN — apply_quality_gate
 # ════════════════════════════════════════════════════════════════════
 def apply_quality_gate(
@@ -692,6 +840,30 @@ def apply_quality_gate(
             total_penalty += dxy_result["dxy_penalty"]
             flags.append("DXY en conflit avec signal")
         layer_scores["dxy_macro"] = 100 - int(dxy_result.get("dxy_penalty", 0) * 200)
+
+    # Layer 16 — Correlation breakdown
+    corr_result = _check_correlation_breakdown(df, signal, onchain_context)
+    if not corr_result["passed"]:
+        rejected.append(corr_result)
+    else:
+        if corr_result.get("correlation_penalty", 0) > 0:
+            total_penalty += corr_result["correlation_penalty"]
+            flags.append("Correlation breakdown")
+        layer_scores["correlation_breakdown"] = 100 - int(corr_result.get("correlation_penalty", 0) * 200)
+
+    # Layer 17 — Vol term structure
+    vol_ts_result = _check_vol_term_structure(df, signal, atr_value)
+    if not vol_ts_result["passed"]:
+        rejected.append(vol_ts_result)
+    else:
+        if vol_ts_result.get("vol_term_penalty", 0) > 0:
+            total_penalty += vol_ts_result["vol_term_penalty"]
+            ratio = vol_ts_result.get("vol_term_ratio", 1.0)
+            if ratio > VOL_TERM_CONTANGO_RATIO:
+                flags.append("Vol term contango (stress)")
+            else:
+                flags.append("Vol term backwardation (complacency)")
+        layer_scores["vol_term_structure"] = 100 - int(vol_ts_result.get("vol_term_penalty", 0) * 200)
 
     # Composite quality score
     if layer_scores:
