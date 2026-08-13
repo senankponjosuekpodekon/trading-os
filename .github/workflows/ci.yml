@@ -64,6 +64,21 @@ jobs:
 
   engine:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: trading_user
+          POSTGRES_PASSWORD: trading_pass
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U trading_user -d app"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,7 +97,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://trading_user:trading_pass@localhost:5432/app
         run: |
-          if [ -d tests ]; then pytest -q; else echo "No tests yet"; fi
+          if [ -d tests ]; then pytest -q --timeout=60 -x; else echo "No tests yet"; fi
 
   docker:
     runs-on: ubuntu-latest
