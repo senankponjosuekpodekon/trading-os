@@ -143,8 +143,9 @@ class TestWarmupSlow:
 
         async def fake_sleep(seconds):
             sleep_calls.append(seconds)
-            if seconds not in (15, 0.5):
-                raise _StopLoop()
+            if seconds == 15:
+                return
+            raise _StopLoop()
 
         with patch.object(scan_module, "fetch_and_analyze", side_effect=fake_fetch_and_analyze), \
              patch.object(scan_module, "set_cached", side_effect=fake_set_cached), \
@@ -167,13 +168,12 @@ class TestWarmupSlow:
         keys = {k for k, _ in calls}
         assert keys == {"scan:EUR/USD:1h", "scan:XAU/USD:1h"}
 
-    def test_waits_15s_before_starting_and_paces_requests_by_500ms(self):
+    def test_waits_15s_before_starting_then_scans(self):
         _, sleep_calls = self._run_one_cycle(
             forex_symbols=["EUR/USD"],
             timeframes=["1h"],
         )
         assert sleep_calls[0] == 15
-        assert 0.5 in sleep_calls
 
     def test_caches_across_multiple_timeframes(self):
         calls, _ = self._run_one_cycle(
@@ -197,8 +197,9 @@ class TestWarmupSlow:
             calls.append(key)
 
         async def fake_sleep(seconds):
-            if seconds not in (15, 0.5):
-                raise _StopLoop()
+            if seconds == 15:
+                return
+            raise _StopLoop()
 
         async def fake_persist_scan(result, timeframe):
             pass
@@ -239,16 +240,28 @@ def test_warmup_features_runs_all_loops_concurrently():
         started.append("brvm")
         raise _StopLoop("brvm")
 
+    async def fake_warmup_stocks():
+        started.append("stocks")
+        raise _StopLoop("stocks")
+
     async def fake_scan_batch_flusher():
         started.append("flusher")
         raise _StopLoop("flusher")
+
+    async def fake_supervised_loop(name, coro_factory, max_restarts=-1):
+        await coro_factory()
+
+    async def fake_prefetch_klines():
+        pass
 
     with patch.object(scan_module, "warmup_fast", side_effect=fake_warmup_fast), \
          patch.object(scan_module, "warmup_medium", side_effect=fake_warmup_medium), \
          patch.object(scan_module, "warmup_slow", side_effect=fake_warmup_slow), \
          patch.object(scan_module, "warmup_brvm", side_effect=fake_warmup_brvm), \
-         patch.object(scan_module, "_scan_batch_flusher", side_effect=fake_scan_batch_flusher):
-        with pytest.raises(_StopLoop):
-            asyncio.run(scan_module.warmup_features())
+         patch.object(scan_module, "warmup_stocks", side_effect=fake_warmup_stocks), \
+         patch.object(scan_module, "_scan_batch_flusher", side_effect=fake_scan_batch_flusher), \
+         patch.object(scan_module, "_supervised_loop", side_effect=fake_supervised_loop), \
+         patch.object(scan_module, "prefetch_klines", side_effect=fake_prefetch_klines):
+        asyncio.run(scan_module.warmup_features())
 
-    assert set(started) == {"fast", "medium", "slow", "brvm", "flusher"}
+    assert set(started) == {"fast", "medium", "slow", "brvm", "stocks", "flusher"}
