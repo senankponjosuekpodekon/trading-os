@@ -64,7 +64,9 @@ class CircuitBreaker:
                     raise CircuitBreakerOpen(self.name)
 
         try:
-            result = await fn() if asyncio.iscoroutinefunction(fn) else fn()
+            result = fn()
+            if asyncio.iscoroutine(result):
+                result = await result
         except exceptions:
             await self._record_failure()
             raise
