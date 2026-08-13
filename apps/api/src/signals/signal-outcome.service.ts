@@ -9,7 +9,7 @@ import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
 
 const TF_TO_BARS_LOOKBACK: Record<string, number> = {
-  '1m': 60, '5m': 48, '15m': 32, '1h': 24, '4h': 12, '1d': 5,
+  '1m': 60, '5m': 50, '15m': 50, '1h': 50, '4h': 50, '1d': 50,
 };
 
 const TF_TO_BINANCE_INTERVAL: Record<string, string> = {

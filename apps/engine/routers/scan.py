@@ -62,7 +62,7 @@ from risk.dca_tranches import compute_dca_tranches, compute_scale_out
 from utils.correlation import set_correlation_id, clear_correlation_id
 
 logger = get_logger(__name__)
-_executor = ThreadPoolExecutor(max_workers=16)
+_executor = ThreadPoolExecutor(max_workers=4)  # Match CPU cores to avoid context-switch overhead
 atexit.register(lambda: _executor.shutdown(wait=False))
 
 # ── Scan history persistence ──────────────────────────────────
@@ -590,6 +590,7 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
+@rate_limit(max_concurrent=4, min_delay=0.5)
 async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV depuis Twelve Data API — pour Forex, métaux, WTI."""
     if not TWELVE_DATA_API_KEY:
@@ -718,6 +719,7 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
         return None
 
 
+@rate_limit(max_concurrent=8, min_delay=0.1)
 async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV via yfinance — fallback gratuit pour Forex, commodités."""
     import datetime as _dt
@@ -2382,7 +2384,9 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
                 if df_bias is None:
                     df_bias = await asyncio.wait_for(fetch_yfinance_klines(symbol, bias_tf, limit=100), timeout=5.0)
                 if df_bias is not None and len(df_bias) >= 50:
-                    bias_regimes[bias_tf] = detect_regime(df_bias["high"], df_bias["low"], df_bias["close"])
+                    bias_regimes[bias_tf] = await asyncio.to_thread(
+                        detect_regime, df_bias["high"], df_bias["low"], df_bias["close"]
+                    )
             except Exception:
                 pass
 
@@ -2497,7 +2501,8 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             _pc24 = float((df["close"].iloc[-1] / df["close"].iloc[-min(len(df), 24)] - 1) * 100) if len(df) >= 24 else 0
             _pc1 = float((df["close"].iloc[-1] / df["close"].iloc[-2] - 1) * 100) if len(df) >= 2 else 0
             _vol24 = float(df["volume"].iloc[-min(len(df), 24):].sum() * df["close"].iloc[-1]) if "volume" in df else 0
-            _defense = run_defense_checks(
+            _defense = await asyncio.to_thread(
+                run_defense_checks,
                 symbol, price_change_24h=_pc24, price_change_1h=_pc1,
                 volume_24h=_vol24, liquidity=_liquidity if _liquidity else 0,
             )
@@ -2583,7 +2588,8 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             if tokenomics_context:
                 _tokenomics_score = max(0, 100 - tokenomics_context.get("risk_score", 50))
             _tokenomics_penalty = max(0, _tokenomics_score) if _tokenomics_score else None
-            _grade = compute_token_grade(
+            _grade = await asyncio.to_thread(
+                compute_token_grade,
                 symbol,
                 technical_score=result.get("confidence", 50),
                 technical_confidence=result.get("confidence", 50),
@@ -2629,13 +2635,17 @@ async def warmup_fast():
                 logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
+        _BATCH_SIZE = 4  # Process 4 symbols at a time to avoid CPU saturation
         for timeframe in WARMUP_TIMEFRAMES_FAST:
-            tasks = [
-                _scan_one(sym, timeframe, strat)
-                for sym in BINANCE_PRIORITY_SYMBOLS
-                for strat in (strategies or [None])
-            ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            all_syms = list(BINANCE_PRIORITY_SYMBOLS)
+            for i in range(0, len(all_syms), _BATCH_SIZE):
+                batch = all_syms[i:i + _BATCH_SIZE]
+                tasks = [
+                    _scan_one(sym, timeframe, strat)
+                    for sym in batch
+                    for strat in (strategies or [None])
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_fast_done", timeframe=timeframe,
                         symbols=len(BINANCE_PRIORITY_SYMBOLS), strategies=len(strategies),
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
@@ -2670,13 +2680,17 @@ async def warmup_medium():
                 logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
+        _BATCH_SIZE = 4
         for timeframe in WARMUP_TIMEFRAMES_MEDIUM:
-            tasks = [
-                _scan_one(sym, timeframe, strat)
-                for sym in DERIV_SYMBOLS
-                for strat in (strategies or [None])
-            ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            all_syms = list(DERIV_SYMBOLS)
+            for i in range(0, len(all_syms), _BATCH_SIZE):
+                batch = all_syms[i:i + _BATCH_SIZE]
+                tasks = [
+                    _scan_one(sym, timeframe, strat)
+                    for sym in batch
+                    for strat in (strategies or [None])
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(1, WARMUP_INTERVAL_MEDIUM - elapsed)
@@ -2707,13 +2721,17 @@ async def warmup_slow():
                 logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
+        _BATCH_SIZE = 4
         for timeframe in WARMUP_TIMEFRAMES_SLOW:
-            tasks = [
-                _scan_one(sym, timeframe, strat)
-                for sym in FOREX_COMMODITY_SYMBOLS
-                for strat in (strategies or [None])
-            ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            all_syms = list(FOREX_COMMODITY_SYMBOLS)
+            for i in range(0, len(all_syms), _BATCH_SIZE):
+                batch = all_syms[i:i + _BATCH_SIZE]
+                tasks = [
+                    _scan_one(sym, timeframe, strat)
+                    for sym in batch
+                    for strat in (strategies or [None])
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(1, WARMUP_INTERVAL_SLOW - elapsed)
@@ -2810,13 +2828,17 @@ async def warmup_stocks():
                 logger.warning("warmup_stocks_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
+        _BATCH_SIZE = 4
         for timeframe in WARMUP_TIMEFRAMES_STOCKS:
-            tasks = [
-                _scan_one(sym, timeframe, strat)
-                for sym in stocks
-                for strat in (strategies or [None])
-            ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            all_syms = list(stocks)
+            for i in range(0, len(all_syms), _BATCH_SIZE):
+                batch = all_syms[i:i + _BATCH_SIZE]
+                tasks = [
+                    _scan_one(sym, timeframe, strat)
+                    for sym in batch
+                    for strat in (strategies or [None])
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_stocks_done", timeframe=timeframe,
                         symbols=len(stocks), strategies=len(strategies),
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
