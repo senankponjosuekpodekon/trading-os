@@ -111,6 +111,28 @@ RSS_SOURCES: dict[str, list[str]] = {
         "https://www.financialafrik.com/feed/",
         "https://feeds.reuters.com/reuters/AFRICAOnlineNews",
     ],
+    "jse": [
+        "https://www.news24.com/rss/finance/",
+        "https://www.businesslive.co.za/rss/finance/",
+        "https://www.moneyweb.co.za/feed/",
+        "https://feeds.reuters.com/reuters/AFRICAOnlineNews",
+    ],
+    "ngx": [
+        "https://www.premiumtimesng.com/feed/",
+        "https://www.thisdaylive.com/feed/",
+        "https://www.vanguardngr.com/feed/",
+        "https://feeds.reuters.com/reuters/AFRICAOnlineNews",
+    ],
+    "nse": [
+        "https://www.businessdailyafrica.com/rss/finance/",
+        "https://www.nation.africa/kenya/business/rss",
+        "https://feeds.reuters.com/reuters/AFRICAOnlineNews",
+    ],
+    "gse": [
+        "https://www.graphic.com.gh/feed/",
+        "https://www.myjoyonline.com/feed/",
+        "https://feeds.reuters.com/reuters/AFRICAOnlineNews",
+    ],
     "macro": [
         "https://feeds.reuters.com/reuters/businessNews",
         "https://feeds.reuters.com/reuters/topNews",
@@ -184,6 +206,55 @@ SYMBOL_KEYWORDS: dict[str, list[str]] = {
     "UNXC":       ["uniwax", "cote d'ivoire", "ivoire"],
     "SICC":       ["sicor", "cote d'ivoire", "ivoire"],
     "ECOC":       ["ecobank", "cote d'ivoire", "ivoire"],
+    # JSE (South Africa) — top liquid stocks
+    "jse":        ["jse", "johannesburg stock exchange", "south africa", "rand"],
+    "SOL":        ["sasol", "south africa"],
+    "NPN":        ["nasdaq", "naspers", "south africa"],
+    "S32":        ["south32", "south africa"],
+    "SBK":        ["standard bank", "south africa"],
+    "FSR":        ["firstrand", "south africa"],
+    "AGL":        ["anglo american", "south africa"],
+    "BIL":        ["bhp billiton", "south africa"],
+    "MTN":        ["mtn", "south africa"],
+    "VOD":        ["vodacom", "south africa"],
+    "SHP":        ["shoprite", "south africa"],
+    "CFR":        ["richemont", "south africa"],
+    "SLM":        ["sanlam", "south africa"],
+    "REM":        ["remgro", "south africa"],
+    "BTI":        ["british american tobacco", "south africa"],
+    # NGX (Nigeria) — top liquid stocks
+    "ngx":        ["ngx", "nigerian exchange", "nigeria", "naira"],
+    "DANGCEM":    ["dangote cement", "nigeria"],
+    "MTNN":       ["mtn nigeria", "nigeria"],
+    "AIRTELAFRI": ["airtel africa", "nigeria"],
+    "BUACEMENT":  ["bua cement", "nigeria"],
+    "BUAFOODS":   ["bua foods", "nigeria"],
+    "ZENITHBANK": ["zenith bank", "nigeria"],
+    "GTCO":       ["guaranty trust", "nigeria"],
+    "UBA":        ["united bank for africa", "nigeria"],
+    "ACCESSCORP": ["access bank", "nigeria"],
+    "SEPLAT":     ["seplat", "nigeria"],
+    "NESTLE":     ["nestle nigeria", "nigeria"],
+    "OANDO":      ["oando", "nigeria"],
+    # NSE (Kenya) — top liquid stocks
+    "nse_ke":     ["nairobi securities exchange", "kenya", "shilling"],
+    "SCOM":       ["safaricom", "kenya"],
+    "EQTY":       ["equity bank", "kenya"],
+    "KCB":        ["kcb group", "kenya"],
+    "EABL":       ["east african breweries", "kenya"],
+    "NCBA":       ["ncba", "kenya"],
+    "KEGN":       ["kengen", "kenya"],
+    "KPLC":       ["kenya power", "kenya"],
+    "BATK":       ["bat kenya", "kenya"],
+    # GSE (Ghana) — top liquid stocks
+    "gse":        ["ghana stock exchange", "ghana", "cedi"],
+    "MTNGH":      ["mtn ghana", "ghana"],
+    "GCB":        ["ghana commercial bank", "ghana"],
+    "EGH":        ["ecobank ghana", "ghana"],
+    "GOIL":       ["ghana oil", "ghana"],
+    "TOTAL":      ["totalenergies ghana", "ghana"],
+    "GGBL":       ["guinness ghana", "ghana"],
+    "SIC":        ["sic insurance", "ghana"],
 }
 
 # Reddit subreddits par marché
@@ -245,6 +316,15 @@ def _symbol_to_source_category(symbol: str) -> str:
     from scrapers.brvm_scraper import is_brvm_symbol
     if is_brvm_symbol(symbol) or "BRVM" in symbol:
         return "brvm"
+    # African exchanges by prefix or known symbols
+    if symbol.startswith("JSE:") or symbol in SYMBOL_KEYWORDS and any(k in symbol for k in ["SOL", "NPN", "SBK", "FSR", "AGL", "BIL", "MTN", "VOD", "SHP", "CFR", "SLM", "REM", "BTI", "S32"]):
+        return "jse"
+    if symbol.startswith("NGX:") or symbol in SYMBOL_KEYWORDS and any(k in symbol for k in ["DANGCEM", "MTNN", "AIRTELAFRI", "BUACEMENT", "BUAFOODS", "ZENITHBANK", "GTCO", "UBA", "ACCESSCORP", "SEPLAT", "NESTLE", "OANDO"]):
+        return "ngx"
+    if symbol.startswith("NSE:") or symbol in SYMBOL_KEYWORDS and any(k in symbol for k in ["SCOM", "EQTY", "KCB", "EABL", "NCBA", "KEGN", "KPLC", "BATK"]):
+        return "nse"
+    if symbol.startswith("GSE:") or symbol in SYMBOL_KEYWORDS and any(k in symbol for k in ["MTNGH", "GCB", "EGH", "GOIL", "GGBL", "SIC"]):
+        return "gse"
     return "crypto"
 
 
