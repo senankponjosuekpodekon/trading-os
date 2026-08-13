@@ -168,7 +168,7 @@ async def price_broadcaster():
                         max_retries=1,
                         base_delay=0.5,
                         exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
-                        on_retry=lambda attempt, exc: logger.warning(
+                        on_retry=lambda attempt, exc: logger.debug(
                             "binance_price_retry",
                             attempt=attempt,
                             error_type=type(exc).__name__,
@@ -208,7 +208,7 @@ async def price_broadcaster():
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.warning("price_broadcast_failed", error_type=type(e).__name__, error=repr(e))
+                logger.debug("price_broadcast_failed", error_type=type(e).__name__, error=repr(e))
             await asyncio.sleep(3 + random.uniform(0, 0.5))
 
 

@@ -100,7 +100,7 @@ async def _fetch_whale_transactions(
                     if tx.get("symbol", "").upper() == symbol.upper()
                 ]
     except Exception as exc:
-        logger.warning("whale_alert_fetch_failed", symbol=symbol, error=str(exc))
+        logger.debug("whale_alert_fetch_failed", symbol=symbol, error=str(exc))
 
     return []
 
@@ -149,7 +149,7 @@ async def _fetch_dex_liquidity_history(symbol: str) -> Dict[str, Any]:
             "url": best.get("url", ""),
         }
     except Exception as exc:
-        logger.warning("dex_liquidity_fetch_failed", symbol=symbol, error=str(exc))
+        logger.debug("dex_liquidity_fetch_failed", symbol=symbol, error=str(exc))
         return {"found": False, "liquidity": 0, "trend": "unknown"}
 
 

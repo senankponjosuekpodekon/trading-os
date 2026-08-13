@@ -12,12 +12,14 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
+import asyncpg
+
 from config import settings
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_shared_pool: Optional[object] = None
+_shared_pool: Optional[asyncpg.Pool] = None
 _lock = asyncio.Lock()
 
 

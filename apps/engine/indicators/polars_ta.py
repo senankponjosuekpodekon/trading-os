@@ -110,7 +110,7 @@ def compute_all_indicators(
     return df
 
 
-def get_indicator_values(df: pl.DataFrame) -> dict:
+def get_indicator_values(df: pl.DataFrame) -> dict[str, float | None]:
     """Extract last-bar indicator values from a DataFrame produced by compute_all_indicators.
 
     Returns a dict with scalar values ready for use in scoring logic.

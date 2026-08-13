@@ -16,7 +16,6 @@ from routers.price_action import detect_market_structure, price_action_bonus
 from routers.synthetic_engine import analyze_synthetic, evaluate_synthetic_strategy, SYMBOL_TO_DERIV as SYNTHETIC_SYMBOLS
 from routers.boom_crash_model import analyze_boom_crash
 from routers.sr_zones import get_sr_zones, sr_bonus
-from utils.deriv_symbols import to_wire_symbol
 from routers.patterns import scan_last_patterns, patterns_bonus
 from patterns.detector import detect_all as detect_chart_patterns
 from patterns.confluence import score_pattern_confluence
@@ -65,157 +64,17 @@ logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=4)  # Match CPU cores to avoid context-switch overhead
 atexit.register(lambda: _executor.shutdown(wait=False))
 
-# ── Scan history persistence ──────────────────────────────────
-_scan_db_pool = None
-_scan_db_lock = asyncio.Lock()
-_scan_batch: list[dict] = []
-_scan_batch_lock = asyncio.Lock()
-
-
-async def _get_scan_pool():
-    global _scan_db_pool
-    if _scan_db_pool is None:
-        async with _scan_db_lock:
-            if _scan_db_pool is None:
-                import asyncpg
-                url = config.settings.database_url.replace(
-                    "postgresql+asyncpg://", "postgresql://"
-                ).replace("postgres://", "postgresql://")
-                _scan_db_pool = await asyncpg.create_pool(url, min_size=1, max_size=3)
-    return _scan_db_pool
-
-
-async def _persist_scan_redis(result: dict, timeframe: str) -> None:
-    """Push scan result to Redis list for real-time frontend access (TTL 1h)."""
-    try:
-        entry = {
-            "strategy_id": result.get("strategy_id"),
-            "strategy_name": result.get("strategy_name") or "Default",
-            "symbol": result.get("symbol"),
-            "timeframe": timeframe,
-            "signal": result.get("signal", "NEUTRAL"),
-            "confidence": result.get("confidence", 0),
-            "explanation": result.get("explanation", ""),
-            "signal_pending": result.get("signal_pending", False),
-            "persistence_score": result.get("persistence_score", 0),
-            "asset_type": result.get("asset_type"),
-            "quality_score": result.get("quality_score", 0),
-            "quality_flags": result.get("quality_flags", []),
-            "quality_size_multiplier": result.get("quality_size_multiplier", 0),
-            "scanned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-        key = "scan_history:recent"
-        r = await cache.client()
-        await r.lpush(key, json.dumps(entry, default=str))
-        await r.ltrim(key, 0, 499)  # keep last 500 entries
-        await r.expire(key, SCAN_HISTORY_REDIS_TTL)
-    except Exception:
-        pass
-
-
-async def _queue_scan_for_batch(result: dict, timeframe: str) -> None:
-    """Queue scan result for batch DB insertion (every 5 min)."""
-    entry = {
-        "strategy_id": result.get("strategy_id"),
-        "strategy_name": result.get("strategy_name") or "Default",
-        "symbol": result.get("symbol"),
-        "timeframe": timeframe,
-        "signal": result.get("signal", "NEUTRAL"),
-        "confidence": int(result.get("confidence", 0)),
-        "explanation": result.get("explanation", "")[:2000],
-        "signal_pending": bool(result.get("signal_pending", False)),
-        "persistence_score": float(result.get("persistence_score", 0)),
-        "asset_type": result.get("asset_type"),
-        "quality_score": int(result.get("quality_score", 0)),
-        "quality_size_multiplier": float(result.get("quality_size_multiplier", 0)),
-    }
-    async with _scan_batch_lock:
-        _scan_batch.append(entry)
-        if len(_scan_batch) > 2000:
-            _scan_batch[:] = _scan_batch[-2000:]
-
-
-async def _flush_scan_batch() -> None:
-    """Batch insert queued scans into scan_history table."""
-    async with _scan_batch_lock:
-        if not _scan_batch:
-            return
-        batch = _scan_batch.copy()
-        _scan_batch.clear()
-    try:
-        pool = await _get_scan_pool()
-        async with pool.acquire() as conn:
-            rows = [
-                (e["strategy_id"], e["strategy_name"], e["symbol"], e["timeframe"],
-                 e["signal"], e["confidence"], e["explanation"], e["signal_pending"],
-                 e["persistence_score"], e["asset_type"])
-                for e in batch
-            ]
-            await conn.executemany(
-                """INSERT INTO scan_history
-                   (id, strategy_id, strategy_name, symbol, timeframe, signal,
-                    confidence, explanation, signal_pending, persistence_score,
-                    asset_type, scanned_at)
-                   VALUES (md5(random()::text || clock_timestamp()::text || random()::text), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())""",
-                rows,
-            )
-        logger.info("scan_history_batch_inserted", count=len(rows))
-    except Exception as e:
-        logger.warning("scan_history_batch_failed", error=str(e), count=len(batch))
-
-
-async def _scan_batch_flusher():
-    """Flush scan batch to DB every 5 minutes."""
-    while True:
-        await asyncio.sleep(300)
-        await _flush_scan_batch()
-
-
-async def _persist_scan(result: dict, timeframe: str) -> None:
-    """Persist scan result to Redis (real-time) + queue for DB batch."""
-    await _persist_scan_redis(result, timeframe)
-    await _queue_scan_for_batch(result, timeframe)
-
-
-# ── Auto-ingest high-confidence signals to API (→ SignalCards) ──
-_ingest_recent: dict[str, float] = {}  # key: "symbol:timeframe" → last ingest timestamp
-_INGEST_COOLDOWN = 300  # 5 min between ingests for the same symbol+timeframe
-_ingest_client: httpx.AsyncClient | None = None
-
-
-async def _try_ingest_signal(result: dict, timeframe: str) -> None:
-    """If signal is BUY/SELL with confidence >= 70, POST to API /signals/ingest.
-    This creates a Signal record → appears as a SignalCard in the frontend.
-    Fire-and-forget, 5s timeout, deduplicated per symbol+timeframe (5 min cooldown).
-    """
-    sig = result.get("signal", "NEUTRAL")
-    conf = result.get("confidence", 0)
-    if sig not in ("BUY", "SELL") or conf < 70:
-        return
-    sym = result.get("symbol", "")
-    key = f"{sym}:{timeframe}"
-    now = time.monotonic()
-    last = _ingest_recent.get(key, 0)
-    if now - last < _INGEST_COOLDOWN:
-        return
-    _ingest_recent[key] = now
-
-    api_url = config.settings.api_url
-    api_key = config.settings.engine_api_key
-    if not api_url or not api_key:
-        return
-
-    global _ingest_client
-    try:
-        if _ingest_client is None or _ingest_client.is_closed:
-            _ingest_client = httpx.AsyncClient(timeout=5.0)
-        await _ingest_client.post(
-            f"{api_url}/signals/ingest",
-            json=result,
-            headers={"X-Engine-Key": api_key},
-        )
-    except Exception:
-        pass
+# ── Scan history persistence (extracted to scan_persistence.py) ──
+from routers.scan_persistence import (
+    _persist_scan,
+    _persist_scan_redis,
+    _queue_scan_for_batch,
+    _flush_scan_batch,
+    _scan_batch_flusher,
+    _try_ingest_signal,
+    _get_scan_pool,
+)
+from routers.scan_persistence import SCAN_HISTORY_REDIS_TTL
 
 
 # ── Active strategies loader ─────────────────────────────────
@@ -346,9 +205,6 @@ BRVM_OPEN_HOUR   = 10
 BRVM_CLOSE_HOUR   = 14
 BRVM_CLOSE_MIN    = 30
 
-# Redis TTL for scan history feed (1 hour)
-SCAN_HISTORY_REDIS_TTL = 3600
-
 # Compat legacy
 WARMUP_TIMEFRAMES        = WARMUP_TIMEFRAMES_SLOW
 WARMUP_INTERVAL_SECONDS  = WARMUP_INTERVAL_FAST
@@ -367,133 +223,13 @@ _PERSISTENCE_WINDOW = 5    # fenêtre glissante (nb de scans) pour le persistenc
 
 router = APIRouter()
 
-SYMBOL_TO_BINANCE = {
-    "BTC/USDT":   "BTCUSDT",
-    "ETH/USDT":   "ETHUSDT",
-    "SOL/USDT":   "SOLUSDT",
-    "BNB/USDT":   "BNBUSDT",
-    "AVAX/USDT":  "AVAXUSDT",
-    "ADA/USDT":   "ADAUSDT",
-    "DOT/USDT":   "DOTUSDT",
-    "LINK/USDT":  "LINKUSDT",
-    "MATIC/USDT": "MATICUSDT",
-    "ATOM/USDT":  "ATOMUSDT",
-    "LTC/USDT":   "LTCUSDT",
-    "XRP/USDT":   "XRPUSDT",
-    "DOGE/USDT":  "DOGEUSDT",
-    "TRX/USDT":   "TRXUSDT",
-    "TON/USDT":   "TONUSDT",
-    "EUR/USDT":   "EURUSDT",
-    "GBP/USDT":   "GBPUSDT",
-    "PAXG/USDT":  "PAXGUSDT",
-}
-
-# Symboles disponibles via Twelve Data (Forex réel, métaux, énergie)
-# Clé gratuite: https://twelvedata.com  →  TWELVE_DATA_API_KEY dans .env
-SYMBOL_TO_TWELVEDATA = {
-    "EUR/USD": "EUR/USD",
-    "GBP/USD": "GBP/USD",
-    "USD/JPY": "USD/JPY",
-    "AUD/USD": "AUD/USD",
-    "USD/CHF": "USD/CHF",
-    "USD/CAD": "USD/CAD",
-    "NZD/USD": "NZD/USD",
-    "XAU/USD": "XAU/USD",
-    "XAG/USD": "XAG/USD",
-    "WTI/USD": "WTI/USD",
-    "BRENT/USD": "BRENT/USD",
-}
-
-# Symboles disponibles via yfinance (fallback gratuit, sans clé API)
-# Utilisé quand Twelve Data n'est pas configuré OU pour commodités/VIX
-SYMBOL_TO_YFINANCE = {
-    "EUR/USD":   "EURUSD=X",
-    "GBP/USD":   "GBPUSD=X",
-    "USD/JPY":   "JPY=X",
-    "AUD/USD":   "AUDUSD=X",
-    "USD/CHF":   "CHF=X",
-    "USD/CAD":   "CAD=X",
-    "NZD/USD":   "NZDUSD=X",
-    "XAU/USD":   "GC=F",      # Gold Futures
-    "XAG/USD":   "SI=F",      # Silver Futures
-    "WTI/USD":   "CL=F",      # WTI Crude Oil Futures
-    "BRENT/USD": "BZ=F",      # Brent Crude Futures
-    # ── US Stocks & Indices (Phase J) ──
-    "AAPL/USD":  "AAPL",
-    "TSLA/USD":  "TSLA",
-    "MSFT/USD":  "MSFT",
-    "NVDA/USD":  "NVDA",
-    "AMZN/USD":  "AMZN",
-    "META/USD":  "META",
-    "GOOGL/USD": "GOOGL",
-    "NFLX/USD":  "NFLX",
-    "AMD/USD":   "AMD",
-    "INTC/USD":  "INTC",
-    "JPM/USD":   "JPM",
-    "BAC/USD":   "BAC",
-    "SP500/USD": "^GSPC",     # S&P 500 Index
-    "NASDAQ/USD": "^IXIC",    # NASDAQ Composite
-    "DOW/USD":   "^DJI",      # Dow Jones Industrial Average
-    "VIX/USD":   "^VIX",      # Volatility Index
-}
-
-# US Stock symbols for asset type classification
-US_STOCK_SYMBOLS = {
-    "AAPL/USD", "TSLA/USD", "MSFT/USD", "NVDA/USD", "AMZN/USD",
-    "META/USD", "GOOGL/USD", "NFLX/USD", "AMD/USD", "INTC/USD",
-    "JPM/USD", "BAC/USD", "SP500/USD", "NASDAQ/USD", "DOW/USD", "VIX/USD",
-}
-
-# Conversion timeframe interne → yfinance interval
-TF_TO_YF: dict = {
-    "1m": "1m",  "5m": "5m",  "15m": "15m",
-    "1h": "1h",  "4h": "1h",   "1d": "1d",   # yfinance n'a pas 4h natif
-}
-
-# Période yfinance selon le timeframe (pour obtenir ~300 bougies)
-TF_TO_YF_PERIOD: dict = {
-    "1m": "7d", "5m": "60d", "15m": "60d",
-    "1h": "730d", "4h": "730d", "1d": "5y",
-}
-
-TWELVE_DATA_API_KEY = config.settings.twelve_data_api_key
-DERIV_API_TOKEN     = config.settings.deriv_api_token
-
-_CACHE_TTL_YF    = 300  # yfinance : cache 5 min
-_CACHE_TTL_DERIV = 60   # Deriv : défaut 1 min (overridé par _get_cache_ttl)
-
-# Mapping symboles internes → identifiants API Deriv
-SYMBOL_TO_DERIV = {
-    # Volatility Indices — aliases courts (format seed) + aliases longs (legacy)
-    "V10":   "R_10",   "VIX10/USD":   "R_10",
-    "V25":   "R_25",   "VIX25/USD":   "R_25",
-    "V50":   "R_50",   "VIX50/USD":   "R_50",
-    "V75":   "R_75",   "VIX75/USD":   "R_75",
-    "V100":  "R_100",  "VIX100/USD":  "R_100",
-    # Boom & Crash
-    "BOOM300":   to_wire_symbol("BOOM300"), "BOOM300/USD":   to_wire_symbol("BOOM300"),
-    "BOOM500":   "BOOM500",  "BOOM500/USD":   "BOOM500",
-    "BOOM1000":  "BOOM1000", "BOOM1000/USD":  "BOOM1000",
-    "CRASH300":  to_wire_symbol("CRASH300"),"CRASH300/USD":  to_wire_symbol("CRASH300"),
-    "CRASH500":  "CRASH500", "CRASH500/USD":  "CRASH500",
-    "CRASH1000": "CRASH1000","CRASH1000/USD": "CRASH1000",
-    # Jump Indices
-    "JUMP10":  "JD10", "JUMP10/USD":  "JD10",
-    "JUMP25":  "JD25", "JUMP25/USD":  "JD25",
-    "JUMP50":  "JD50", "JUMP50/USD":  "JD50",
-    "JUMP75":  "JD75", "JUMP75/USD":  "JD75",
-    "JUMP100": "JD100","JUMP100/USD": "JD100",
-}
-
-# Conversion timeframe → granularité Deriv en secondes
-TF_TO_DERIV_GRANULARITY: dict = {
-    "1m": 60, "5m": 300, "15m": 900,
-    "1h": 3600, "4h": 14400, "1d": 86400,
-}
-
-# Asset type classification
-FOREX_SYMBOLS = set(SYMBOL_TO_TWELVEDATA.keys()) | (set(SYMBOL_TO_YFINANCE.keys()) - US_STOCK_SYMBOLS)
-COMMODITY_SYMBOLS = {"XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD"}
+# ── Symbol mappings & timeframe conversions (extracted to symbol_mappings.py) ──
+from routers.symbol_mappings import (
+    SYMBOL_TO_BINANCE, SYMBOL_TO_TWELVEDATA, SYMBOL_TO_YFINANCE, SYMBOL_TO_DERIV,
+    US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
+    TF_TO_YF, TF_TO_YF_PERIOD, TF_TO_TD, TF_TO_DERIV_GRANULARITY, TF_TO_MS, TF_MAP,
+    TWELVE_DATA_API_KEY, DERIV_API_TOKEN,
+)
 
 
 def get_asset_type(symbol: str) -> str:
@@ -512,24 +248,6 @@ def get_asset_type(symbol: str) -> str:
         return "FOREX"
     return "UNKNOWN"
 
-
-# Conversion timeframe interne → Twelve Data
-TF_TO_TD: dict = {
-    "1m": "1min", "5m": "5min", "15m": "15min",
-    "1h": "1h",   "4h": "4h",   "1d": "1day",
-}
-
-TF_MAP = {"1m":"1m","5m":"5m","15m":"15m","1h":"1h","4h":"4h","1d":"1d"}
-
-# Durée en ms de chaque timeframe — utilisé pour détecter la bougie non clôturée
-TF_TO_MS: dict[str, int] = {
-    "1m":    60_000,
-    "5m":   300_000,
-    "15m":  900_000,
-    "1h":  3_600_000,
-    "4h": 14_400_000,
-    "1d": 86_400_000,
-}
 
 
 class ScanRequest(BaseModel):
@@ -558,315 +276,16 @@ def bollinger(s: pd.Series, p: int = 20, k: float = 2.0):
     return out.iloc[:, 2], out.iloc[:, 1], out.iloc[:, 0], out.iloc[:, 3]
 
 
-_http_client: Optional[httpx.AsyncClient] = None
-_klines_cache: dict = {}  # key -> (timestamp, df)
-_CACHE_TTL = 60  # secondes (défaut, utilisé par fetch_binance_klines pour TF < 1h)
-_CACHE_TTL_TD = 300  # Twelve Data: 5min (limite 800 req/jour sur plan gratuit)
-
-# TTL dynamique selon le timeframe — une bougie 1h change peu en 5 min
-_TF_CACHE_TTL = {
-    "1m": 30,      # 30s — très volatil
-    "5m": 60,      # 1 min
-    "15m": 120,    # 2 min
-    "1h": 300,     # 5 min
-    "4h": 600,     # 10 min
-    "1d": 1800,    # 30 min
-    "1w": 3600,    # 1h
-}
-
-
-def _get_cache_ttl(interval: str) -> int:
-    """Retourne le TTL de cache adapté au timeframe."""
-    return _TF_CACHE_TTL.get(interval, _CACHE_TTL)
-_TD_SEMAPHORE   = asyncio.Semaphore(1)  # Twelve Data : un appel à la fois pour éviter le 429
-_TD_MIN_DELAY   = 1.2   # secondes entre 2 appels Twelve Data (~50 req/min sur plan gratuit)
-_td_last_call   = 0.0   # timestamp monotonic du dernier appel
-
-
-def _get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=20))
-    return _http_client
-
-
-@rate_limit(max_concurrent=4, min_delay=0.5)
-async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
-    """Fetch OHLCV depuis Twelve Data API — pour Forex, métaux, WTI."""
-    if not TWELVE_DATA_API_KEY:
-        return None
-    td_sym = SYMBOL_TO_TWELVEDATA.get(symbol)
-    if not td_sym:
-        return None
-    td_interval = TF_TO_TD.get(interval, "1h")
-
-    cache_key = f"td:{td_sym}:{td_interval}:{limit}"
-    now = time.monotonic()
-    if cache_key in _klines_cache:
-        ts, df = _klines_cache[cache_key]
-        if now - ts < _CACHE_TTL_TD:
-            return df
-
-    url = "https://api.twelvedata.com/time_series"
-    params = {
-        "symbol":    td_sym,
-        "interval":  td_interval,
-        "outputsize": limit,
-        "apikey":    TWELVE_DATA_API_KEY,
-        "format":    "JSON",
-        "order":     "ASC",
-    }
-
-    async def _do_fetch():
-        global _td_last_call
-        async with _TD_SEMAPHORE:
-            # Respecter le délai minimum entre deux appels Twelve Data
-            elapsed = time.monotonic() - _td_last_call
-            if elapsed < _TD_MIN_DELAY:
-                await asyncio.sleep(_TD_MIN_DELAY - elapsed)
-            client = _get_http_client()
-            r = await client.get(url, params=params)
-            _td_last_call = time.monotonic()
-            r.raise_for_status()
-            return r.json()
-
-    try:
-        data = await retry_async(
-            _do_fetch,
-            max_retries=1,
-            base_delay=0.5,
-            exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
-            on_retry=lambda attempt, exc: logger.warning(
-                "twelvedata_retry", symbol=symbol, attempt=attempt, error=str(exc)
-            ),
-            source="twelvedata",
-        )
-        if "values" not in data:
-            return None
-        rows = data["values"]
-        df = pd.DataFrame(rows)
-        df.rename(columns={"datetime": "time"}, inplace=True)
-        for col in ["open", "high", "low", "close"]:
-            df[col] = df[col].astype(float)
-        df["volume"] = df.get("volume", pd.Series([0.0] * len(df))).astype(float)
-        df["time"] = pd.to_datetime(df["time"]).map(lambda t: int(t.timestamp()))
-        _klines_cache[cache_key] = (time.monotonic(), df)
-        return df
-    except Exception as exc:
-        logger.warning(
-            "twelvedata_fetch_failed",
-            symbol=symbol,
-            interval=interval,
-            error=str(exc),
-        )
-        return None
-
-
-@rate_limit(max_concurrent=15, min_delay=0.05)
-async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
-    """Fetch OHLCV depuis l'API Deriv WebSocket — pour les indices synthétiques (V75, Boom/Crash, Jump)."""
-    import websockets
-    import json as _json
-    deriv_sym = SYMBOL_TO_DERIV.get(symbol)
-    if not deriv_sym:
-        return None
-
-    granularity = TF_TO_DERIV_GRANULARITY.get(interval, 3600)
-    cache_key   = f"deriv:{deriv_sym}:{granularity}:{limit}"
-    now = time.monotonic()
-    if cache_key in _klines_cache:
-        ts, df = _klines_cache[cache_key]
-        if now - ts < _get_cache_ttl(interval):
-            return df
-
-    ws_url = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
-    payload = {
-        "ticks_history": deriv_sym,
-        "adjust_start_time": 1,
-        "count": limit,
-        "end": "latest",
-        "granularity": granularity,
-        "style": "candles",
-    }
-
-    try:
-        async with websockets.connect(ws_url, ping_interval=None) as ws:
-            await ws.send(_json.dumps(payload))
-            raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
-            data = _json.loads(raw)
-
-        if "error" in data or "candles" not in data:
-            return None
-
-        candles_raw = data["candles"]
-        df = pd.DataFrame([
-            {
-                "time":   c["epoch"],
-                "open":   float(c["open"]),
-                "high":   float(c["high"]),
-                "low":    float(c["low"]),
-                "close":  float(c["close"]),
-                # Deriv API doesn't provide volume — use candle range as proxy
-                # (captures intrabar volatility, which is what volume_spike measures)
-                "volume": float(c["high"]) - float(c["low"]),
-            }
-            for c in candles_raw
-        ])
-        _klines_cache[cache_key] = (time.monotonic(), df)
-        return df
-    except Exception as exc:
-        logger.warning("deriv_klines_error", symbol=symbol, error=str(exc))
-        return None
-
-
-@rate_limit(max_concurrent=8, min_delay=0.1)
-async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
-    """Fetch OHLCV via yfinance — fallback gratuit pour Forex, commodités."""
-    import datetime as _dt
-    yf_sym = SYMBOL_TO_YFINANCE.get(symbol)
-    if not yf_sym:
-        return None
-
-    yf_interval = TF_TO_YF.get(interval, "1h")
-    cache_key   = f"yf:{yf_sym}:{yf_interval}:{limit}"
-    now = time.monotonic()
-    if cache_key in _klines_cache:
-        ts, df = _klines_cache[cache_key]
-        if now - ts < _CACHE_TTL_YF:
-            return df
-
-    # Calculer la fenêtre start/end pour obtenir ~limit bougies
-    # yfinance limite les données intraday : 7j max pour <=1h, 60j pour <=1h sur Forex
-    _interval_seconds = {
-        "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "1d": 86400,
-    }
-    seconds_per_bar = _interval_seconds.get(yf_interval, 3600)
-    # On demande limit*1.5 barres pour absorber les gaps week-end/nuit
-    needed_seconds = int(seconds_per_bar * limit * 1.5)
-    # Plafond selon les limites yfinance par intervalle
-    _max_seconds = {
-        "1m": 7 * 86400, "5m": 60 * 86400, "15m": 60 * 86400,
-        "1h": 730 * 86400, "1d": 5 * 365 * 86400,
-    }
-    max_sec = _max_seconds.get(yf_interval, 730 * 86400)
-    window  = min(needed_seconds, max_sec)
-    end_dt   = _dt.datetime.utcnow()
-    start_dt = end_dt - _dt.timedelta(seconds=window)
-
-    try:
-        import yfinance as yf
-        loop = asyncio.get_event_loop()
-        def _download():
-            ticker = yf.Ticker(yf_sym)
-            df_raw = ticker.history(
-                start=start_dt.strftime("%Y-%m-%d"),
-                end=(end_dt + _dt.timedelta(days=1)).strftime("%Y-%m-%d"),
-                interval=yf_interval,
-                auto_adjust=True,
-                actions=False,
-            )
-            return df_raw
-        df_raw = await loop.run_in_executor(_executor, _download)
-        if df_raw is None or df_raw.empty:
-            return None
-        # Normaliser l'index → secondes Unix entières
-        # datetime64[s, tz] : astype int64 = secondes (pas ns) → ne pas diviser
-        # datetime64[ns, tz] : astype int64 = nanosecondes → diviser par 1e9
-        # Méthode robuste : utiliser .timestamp() sur chaque Timestamp
-        times = df_raw.index.map(lambda t: int(t.timestamp()))
-        df = pd.DataFrame({
-            "time":   times.values,
-            "open":   df_raw["Open"].astype(float).values,
-            "high":   df_raw["High"].astype(float).values,
-            "low":    df_raw["Low"].astype(float).values,
-            "close":  df_raw["Close"].astype(float).values,
-            "volume": df_raw["Volume"].astype(float).values,
-        })
-        # Pour 4h : rééchantillonner depuis 1h
-        if interval == "4h" and yf_interval == "1h":
-            df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
-            df = df.set_index("time").resample("4h").agg(
-                open=("open", "first"), high=("high", "max"),
-                low=("low", "min"),   close=("close", "last"),
-                volume=("volume", "sum")
-            ).dropna().reset_index()
-            df["time"] = df["time"].map(lambda t: int(t.timestamp()))
-        # Trier, déduplicquer, limiter
-        df = (df.sort_values("time")
-                .drop_duplicates(subset=["time"])
-                .dropna(subset=["close"])
-                .tail(limit)
-                .reset_index(drop=True))
-        if len(df) < 2:
-            return None
-        # Proxy volume: si yfinance retourne volume=0 (forex/commodities),
-        # utiliser le range de bougie (high - low) comme proxy de volatilité intrabar.
-        # Cohérent avec l'approche Deriv (indices synthétiques sans volume).
-        if df["volume"].sum() == 0:
-            df["volume"] = (df["high"] - df["low"]).astype(float)
-        _klines_cache[cache_key] = (time.monotonic(), df)
-        return df
-    except Exception as exc:
-        logger.warning("yfinance_error", symbol=symbol, error=str(exc))
-        return None
-
-
-@rate_limit(max_concurrent=10, min_delay=0.05)
-async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
-    import time as _time
-    binance_sym = SYMBOL_TO_BINANCE.get(symbol)
-    if not binance_sym:
-        return None
-
-    cache_key = f"{binance_sym}:{interval}:{limit}"
-    now = _time.monotonic()
-    if cache_key in _klines_cache:
-        ts, df = _klines_cache[cache_key]
-        if now - ts < _get_cache_ttl(interval):
-            return df
-
-    url = f"https://api.binance.com/api/v3/klines?symbol={binance_sym}&interval={interval}&limit={limit}"
-
-    async def _do_fetch():
-        client = _get_http_client()
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.json()
-
-    try:
-        data = await retry_async(
-            _do_fetch,
-            max_retries=3,
-            base_delay=0.5,
-            exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
-            on_retry=lambda attempt, exc: logger.warning(
-                "binance_retry", symbol=symbol, attempt=attempt,
-                error_type=type(exc).__name__, error=repr(exc),
-            ),
-            source="binance_batch",
-        )
-        df = pd.DataFrame(data, columns=[
-            "time","open","high","low","close","volume",
-            "close_time","quote_vol","trades","taker_buy_base","taker_buy_quote","ignore"
-        ])
-        for col in ["open","high","low","close","volume"]:
-            df[col] = df[col].astype(float)
-        # Exclure la dernière bougie si elle n'est pas encore clôturée (anti-repaint)
-        candle_ms = TF_TO_MS.get(interval, 3_600_000)
-        now_ms = int(_time.time() * 1000)
-        if len(df) > 1 and int(df["time"].iloc[-1]) + candle_ms > now_ms:
-            df = df.iloc[:-1].reset_index(drop=True)
-        _klines_cache[cache_key] = (_time.monotonic(), df)
-        return df
-    except Exception as exc:
-        logger.warning(
-            "binance_klines_failed",
-            symbol=symbol,
-            interval=interval,
-            error_type=type(exc).__name__,
-            error=repr(exc),
-        )
-        return None
+# ── Klines fetchers (extracted to scan_fetchers.py) ──
+from routers.scan_fetchers import (
+    fetch_twelvedata_klines,
+    fetch_deriv_klines,
+    fetch_yfinance_klines,
+    fetch_binance_klines,
+    _klines_cache,
+    _get_cache_ttl,
+    _get_http_client,
+)
 
 
 # Hiérarchie 3-TF : pour chaque LTF (timeframe d'exécution), définit quel TF intermédiaire
@@ -2424,7 +1843,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
         try:
             tokenomics_context = await asyncio.wait_for(fetch_tokenomics(symbol), timeout=3.0)
         except Exception as exc:
-            logger.warning("tokenomics_context_failed", symbol=symbol, error=str(exc))
+            logger.debug("tokenomics_context_failed", symbol=symbol, error=str(exc))
             tokenomics_context = None
 
     # Social sentiment (crypto) — computed async before sync analysis
@@ -2433,7 +1852,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
         try:
             social_context = await asyncio.wait_for(fetch_social_metrics(symbol), timeout=3.0)
         except Exception as exc:
-            logger.warning("social_context_failed", symbol=symbol, error=str(exc))
+            logger.debug("social_context_failed", symbol=symbol, error=str(exc))
             social_context = None
 
     # ── Phase M: X/Twitter sentiment for crypto ──

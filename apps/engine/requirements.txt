@@ -35,3 +35,6 @@ fastembed>=0.8.0             # RAG embeddings ONNX (no GPU needed)
 beautifulsoup4>=4.13.4       # News scraping (BRVM + RSS)
 lxml>=5.4.0                  # Parser XML rapide pour RSS feeds (news_scraper.py)
 # scikit-learn>=1.7.0        # ML scoring Phase 3 (non utilisé)
+
+# Dev
+mypy>=1.13.0                 # Progressive type checking

@@ -4,17 +4,26 @@ Detects dangerous unlock schedules and concentration risk.
 External APIs are optional; when missing/unreachable we fallback to a mock table.
 """
 import httpx
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 
 from utils.rate_limiter import rate_limit
 from utils.http import retry_async
+from utils.circuit_breaker import get_breaker, CircuitBreakerOpen
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 TOKENUNLOCKS_BASE = "https://api.token.unlocks.app"
+
+# In-memory cache: tokenomics data doesn't change frequently (unlocks are scheduled weeks ahead)
+_tokenomics_cache: dict[str, tuple[float, dict]] = {}
+_TOKENOMICS_CACHE_TTL = 1800  # 30 minutes
 
 COINGECKO_IDS = {
     "BTC": "bitcoin",
@@ -137,33 +146,52 @@ def _mock_tokenomics(base: str) -> dict:
 
 
 async def fetch_tokenomics(symbol: str) -> dict:
-    """Fetch tokenomics data for a symbol; fallback to mock table if APIs fail."""
+    """Fetch tokenomics data for a symbol; fallback to mock table if APIs fail.
+
+    Uses a 30-minute cache to avoid repeated API calls for data that changes
+    infrequently (token unlock schedules). A circuit breaker prevents cascading
+    failures when external APIs are down.
+    """
     base = _symbol_base(symbol)
 
-    # Token unlocks attempt
-    unlocks = await _fetch_token_unlocks(base)
-    next_unlock_pct, next_unlock_date = _parse_unlock_pct(unlocks)
+    # Check cache first
+    cached = _tokenomics_cache.get(base)
+    if cached and (time.monotonic() - cached[0]) < _TOKENOMICS_CACHE_TTL:
+        return cached[1]
 
-    # CoinGecko coin page for extra metadata; if fails we keep whatever we have
-    cg_data = await _fetch_coingecko_coin(base)
+    breaker = get_breaker("token_unlocks")
 
-    # Holder concentration: we don't have a free public source for most assets;
-    # use mock fallback when not available.
-    top10 = None
-    if cg_data and isinstance(cg_data, dict):
-        # Some coins expose supply metrics; not holders.
+    try:
+        # Token unlocks attempt (via circuit breaker)
+        unlocks = await breaker.call(lambda: _fetch_token_unlocks(base))
+        next_unlock_pct, next_unlock_date = _parse_unlock_pct(unlocks)
+
+        # CoinGecko coin page for extra metadata
+        cg_data = await _fetch_coingecko_coin(base)
+
         top10 = None
+        if cg_data and isinstance(cg_data, dict):
+            top10 = None
 
-    if next_unlock_pct is None and top10 is None:
-        return _mock_tokenomics(base)
+        if next_unlock_pct is None and top10 is None:
+            result = _mock_tokenomics(base)
+        else:
+            result = {
+                "symbol": base,
+                "next_unlock_pct": round(next_unlock_pct or 0.0, 3),
+                "next_unlock_date": next_unlock_date.isoformat() if next_unlock_date else None,
+                "top10_holders_pct": round(top10 or _TOKENOMICS_MOCK.get(base, {}).get("top10_holders_pct", 50.0), 2),
+                "source": "api" if unlocks else "mock",
+            }
+    except CircuitBreakerOpen:
+        result = _mock_tokenomics(base)
+    except Exception as exc:
+        logger.warning("tokenomics_fetch_failed", symbol=symbol, error=str(exc))
+        result = _mock_tokenomics(base)
 
-    return {
-        "symbol": base,
-        "next_unlock_pct": round(next_unlock_pct or 0.0, 3),
-        "next_unlock_date": next_unlock_date.isoformat() if next_unlock_date else None,
-        "top10_holders_pct": round(top10 or _TOKENOMICS_MOCK.get(base, {}).get("top10_holders_pct", 50.0), 2),
-        "source": "api" if unlocks else "mock",
-    }
+    # Cache the result (even mock data, to avoid retrying every 60s)
+    _tokenomics_cache[base] = (time.monotonic(), result)
+    return result
 
 
 @router.get("/{symbol}")
