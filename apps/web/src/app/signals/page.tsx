@@ -17,6 +17,7 @@ const SCAN_SYMBOLS_GROUPS = [
   { label: 'Deriv B&C',   symbols: ['BOOM300','BOOM500','BOOM1000','CRASH300','CRASH500','CRASH1000'] },
   { label: 'Deriv Jump',  symbols: ['JUMP10','JUMP25','JUMP50','JUMP75','JUMP100'] },
   { label: 'BRVM',        symbols: ['ONTBF','SGBF','BOABF','ETIT','SIVC','PALC','SOGC','SNTS','CIEC','NSIC','ORGT','BICC','CBIBF','ABJC','STAC'] },
+  { label: 'Actions US',  symbols: ['AAPL/USD','TSLA/USD','MSFT/USD','NVDA/USD','AMZN/USD','META/USD','GOOGL/USD','NFLX/USD','AMD/USD','INTC/USD','JPM/USD','BAC/USD','SP500/USD','NASDAQ/USD','DOW/USD','VIX/USD'] },
 ];
 const ALL_SYMBOLS = SCAN_SYMBOLS_GROUPS.flatMap(g => g.symbols);
 const TIMEFRAMES  = ['15m', '1h', '4h', '1d'];
@@ -41,13 +42,17 @@ const MARKETS = [
   { key: 'FOREX', label: 'Forex' },
   { key: 'SYNTHETIC', label: 'Synthétique' },
   { key: 'BRVM', label: 'BRVM' },
+  { key: 'STOCK', label: 'Actions US' },
 ];
 
 function inferMarket(symbol?: string): string {
   if (!symbol) return 'UNKNOWN';
   if (symbol.endsWith('/USDT')) return 'CRYPTO';
   if (/^(VIX|JUMP|BOOM|CRASH)\d+/i.test(symbol)) return 'SYNTHETIC';
-  if (symbol.includes('/')) return 'FOREX';
+  if (symbol.includes('/')) {
+    if (symbol.endsWith('/USD') && !['EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CHF','USD/CAD','NZD/USD','XAU/USD','XAG/USD','WTI/USD','BRENT/USD'].includes(symbol)) return 'STOCK';
+    return 'FOREX';
+  }
   return 'BRVM';
 }
 

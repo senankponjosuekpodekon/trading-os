@@ -67,10 +67,22 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Trading OS Engine starting up")
+
+    def _log_task_death(task_name: str):
+        def _cb(t: asyncio.Task):
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc:
+                logger.error("background_task_died", task=task_name, error=str(exc))
+        return _cb
+
     price_task = asyncio.create_task(ws.price_broadcaster())
     warmup_task = asyncio.create_task(scan.warmup_features())
     from utils.crons import run_all_crons
     cron_task = asyncio.create_task(run_all_crons())
+    for t, name in [(price_task, "price_broadcaster"), (warmup_task, "warmup_features"), (cron_task, "crons")]:
+        t.add_done_callback(_log_task_death(name))
     yield
     price_task.cancel()
     warmup_task.cancel()

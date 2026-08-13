@@ -71,9 +71,12 @@ async def cron_portfolio_rebalance():
 
 
 async def run_all_crons():
-    """Launch all cron jobs in parallel."""
+    """Launch all cron jobs in parallel. Each cron is individually resilient
+    (try/except inside the while loop), but we also use return_exceptions=True
+    as a safety net so one crash doesn't kill the others."""
     await asyncio.gather(
         cron_daily_pulse(),
         cron_hidden_gems(),
         cron_portfolio_rebalance(),
+        return_exceptions=True,
     )

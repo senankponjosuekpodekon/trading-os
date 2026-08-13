@@ -13,9 +13,10 @@ import { BillingModule } from '../billing/billing.module';
 import { EngineHttpModule } from '../engine/engine-http.module';
 import { SystemHealthModule } from '../system-health/system-health.module';
 import { ExpectedMoveModule } from '../expected-move/expected-move.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [HttpModule, EngineHttpModule, NotificationsModule, MarketDataModule, BillingModule, SystemHealthModule, ExpectedMoveModule],
+  imports: [HttpModule, AuthModule, EngineHttpModule, NotificationsModule, MarketDataModule, BillingModule, SystemHealthModule, ExpectedMoveModule],
   controllers: [SignalsController],
   providers: [SignalsService, SignalOutcomeService, SignalPredictorService, PatternPredictorService, FeatureStoreService, RegimeClassifierService],
   exports: [SignalsService, SignalOutcomeService, SignalPredictorService, PatternPredictorService, FeatureStoreService, RegimeClassifierService],

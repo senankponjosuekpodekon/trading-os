@@ -19,6 +19,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://host.docker.internal:6379
       ENGINE_API_KEY: ${ENGINE_API_KEY:?ENGINE_API_KEY is required}
+      API_URL: http://api:3001
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

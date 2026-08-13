@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379", validation_alias="REDIS_URL")
     engine_port: int = Field(default=8000, validation_alias="ENGINE_PORT")
     engine_api_key: str = Field(default="", validation_alias="ENGINE_API_KEY")
+    api_url: str = Field(default="http://localhost:3000", validation_alias="API_URL")
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN_ENGINE")
 
     sentry_traces_sample_rate: float = Field(default=0.05, validation_alias="SENTRY_TRACES_SAMPLE_RATE")

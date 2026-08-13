@@ -23,6 +23,7 @@ const SCAN_SYMBOLS_GROUPS = [
   { label: 'Deriv B&C',   symbols: ['BOOM300','BOOM500','BOOM1000','CRASH300','CRASH500','CRASH1000'] },
   { label: 'Deriv Jump',  symbols: ['JUMP10','JUMP25','JUMP50','JUMP75','JUMP100'] },
   { label: 'BRVM',        symbols: ['ONTBF','SGBF','BOABF','ETIT','SIVC','PALC','SOGC','SNTS','CIEC','NSIC','ORGT','BICC','CBIBF','ABJC','STAC'] },
+  { label: 'Actions US',  symbols: ['AAPL/USD','TSLA/USD','MSFT/USD','NVDA/USD','AMZN/USD','META/USD','GOOGL/USD','NFLX/USD','AMD/USD','INTC/USD','JPM/USD','BAC/USD','SP500/USD','NASDAQ/USD','DOW/USD','VIX/USD'] },
 ];
 const ALL_SYMBOLS = SCAN_SYMBOLS_GROUPS.flatMap(g => g.symbols);
 
@@ -33,7 +34,10 @@ function inferMarket(symbol?: string): string {
   if (!symbol) return 'UNKNOWN';
   if (symbol.endsWith('/USDT')) return 'CRYPTO';
   if (/^(VIX|JUMP|BOOM|CRASH|V\d+)/i.test(symbol)) return 'SYNTHETIC';
-  if (symbol.includes('/')) return 'FOREX';
+  if (symbol.includes('/')) {
+    if (symbol.endsWith('/USD') && !['EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CHF','USD/CAD','NZD/USD','XAU/USD','XAG/USD','WTI/USD','BRENT/USD'].includes(symbol)) return 'STOCK';
+    return 'FOREX';
+  }
   return 'BRVM';
 }
 
@@ -358,7 +362,7 @@ export default function ScannerPage() {
             </div>
             <Select label="Timeframe" value={timeframe} onChange={setTimeframe} options={TIMEFRAMES} />
             <Select label="Direction" value={direction} onChange={setDirection} options={DIRECTIONS} />
-            <Select label="Marché" value={market} onChange={setMarket} options={['all', 'CRYPTO', 'FOREX', 'SYNTHETIC', 'BRVM']} />
+            <Select label="Marché" value={market} onChange={setMarket} options={['all', 'CRYPTO', 'FOREX', 'SYNTHETIC', 'BRVM', 'STOCK']} />
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Confiance min : {minConf}%</label>
               <input

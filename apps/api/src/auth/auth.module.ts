@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { EngineKeyGuard } from './engine-key.guard';
 import { TwoFactorController } from './two-factor.controller';
 import { TwoFactorService } from './two-factor.service';
 import { AuditModule } from '../audit/audit.module';
@@ -23,7 +24,7 @@ import { AuditModule } from '../audit/audit.module';
     AuditModule,
   ],
   controllers: [AuthController, TwoFactorController],
-  providers: [AuthService, TwoFactorService, JwtStrategy],
-  exports: [JwtModule, AuthService, TwoFactorService],
+  providers: [AuthService, TwoFactorService, JwtStrategy, EngineKeyGuard],
+  exports: [JwtModule, AuthService, TwoFactorService, EngineKeyGuard],
 })
 export class AuthModule {}

@@ -6,6 +6,7 @@ import { SignalFeatures } from './signal-predictor.service';
 import { PatternPredictorService, PatternFeaturesInput } from './pattern-predictor.service';
 import { EngineHttpService } from '../engine/engine-http.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { EngineKeyGuard } from '../auth/engine-key.guard';
 
 @Controller('signals')
 @UseGuards(JwtAuthGuard)
@@ -165,6 +166,13 @@ export class SignalsController {
   @Get('pattern-predictor/status')
   patternPredictorStatus() {
     return this.patternPredictorService.getStatus();
+  }
+
+  @Post('ingest')
+  @UseGuards(EngineKeyGuard)
+  @Throttle({ default: { limit: 300, ttl: 60_000 } })
+  async ingestSignal(@Body() body: any) {
+    return this.signalsService.ingestSignal(body);
   }
 
   @Get('scan-history')

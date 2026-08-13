@@ -175,6 +175,47 @@ async def _persist_scan(result: dict, timeframe: str) -> None:
     await _queue_scan_for_batch(result, timeframe)
 
 
+# ── Auto-ingest high-confidence signals to API (→ SignalCards) ──
+_ingest_recent: dict[str, float] = {}  # key: "symbol:timeframe" → last ingest timestamp
+_INGEST_COOLDOWN = 300  # 5 min between ingests for the same symbol+timeframe
+_ingest_client: httpx.AsyncClient | None = None
+
+
+async def _try_ingest_signal(result: dict, timeframe: str) -> None:
+    """If signal is BUY/SELL with confidence >= 70, POST to API /signals/ingest.
+    This creates a Signal record → appears as a SignalCard in the frontend.
+    Fire-and-forget, 5s timeout, deduplicated per symbol+timeframe (5 min cooldown).
+    """
+    sig = result.get("signal", "NEUTRAL")
+    conf = result.get("confidence", 0)
+    if sig not in ("BUY", "SELL") or conf < 70:
+        return
+    sym = result.get("symbol", "")
+    key = f"{sym}:{timeframe}"
+    now = time.monotonic()
+    last = _ingest_recent.get(key, 0)
+    if now - last < _INGEST_COOLDOWN:
+        return
+    _ingest_recent[key] = now
+
+    api_url = config.settings.api_url
+    api_key = config.settings.engine_api_key
+    if not api_url or not api_key:
+        return
+
+    global _ingest_client
+    try:
+        if _ingest_client is None or _ingest_client.is_closed:
+            _ingest_client = httpx.AsyncClient(timeout=5.0)
+        await _ingest_client.post(
+            f"{api_url}/signals/ingest",
+            json=result,
+            headers={"X-Engine-Key": api_key},
+        )
+    except Exception:
+        pass
+
+
 # ── Active strategies loader ─────────────────────────────────
 _active_strategies_cache: list[dict] = []
 _active_strategies_ts: float = 0
@@ -285,15 +326,18 @@ WARMUP_TIMEFRAMES_FAST   = ["15m", "1h"]       # Binance prioritaire — cycle 6
 WARMUP_TIMEFRAMES_MEDIUM = ["1h", "15m"]       # Deriv synthétiques — cycle 2 min
 WARMUP_TIMEFRAMES_SLOW   = ["1h", "4h"]        # Forex/Commodités — cycle 5 min
 WARMUP_TIMEFRAMES_BRVM   = ["1h"]               # BRVM — cycle 5 min pendant heures de marché
+WARMUP_TIMEFRAMES_STOCKS  = ["1h", "4h"]        # Actions US — cycle 5 min pendant heures NYSE
 
 WARMUP_INTERVAL_FAST    = 60                   # secondes — Binance prioritaire
 WARMUP_INTERVAL_MEDIUM  = 120                  # secondes — Deriv synthétiques
 WARMUP_INTERVAL_SLOW    = 300                  # secondes — Forex/Commodités
 WARMUP_INTERVAL_BRVM    = 300                  # secondes — BRVM (heures de marché uniquement)
+WARMUP_INTERVAL_STOCKS  = 300                  # secondes — Actions US (heures NYSE uniquement)
 WARMUP_TTL_FAST         = 90                   # TTL cache pour actifs rapides
 WARMUP_TTL_MEDIUM       = 180                  # TTL cache pour actifs medium
 WARMUP_TTL_SLOW         = 360                  # TTL cache pour actifs lents
 WARMUP_TTL_BRVM         = 360                  # TTL cache pour BRVM
+WARMUP_TTL_STOCKS       = 360                  # TTL cache pour Actions US
 
 # BRVM market hours: Mon-Fri 10:00-14:30 UTC
 BRVM_OPEN_HOUR   = 10
@@ -2568,6 +2612,7 @@ async def warmup_fast():
                     suffix = f":{strat['id']}" if strat else ""
                     await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_FAST)
                     await _persist_scan(res, timeframe)
+                    await _try_ingest_signal(res, timeframe)
             except Exception as e:
                 logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(e))
 
@@ -2583,7 +2628,7 @@ async def warmup_fast():
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
         # Attendre le reste du cycle (60s - temps du scan)
         elapsed = time.monotonic() - t0
-        wait = max(0, WARMUP_INTERVAL_FAST - elapsed)
+        wait = max(1, WARMUP_INTERVAL_FAST - elapsed)
         await asyncio.sleep(wait)
 
 
@@ -2605,6 +2650,7 @@ async def warmup_medium():
                     suffix = f":{strat['id']}" if strat else ""
                     await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_MEDIUM)
                     await _persist_scan(res, timeframe)
+                    await _try_ingest_signal(res, timeframe)
             except Exception as e:
                 logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe, error=str(e))
 
@@ -2617,7 +2663,7 @@ async def warmup_medium():
             await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
-        wait = max(0, WARMUP_INTERVAL_MEDIUM - elapsed)
+        wait = max(1, WARMUP_INTERVAL_MEDIUM - elapsed)
         await asyncio.sleep(wait)
 
 
@@ -2639,6 +2685,7 @@ async def warmup_slow():
                     suffix = f":{strat['id']}" if strat else ""
                     await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_SLOW)
                     await _persist_scan(res, timeframe)
+                    await _try_ingest_signal(res, timeframe)
             except Exception as e:
                 logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
 
@@ -2651,7 +2698,7 @@ async def warmup_slow():
             await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
-        wait = max(0, WARMUP_INTERVAL_SLOW - elapsed)
+        wait = max(1, WARMUP_INTERVAL_SLOW - elapsed)
         await asyncio.sleep(wait)
 
 
@@ -2697,10 +2744,63 @@ async def warmup_brvm():
                 res["strategy_name"] = "BRVM Value Swing"
             await set_cached(f"scan:{sym}:{timeframe}", res, ttl=WARMUP_TTL_BRVM)
             await _persist_scan(res, timeframe)
+            await _try_ingest_signal(res, timeframe)
         logger.info("warmup_brvm_done", symbols=len(BRVM_SYMBOLS), results=len(brvm_results),
                     strategies=len(strategies), elapsed_ms=round((time.monotonic() - t0) * 1000))
         elapsed = time.monotonic() - t0
-        wait = max(0, WARMUP_INTERVAL_BRVM - elapsed)
+        wait = max(1, WARMUP_INTERVAL_BRVM - elapsed)
+        await asyncio.sleep(wait)
+
+
+def _is_nyse_open() -> bool:
+    """Check if NYSE is currently open (Mon-Fri 14:30-21:00 UTC)."""
+    now = time.gmtime()
+    if now.tm_wday >= 5:
+        return False
+    hour_min = now.tm_hour * 60 + now.tm_min
+    return 870 <= hour_min < 1260  # 14:30 - 21:00 UTC
+
+
+async def warmup_stocks():
+    """Boucle Actions US — cycle 5 min, uniquement pendant les heures NYSE.
+    NYSE: Lundi-Vendredi 14:30-21:00 UTC.
+    Données via yfinance (gratuit, illimité).
+    Parallélisé : tous les symboles scannés en un seul asyncio.gather.
+    """
+    stocks = sorted(US_STOCK_SYMBOLS)
+    logger.info("warmup_stocks_start", symbols=len(stocks), interval=WARMUP_INTERVAL_STOCKS)
+    await asyncio.sleep(20)
+    while True:
+        if not _is_nyse_open():
+            logger.info("warmup_stocks_skipped", reason="market_closed")
+            await asyncio.sleep(60)
+            continue
+        t0 = time.monotonic()
+        strategies = await _load_active_strategies()
+
+        async def _scan_one(sym: str, timeframe: str, strat):
+            try:
+                res = await fetch_and_analyze(sym, timeframe, strategy=strat)
+                if res and not isinstance(res, Exception):
+                    suffix = f":{strat['id']}" if strat else ""
+                    await set_cached(f"scan:{sym}:{timeframe}{suffix}", res, ttl=WARMUP_TTL_STOCKS)
+                    await _persist_scan(res, timeframe)
+                    await _try_ingest_signal(res, timeframe)
+            except Exception as e:
+                logger.warning("warmup_stocks_failed", symbol=sym, tf=timeframe, error=str(e))
+
+        for timeframe in WARMUP_TIMEFRAMES_STOCKS:
+            tasks = [
+                _scan_one(sym, timeframe, strat)
+                for sym in stocks
+                for strat in (strategies or [None])
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("warmup_stocks_done", timeframe=timeframe,
+                        symbols=len(stocks), strategies=len(strategies),
+                        elapsed_ms=round((time.monotonic() - t0) * 1000))
+        elapsed = time.monotonic() - t0
+        wait = max(1, WARMUP_INTERVAL_STOCKS - elapsed)
         await asyncio.sleep(wait)
 
 
@@ -2710,7 +2810,7 @@ async def prefetch_klines():
     Timeout global de 15s — les symboles non fetchés seront récupérés par les boucles warmup.
     """
     t0 = time.monotonic()
-    all_symbols = BINANCE_PRIORITY_SYMBOLS + DERIV_SYMBOLS + FOREX_COMMODITY_SYMBOLS
+    all_symbols = BINANCE_PRIORITY_SYMBOLS + DERIV_SYMBOLS + FOREX_COMMODITY_SYMBOLS + sorted(US_STOCK_SYMBOLS)
     tf = "1h"
 
     async def _safe_fetch(sym: str):
@@ -2736,18 +2836,46 @@ async def prefetch_klines():
         logger.warning("prefetch_klines_timeout", elapsed_ms=round((time.monotonic() - t0) * 1000))
 
 
+async def _supervised_loop(name: str, coro_factory, max_restarts: int = -1):
+    """Superviseur : redémarre une boucle async si elle crash.
+    coro_factory est une fonction qui crée la coroutine (appelée à chaque restart).
+    """
+    restarts = 0
+    while max_restarts < 0 or restarts <= max_restarts:
+        try:
+            await coro_factory()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            restarts += 1
+            logger.error("warmup_loop_crashed", loop=name, restart=restarts, error=str(e))
+            await asyncio.sleep(5)
+        else:
+            logger.info("warmup_loop_exited_normally", loop=name)
+            break
+
+
 async def warmup_features():
-    """Point d'entrée — pré-fetch klines au démarrage puis lance les 4 boucles + batch flusher."""
-    # Pré-fetch parallèle : remplit le cache klines en un seul asyncio.gather
-    # pour que le premier scan utilisateur soit instantané
-    await prefetch_klines()
-    await asyncio.gather(
-        warmup_fast(),
-        warmup_medium(),
-        warmup_slow(),
-        warmup_brvm(),
-        _scan_batch_flusher(),
-    )
+    """Point d'entrée — pré-fetch klines au démarrage puis lance les 5 boucles + batch flusher.
+    Chaque boucle est supervisée et redémarre automatiquement si elle crash.
+    """
+    try:
+        await prefetch_klines()
+    except Exception as e:
+        logger.warning("prefetch_klines_failed", error=str(e))
+
+    try:
+        await asyncio.gather(
+            _supervised_loop("warmup_fast", warmup_fast),
+            _supervised_loop("warmup_medium", warmup_medium),
+            _supervised_loop("warmup_slow", warmup_slow),
+            _supervised_loop("warmup_brvm", warmup_brvm),
+            _supervised_loop("warmup_stocks", warmup_stocks),
+            _supervised_loop("batch_flusher", _scan_batch_flusher),
+            return_exceptions=True,
+        )
+    except Exception as e:
+        logger.error("warmup_features_fatal", error=str(e))
 
 
 @router.post("/multi")
