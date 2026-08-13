@@ -3,7 +3,6 @@ from pydantic import BaseModel
 from typing import List, Optional
 from collections import defaultdict
 import json
-import httpx
 import asyncio
 import time
 import random
@@ -44,8 +43,6 @@ from ml.feature_factory import build_feature_vector
 import config
 from utils.cache import get_cached, set_cached, cache
 from utils.logger import get_logger
-from utils.http import retry_async
-from utils.rate_limiter import rate_limit
 from utils.circuit_breaker import BREAKERS, State as BreakerState
 from utils.market_context import get_signal_context
 from utils.metrics import inc, observe
@@ -59,22 +56,26 @@ from risk.risk_level import compute_risk_level, get_max_position_pct
 from risk.red_flags import check_red_flags
 from risk.dca_tranches import compute_dca_tranches, compute_scale_out
 from utils.correlation import set_correlation_id, clear_correlation_id
-
-logger = get_logger(__name__)
-_executor = ThreadPoolExecutor(max_workers=4)  # Match CPU cores to avoid context-switch overhead
-atexit.register(lambda: _executor.shutdown(wait=False))
-
-# ── Scan history persistence (extracted to scan_persistence.py) ──
 from routers.scan_persistence import (
     _persist_scan,
-    _persist_scan_redis,
-    _queue_scan_for_batch,
-    _flush_scan_batch,
     _scan_batch_flusher,
     _try_ingest_signal,
     _get_scan_pool,
 )
-from routers.scan_persistence import SCAN_HISTORY_REDIS_TTL
+from routers.symbol_mappings import (
+    SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
+    TF_MAP,
+)
+from routers.scan_fetchers import (
+    fetch_twelvedata_klines,
+    fetch_deriv_klines,
+    fetch_yfinance_klines,
+    fetch_binance_klines,
+)
+
+logger = get_logger(__name__)
+_executor = ThreadPoolExecutor(max_workers=4)  # Match CPU cores to avoid context-switch overhead
+atexit.register(lambda: _executor.shutdown(wait=False))
 
 
 # ── Active strategies loader ─────────────────────────────────
@@ -223,15 +224,6 @@ _PERSISTENCE_WINDOW = 5    # fenêtre glissante (nb de scans) pour le persistenc
 
 router = APIRouter()
 
-# ── Symbol mappings & timeframe conversions (extracted to symbol_mappings.py) ──
-from routers.symbol_mappings import (
-    SYMBOL_TO_BINANCE, SYMBOL_TO_TWELVEDATA, SYMBOL_TO_YFINANCE, SYMBOL_TO_DERIV,
-    US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
-    TF_TO_YF, TF_TO_YF_PERIOD, TF_TO_TD, TF_TO_DERIV_GRANULARITY, TF_TO_MS, TF_MAP,
-    TWELVE_DATA_API_KEY, DERIV_API_TOKEN,
-)
-
-
 def get_asset_type(symbol: str) -> str:
     """Classify an internal symbol into CRYPTO | FOREX | SYNTHETIC | BRVM | COMMODITY | US_STOCK | UNKNOWN."""
     if symbol in SYMBOL_TO_BINANCE or symbol.endswith("/USDT"):
@@ -274,18 +266,6 @@ def bollinger(s: pd.Series, p: int = 20, k: float = 2.0):
     out = ta.bbands(s, length=p, std=k)
     # pandas-ta order: lower, mid, upper, bandwidth, %B
     return out.iloc[:, 2], out.iloc[:, 1], out.iloc[:, 0], out.iloc[:, 3]
-
-
-# ── Klines fetchers (extracted to scan_fetchers.py) ──
-from routers.scan_fetchers import (
-    fetch_twelvedata_klines,
-    fetch_deriv_klines,
-    fetch_yfinance_klines,
-    fetch_binance_klines,
-    _klines_cache,
-    _get_cache_ttl,
-    _get_http_client,
-)
 
 
 # Hiérarchie 3-TF : pour chaque LTF (timeframe d'exécution), définit quel TF intermédiaire
