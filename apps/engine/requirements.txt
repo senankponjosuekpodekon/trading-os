@@ -10,6 +10,7 @@ brvm-package>=0.2.1
 pandas>=2.2.3
 numpy>=2.2.3
 polars>=1.30.0
+pyarrow>=17.0.0
 pandas-ta>=0.4.67b0
 
 # Database
