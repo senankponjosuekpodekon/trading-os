@@ -154,6 +154,7 @@ class TestWarmupSlow:
              patch.object(scan_module, "FOREX_COMMODITY_SYMBOLS", forex_symbols), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_SLOW", timeframes), \
              patch.object(scan_module, "WARMUP_TTL_SLOW", ttl), \
+             patch.object(scan_module, "random", type("R", (), {"uniform": staticmethod(lambda a, b: 0)})()), \
              patch("asyncio.sleep", side_effect=fake_sleep):
             with pytest.raises(_StopLoop):
                 asyncio.run(scan_module.warmup_slow())
@@ -213,6 +214,7 @@ class TestWarmupSlow:
              patch.object(scan_module, "_load_active_strategies", side_effect=fake_load_strategies), \
              patch.object(scan_module, "FOREX_COMMODITY_SYMBOLS", ["EUR/USD", "XAU/USD"]), \
              patch.object(scan_module, "WARMUP_TIMEFRAMES_SLOW", ["1h"]), \
+             patch.object(scan_module, "random", type("R", (), {"uniform": staticmethod(lambda a, b: 0)})()), \
              patch("asyncio.sleep", side_effect=fake_sleep):
             with pytest.raises(_StopLoop):
                 asyncio.run(scan_module.warmup_slow())
