@@ -9,11 +9,10 @@ Common patterns:
 - yfinance fallback for exchanges with .JO/.LG/.NR suffixes
 - Mock data generation when scraping fails
 """
-import httpx
 import asyncio
 from abc import ABC, abstractmethod
 from datetime import date as _date
-from typing import List, Optional
+from typing import List
 
 from utils.logger import get_logger
 

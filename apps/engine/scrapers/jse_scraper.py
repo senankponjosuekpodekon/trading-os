@@ -5,10 +5,9 @@ JSE trading hours: 09:00-17:00 SAST (07:00-15:00 UTC, Mon-Fri).
 ~300+ liquid ordinary shares tracked.
 """
 import asyncio
-import time
 from typing import List
 
-from scrapers.base_africa_scraper import BaseAfricaScraper, HEADERS
+from scrapers.base_africa_scraper import BaseAfricaScraper
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
