@@ -108,8 +108,14 @@ class CircuitBreakerOpen(Exception):
 
 
 # Pre-defined breakers for known external sources.
+# Binance has two separate breakers: realtime (price broadcaster, 3s interval)
+# and batch (warmup loops, 60-300s interval). This prevents a transient
+# timeout in the fast broadcaster from blocking the slower batch warmup.
 BREAKERS: dict[str, CircuitBreaker] = {
-    "binance": CircuitBreaker("binance", failure_threshold=3, recovery_timeout=60.0),
+    "binance_realtime": CircuitBreaker("binance_realtime", failure_threshold=5, recovery_timeout=15.0),
+    "binance_batch": CircuitBreaker("binance_batch", failure_threshold=5, recovery_timeout=30.0),
+    # Keep legacy key as alias to binance_batch for backward compat
+    "binance": None,  # replaced below
     "twelvedata": CircuitBreaker("twelvedata", failure_threshold=3, recovery_timeout=120.0),
     "coingecko": CircuitBreaker("coingecko", failure_threshold=3, recovery_timeout=120.0),
     "newsapi": CircuitBreaker("newsapi", failure_threshold=5, recovery_timeout=300.0),
@@ -122,6 +128,7 @@ BREAKERS: dict[str, CircuitBreaker] = {
     "brvm": CircuitBreaker("brvm", failure_threshold=5, recovery_timeout=300.0),
     "deriv": CircuitBreaker("deriv", failure_threshold=3, recovery_timeout=60.0),
 }
+BREAKERS["binance"] = BREAKERS["binance_batch"]  # alias
 
 
 def get_breaker(name: str) -> CircuitBreaker:

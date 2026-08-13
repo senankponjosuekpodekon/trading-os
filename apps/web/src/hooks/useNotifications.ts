@@ -75,9 +75,13 @@ export function useNotifications() {
 
     connect();
 
+    // Proactively reconnect every 4 minutes (SSE token expires in 5 min)
+    const refreshTimer = setInterval(connect, 4 * 60 * 1000);
+
     return () => {
       stopped = true;
       if (retryTimer) clearTimeout(retryTimer);
+      clearInterval(refreshTimer);
       esRef.current?.close();
     };
   }, [user]);

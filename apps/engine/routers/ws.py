@@ -4,6 +4,7 @@ WebSocket /ws/prices — prix live depuis Binance (via poll 3s)
 """
 import asyncio
 import json
+import random
 import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Set
@@ -12,6 +13,7 @@ from utils.deriv_symbols import to_wire_symbol
 
 from utils.http import retry_async
 from utils.logger import get_logger
+from utils.circuit_breaker import BREAKERS, State as BreakerState
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -145,29 +147,36 @@ async def price_broadcaster():
     """Tâche de fond : fetch prix Binance toutes les 3s, Deriv toutes les 10s, Forex/Commodités toutes les 30s."""
     _yf_counter    = 0   # toutes les 10 itérations = 30s
     _deriv_counter = 0   # toutes les  3 itérations = 10s
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(timeout=10) as client:
         while True:
             try:
-                # --- Binance (toutes les 3s) ---
-                async def _fetch_prices():
-                    resp = await client.get(
-                        BINANCE_PRICE_URL,
-                        params={"symbols": json.dumps(SYMBOLS_BINANCE, separators=(',', ':'))},
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
+                prices = {}
 
-                data = await retry_async(
-                    _fetch_prices,
-                    max_retries=3,
-                    base_delay=0.5,
-                    exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
-                    on_retry=lambda attempt, exc: logger.warning(
-                        "binance_price_retry", attempt=attempt, error=str(exc)
-                    ),
-                    source="binance",
-                )
-                prices = {item["symbol"]: float(item["price"]) for item in data}
+                # --- Binance (toutes les 3s) — skip if circuit breaker OPEN ---
+                _binance_breaker = BREAKERS.get("binance_realtime")
+                if not _binance_breaker or _binance_breaker.state != BreakerState.OPEN.value:
+                    async def _fetch_prices():
+                        resp = await client.get(
+                            BINANCE_PRICE_URL,
+                            params={"symbols": json.dumps(SYMBOLS_BINANCE, separators=(',', ':'))},
+                        )
+                        resp.raise_for_status()
+                        return resp.json()
+
+                    data = await retry_async(
+                        _fetch_prices,
+                        max_retries=1,
+                        base_delay=0.5,
+                        exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
+                        on_retry=lambda attempt, exc: logger.warning(
+                            "binance_price_retry",
+                            attempt=attempt,
+                            error_type=type(exc).__name__,
+                            error=repr(exc),
+                        ),
+                        source="binance_realtime",
+                    )
+                    prices = {item["symbol"]: float(item["price"]) for item in data}
 
                 # --- Deriv (toutes les 10s ~ 3 cycles) ---
                 _deriv_counter += 1
@@ -199,8 +208,8 @@ async def price_broadcaster():
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.warning("price_broadcast_failed", error=str(e))
-            await asyncio.sleep(3)
+                logger.warning("price_broadcast_failed", error_type=type(e).__name__, error=repr(e))
+            await asyncio.sleep(3 + random.uniform(0, 0.5))
 
 
 def set_latest_signals(signals: list):

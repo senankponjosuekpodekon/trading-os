@@ -6,6 +6,7 @@ import json
 import httpx
 import asyncio
 import time
+import random
 import pandas as pd
 import pandas_ta as ta
 import atexit
@@ -46,6 +47,7 @@ from utils.cache import get_cached, set_cached, cache
 from utils.logger import get_logger
 from utils.http import retry_async
 from utils.rate_limiter import rate_limit
+from utils.circuit_breaker import BREAKERS, State as BreakerState
 from utils.market_context import get_signal_context
 from utils.metrics import inc, observe
 from utils.session import get_session_info
@@ -836,9 +838,10 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
             base_delay=0.5,
             exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
             on_retry=lambda attempt, exc: logger.warning(
-                "binance_retry", symbol=symbol, attempt=attempt, error=str(exc)
+                "binance_retry", symbol=symbol, attempt=attempt,
+                error_type=type(exc).__name__, error=repr(exc),
             ),
-            source="binance",
+            source="binance_batch",
         )
         df = pd.DataFrame(data, columns=[
             "time","open","high","low","close","volume",
@@ -858,7 +861,8 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
             "binance_klines_failed",
             symbol=symbol,
             interval=interval,
-            error=str(exc),
+            error_type=type(exc).__name__,
+            error=repr(exc),
         )
         return None
 
@@ -2603,6 +2607,14 @@ async def warmup_fast():
     logger.info("warmup_fast_start", symbols=len(BINANCE_PRIORITY_SYMBOLS), interval=WARMUP_INTERVAL_FAST)
     while True:
         t0 = time.monotonic()
+
+        # Skip entire cycle if Binance batch circuit breaker is OPEN
+        breaker = BREAKERS.get("binance_batch")
+        if breaker and breaker.state == BreakerState.OPEN.value:
+            logger.info("warmup_fast_skipped", reason="binance_batch_circuit_open")
+            await asyncio.sleep(WARMUP_INTERVAL_FAST)
+            continue
+
         strategies = await _load_active_strategies()
 
         async def _scan_one(sym: str, timeframe: str, strat):
@@ -2614,7 +2626,8 @@ async def warmup_fast():
                     await _persist_scan(res, timeframe)
                     await _try_ingest_signal(res, timeframe)
             except Exception as e:
-                logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe, error=str(e))
+                logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe,
+                               error_type=type(e).__name__, error=repr(e))
 
         for timeframe in WARMUP_TIMEFRAMES_FAST:
             tasks = [
@@ -2629,6 +2642,8 @@ async def warmup_fast():
         # Attendre le reste du cycle (60s - temps du scan)
         elapsed = time.monotonic() - t0
         wait = max(1, WARMUP_INTERVAL_FAST - elapsed)
+        # Jitter: add 0-20% of interval to desynchronize loops after restart
+        wait += random.uniform(0, WARMUP_INTERVAL_FAST * 0.2)
         await asyncio.sleep(wait)
 
 
@@ -2638,7 +2653,7 @@ async def warmup_medium():
     Parallélisé : tous les symboles scannés en un seul asyncio.gather.
     """
     logger.info("warmup_medium_start", symbols=len(DERIV_SYMBOLS), interval=WARMUP_INTERVAL_MEDIUM)
-    await asyncio.sleep(5)
+    await asyncio.sleep(5 + random.uniform(0, 5))
     while True:
         t0 = time.monotonic()
         strategies = await _load_active_strategies()
@@ -2652,7 +2667,8 @@ async def warmup_medium():
                     await _persist_scan(res, timeframe)
                     await _try_ingest_signal(res, timeframe)
             except Exception as e:
-                logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe, error=str(e))
+                logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe,
+                               error_type=type(e).__name__, error=repr(e))
 
         for timeframe in WARMUP_TIMEFRAMES_MEDIUM:
             tasks = [
@@ -2664,6 +2680,7 @@ async def warmup_medium():
             logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(1, WARMUP_INTERVAL_MEDIUM - elapsed)
+        wait += random.uniform(0, WARMUP_INTERVAL_MEDIUM * 0.2)
         await asyncio.sleep(wait)
 
 
@@ -2673,7 +2690,7 @@ async def warmup_slow():
     """
     logger.info("warmup_slow_start", symbols=len(FOREX_COMMODITY_SYMBOLS), interval=WARMUP_INTERVAL_SLOW)
     # Décalage initial pour ne pas surcharger au démarrage
-    await asyncio.sleep(15)
+    await asyncio.sleep(15 + random.uniform(0, 10))
     while True:
         t0 = time.monotonic()
         strategies = await _load_active_strategies()
@@ -2687,7 +2704,8 @@ async def warmup_slow():
                     await _persist_scan(res, timeframe)
                     await _try_ingest_signal(res, timeframe)
             except Exception as e:
-                logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe, error=str(e))
+                logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe,
+                               error_type=type(e).__name__, error=repr(e))
 
         for timeframe in WARMUP_TIMEFRAMES_SLOW:
             tasks = [
@@ -2699,6 +2717,7 @@ async def warmup_slow():
             logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS), strategies=len(strategies))
         elapsed = time.monotonic() - t0
         wait = max(1, WARMUP_INTERVAL_SLOW - elapsed)
+        wait += random.uniform(0, WARMUP_INTERVAL_SLOW * 0.2)
         await asyncio.sleep(wait)
 
 
@@ -2722,7 +2741,7 @@ async def warmup_brvm():
     Les données BRVM proviennent du scraper brvm.org (pas yfinance/Binance).
     """
     logger.info("warmup_brvm_start", symbols=len(BRVM_SYMBOLS), interval=WARMUP_INTERVAL_BRVM)
-    await asyncio.sleep(30)
+    await asyncio.sleep(30 + random.uniform(0, 15))
     while True:
         if not _is_brvm_open():
             logger.info("warmup_brvm_skipped", reason="market_closed")
@@ -2749,6 +2768,7 @@ async def warmup_brvm():
                     strategies=len(strategies), elapsed_ms=round((time.monotonic() - t0) * 1000))
         elapsed = time.monotonic() - t0
         wait = max(1, WARMUP_INTERVAL_BRVM - elapsed)
+        wait += random.uniform(0, WARMUP_INTERVAL_BRVM * 0.2)
         await asyncio.sleep(wait)
 
 
@@ -2769,7 +2789,7 @@ async def warmup_stocks():
     """
     stocks = sorted(US_STOCK_SYMBOLS)
     logger.info("warmup_stocks_start", symbols=len(stocks), interval=WARMUP_INTERVAL_STOCKS)
-    await asyncio.sleep(20)
+    await asyncio.sleep(20 + random.uniform(0, 10))
     while True:
         if not _is_nyse_open():
             logger.info("warmup_stocks_skipped", reason="market_closed")
@@ -2787,7 +2807,8 @@ async def warmup_stocks():
                     await _persist_scan(res, timeframe)
                     await _try_ingest_signal(res, timeframe)
             except Exception as e:
-                logger.warning("warmup_stocks_failed", symbol=sym, tf=timeframe, error=str(e))
+                logger.warning("warmup_stocks_failed", symbol=sym, tf=timeframe,
+                               error_type=type(e).__name__, error=repr(e))
 
         for timeframe in WARMUP_TIMEFRAMES_STOCKS:
             tasks = [
@@ -2801,6 +2822,7 @@ async def warmup_stocks():
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
         elapsed = time.monotonic() - t0
         wait = max(1, WARMUP_INTERVAL_STOCKS - elapsed)
+        wait += random.uniform(0, WARMUP_INTERVAL_STOCKS * 0.2)
         await asyncio.sleep(wait)
 
 

@@ -158,7 +158,7 @@ export default function SignalsPage() {
   });
 
   const scanPollingEnabled = pollingConfig?.scanPollingEnabled ?? true;
-  const scanPollingInterval = pollingConfig?.scanPollingInterval ?? 5_000;
+  const scanPollingInterval = pollingConfig?.scanPollingInterval ?? 15_000;
 
   const { data: scanHistoryData, isFetching: scanHistoryLoading } = useQuery({
     queryKey: ['scan-history-realtime'],

@@ -47,7 +47,7 @@ export class WatcherService {
           const { data } = await firstValueFrom(
             this.http.get<{ candles: Array<{ close: number }> }>(
               `${this.engineUrl}/candles/${encodeURIComponent(sym)}`,
-              { params: { timeframe: '1m', limit: 1 }, timeout: 8000, headers: engineHeaders(this.config) },
+              { params: { timeframe: '1m', limit: 50 }, timeout: 8000, headers: engineHeaders(this.config) },
             ),
           );
           if (data.candles && data.candles.length > 0) {
