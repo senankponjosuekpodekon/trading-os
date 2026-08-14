@@ -13,7 +13,7 @@ Endpoints:
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 
 from utils.logger import get_logger
@@ -156,7 +156,7 @@ async def get_africa_quotes(
         "count": len(quotes),
         "exchange": exchange.upper(),
         "source": source,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -192,7 +192,7 @@ async def get_all_africa_quotes():
         "quotes": all_quotes,
         "total": len(all_quotes),
         "exchanges": statuses,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -264,7 +264,7 @@ async def scan_africa(req: AfricaScanRequest):
         "results": all_signals,
         "total": len(all_signals),
         "exchanges_scanned": exchanges,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -290,7 +290,7 @@ async def get_africa_top_movers(
         "top_losers": sorted_q[-5:],
         "exchange": exchange.upper(),
         "source": source,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 

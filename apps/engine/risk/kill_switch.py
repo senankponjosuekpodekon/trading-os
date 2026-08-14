@@ -14,7 +14,7 @@ States:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -106,7 +106,7 @@ class KillSwitch:
             current_capital: Current portfolio capital (realized)
             now: Current timestamp (defaults to utcnow)
         """
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         self.current_capital = max(current_capital, 0.0)
         self.peak_capital = max(self.peak_capital, self.current_capital)
         self._maybe_reset_day(now)
@@ -156,7 +156,7 @@ class KillSwitch:
 
     def can_trade(self, now: Optional[datetime] = None) -> tuple[bool, str]:
         """Check if new trades are allowed."""
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         self._check_recovery_transition(now)
 
         if self.state == KillSwitchState.HALTED:

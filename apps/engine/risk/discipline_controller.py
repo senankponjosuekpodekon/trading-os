@@ -19,7 +19,7 @@ with what adjustments, and why.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from enum import Enum
 
@@ -133,7 +133,7 @@ class DisciplineController:
 
         This is the main entry point for pre-trade risk evaluation.
         """
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         reasons: list[str] = []
         factors: dict = {}
         size_multiplier = 1.0

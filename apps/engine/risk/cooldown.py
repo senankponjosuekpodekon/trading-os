@@ -10,7 +10,7 @@ Features:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from enum import Enum
 
@@ -65,13 +65,13 @@ class CooldownManager:
 
     def record_trade(self, now: Optional[datetime] = None) -> None:
         """Record that a trade was placed."""
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         self._trade_timestamps.append(now)
         self._prune_old_trades(now)
 
     def record_loss(self, now: Optional[datetime] = None) -> None:
         """Record a losing trade and trigger cooldown."""
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         self.consecutive_losses += 1
         self._last_loss_time = now
         self._trade_timestamps.append(now)
@@ -91,14 +91,14 @@ class CooldownManager:
 
     def record_win(self, now: Optional[datetime] = None) -> None:
         """Record a winning trade — resets consecutive losses."""
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         self.consecutive_losses = 0
         self._trade_timestamps.append(now)
         self._prune_old_trades(now)
 
     def can_trade(self, now: Optional[datetime] = None) -> tuple[bool, str]:
         """Check if a new trade is allowed."""
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         self._check_cooldown_expired(now)
         self._prune_old_trades(now)
 
@@ -122,7 +122,7 @@ class CooldownManager:
 
     def status(self, now: Optional[datetime] = None) -> CooldownStatus:
         """Get current cooldown status."""
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         self._check_cooldown_expired(now)
         self._prune_old_trades(now)
 

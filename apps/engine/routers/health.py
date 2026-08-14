@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Response
-from datetime import datetime
+from datetime import datetime, timezone
 from utils.metrics import render
 
 router = APIRouter()
@@ -10,7 +10,7 @@ async def health():
     return {
         "status": "ok",
         "service": "Trading OS Engine",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "0.1.0",
     }
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 from scrapers.brvm_scraper import (
     TOP_SYMBOLS,
@@ -355,8 +355,8 @@ async def get_brvm_quotes():
     quotes = await fetch_brvm_quotes()
     if not quotes:
         quotes = _mock_brvm_quotes()
-        return {"quotes": quotes, "count": len(quotes), "source": "mock", "timestamp": datetime.utcnow().isoformat()}
-    return {"quotes": quotes, "count": len(quotes), "source": "live", "timestamp": datetime.utcnow().isoformat()}
+        return {"quotes": quotes, "count": len(quotes), "source": "mock", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"quotes": quotes, "count": len(quotes), "source": "live", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @router.post("/brvm/scan")
@@ -398,7 +398,7 @@ async def scan_brvm(req: BrvmScanRequest):
         "source":    source,
         "market":    "BRVM",
         "currency":  "XOF",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -417,7 +417,7 @@ async def get_top_movers():
         "top_gainers": sorted_q[:5],
         "top_losers":  sorted_q[-5:],
         "source":      source,
-        "timestamp":   datetime.utcnow().isoformat(),
+        "timestamp":   datetime.now(timezone.utc).isoformat(),
     }
 
 

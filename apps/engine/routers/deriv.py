@@ -13,7 +13,7 @@ import time
 import websockets
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 
 from risk.engine import get_risk_engine
 from risk.discipline_controller import TradeDecision
@@ -282,7 +282,7 @@ async def analyze_v75(req: DerivTickRequest):
         "source":    source,
         "candles":   len(candles),
         "last_price": round(last_candle[4], 4) if last_candle else None,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         **analysis,
     }
 
@@ -477,7 +477,7 @@ async def multi_analyze(req: MultiAnalyzeRequest):
             "category":   info.get("category", "unknown"),
             "source":     source,
             "last_price": last_price,
-            "timestamp":  datetime.utcnow().isoformat(),
+            "timestamp":  datetime.now(timezone.utc).isoformat(),
             **analysis,
         }
 

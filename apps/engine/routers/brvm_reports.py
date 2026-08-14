@@ -17,7 +17,7 @@ from typing import List, Optional
 import asyncio
 import httpx
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 
 from scrapers.brvm_scraper import BRVM_SYMBOLS, HEADERS
@@ -298,7 +298,7 @@ def fundamental_score(reports: List[BrvmReport]) -> int:
     )
     if not latest:
         return 0
-    days = (datetime.utcnow() - latest).days
+    days = (datetime.now(timezone.utc) - latest).days
     if days <= 7:
         return 20
     if days <= 30:
