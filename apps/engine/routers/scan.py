@@ -41,7 +41,7 @@ from features.market_concept_layer import compute_market_concept_vector
 from features.market_embedding import build_market_embedding
 from ml.feature_factory import build_feature_vector
 import config
-from utils.cache import get_cached, set_cached, cache
+from utils.cache import get_cached, set_cached, cache, mem_cached
 from utils.logger import get_logger
 from utils.circuit_breaker import BREAKERS, State as BreakerState
 from utils.market_context import get_signal_context
@@ -1821,7 +1821,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     gold_dxy = None
     if is_gold_symbol(symbol):
         try:
-            gold_dxy = await asyncio.wait_for(get_dxy_momentum(days=5), timeout=5.0)
+            gold_dxy = await asyncio.wait_for(
+                mem_cached("dxy:5d", lambda: get_dxy_momentum(days=5), ttl=300),
+                timeout=5.0,
+            )
         except Exception:
             gold_dxy = None
 
@@ -1829,7 +1832,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     tokenomics_context = None
     if get_asset_type(symbol) == "CRYPTO":
         try:
-            tokenomics_context = await asyncio.wait_for(fetch_tokenomics(symbol), timeout=3.0)
+            tokenomics_context = await asyncio.wait_for(
+                mem_cached(f"tkn:{symbol}", lambda: fetch_tokenomics(symbol), ttl=600),
+                timeout=3.0,
+            )
         except Exception as exc:
             logger.debug("tokenomics_context_failed", symbol=symbol, error=str(exc))
             tokenomics_context = None
@@ -1838,7 +1844,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     social_context = None
     if get_asset_type(symbol) == "CRYPTO":
         try:
-            social_context = await asyncio.wait_for(fetch_social_metrics(symbol), timeout=3.0)
+            social_context = await asyncio.wait_for(
+                mem_cached(f"soc:{symbol}", lambda: fetch_social_metrics(symbol), ttl=600),
+                timeout=3.0,
+            )
         except Exception as exc:
             logger.debug("social_context_failed", symbol=symbol, error=str(exc))
             social_context = None
@@ -1849,7 +1858,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
         try:
             from routers.x_sentiment import fetch_x_sentiment
             _base = symbol.split("/")[0]
-            x_result = await asyncio.wait_for(fetch_x_sentiment(category="crypto", symbol=_base), timeout=8.0)
+            x_result = await asyncio.wait_for(
+                mem_cached(f"xsent:{_base}", lambda: fetch_x_sentiment(category="crypto", symbol=_base), ttl=600),
+                timeout=8.0,
+            )
             if x_result and not x_result.get("error"):
                 x_sentiment_context = {
                     "overall_label": x_result.get("overall_sentiment", {}).get("overall_label"),
@@ -1868,11 +1880,17 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     _asset_type_for_risk = get_asset_type(symbol)
     if _asset_type_for_risk == "CRYPTO":
         try:
-            _mcap_tier = await asyncio.wait_for(fetch_market_cap_tier(symbol), timeout=5.0)
+            _mcap_tier = await asyncio.wait_for(
+                mem_cached(f"mcap:{symbol}", lambda: fetch_market_cap_tier(symbol), ttl=600),
+                timeout=5.0,
+            )
         except Exception:
             _mcap_tier = get_market_cap_tier_sync(symbol, "CRYPTO")
         try:
-            _liquidity = await asyncio.wait_for(compute_liquidity_score(symbol, "CRYPTO"), timeout=5.0)
+            _liquidity = await asyncio.wait_for(
+                mem_cached(f"liq:{symbol}", lambda: compute_liquidity_score(symbol, "CRYPTO"), ttl=600),
+                timeout=5.0,
+            )
         except Exception:
             _liquidity = estimate_liquidity_score_sync(symbol, "CRYPTO", df)
 
@@ -1880,7 +1898,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     _red_flags = None
     if _asset_type_for_risk == "CRYPTO" and _mcap_tier in ("MICRO", "SMALL"):
         try:
-            _red_flags = await asyncio.wait_for(check_red_flags(symbol, _mcap_tier), timeout=8.0)
+            _red_flags = await asyncio.wait_for(
+                mem_cached(f"rf:{symbol}", lambda: check_red_flags(symbol, _mcap_tier), ttl=600),
+                timeout=8.0,
+            )
         except Exception:
             _red_flags = {"red_flags": [], "red_flag_count": 0, "danger": False, "warning": None}
 
@@ -1888,7 +1909,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     _fg_value = None
     if _asset_type_for_risk == "CRYPTO":
         try:
-            _fg = await asyncio.wait_for(fear_greed(), timeout=3.0)
+            _fg = await asyncio.wait_for(
+                mem_cached("fg:global", lambda: fear_greed(), ttl=300),
+                timeout=3.0,
+            )
             _fg_value = _fg.get("value") if isinstance(_fg, dict) else None
         except Exception:
             _fg_value = None
@@ -1896,7 +1920,10 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     # ── On-chain context for crypto (funding rate gate) ──
     if _asset_type_for_risk == "CRYPTO":
         try:
-            _oc_ctx = await asyncio.wait_for(onchain_context(symbol), timeout=3.0)
+            _oc_ctx = await asyncio.wait_for(
+                mem_cached(f"oc:{symbol}", lambda: onchain_context(symbol), ttl=600),
+                timeout=3.0,
+            )
             _onchain_ctx = {"context": _oc_ctx, "fear_greed": _fg_value}
         except Exception:
             _onchain_ctx = None

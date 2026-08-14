@@ -28,8 +28,8 @@ export class AssetConfigService {
   }
 
   async getMarket(marketType: string) {
-    const cfg = await this.prisma.assetConfig.findUnique({
-      where: { marketType_symbol: { marketType, symbol: null as any } },
+    const cfg = await this.prisma.assetConfig.findFirst({
+      where: { marketType, symbol: null, scope: 'market' },
     });
     if (!cfg) {
       return {
@@ -51,9 +51,23 @@ export class AssetConfigService {
     maxStrategies?: number | null;
     timeframes?: any;
   }) {
-    return this.prisma.assetConfig.upsert({
-      where: { marketType_symbol: { marketType, symbol: null as any } },
-      create: {
+    const existing = await this.prisma.assetConfig.findFirst({
+      where: { marketType, symbol: null, scope: 'market' },
+    });
+    if (existing) {
+      return this.prisma.assetConfig.update({
+        where: { id: existing.id },
+        data: {
+          ...(data.isActive !== undefined && { isActive: data.isActive }),
+          ...(data.warmupEnabled !== undefined && { warmupEnabled: data.warmupEnabled }),
+          ...(data.scanInterval !== undefined && { scanInterval: data.scanInterval }),
+          ...(data.maxStrategies !== undefined && { maxStrategies: data.maxStrategies }),
+          ...(data.timeframes !== undefined && { timeframes: data.timeframes }),
+        },
+      });
+    }
+    return this.prisma.assetConfig.create({
+      data: {
         scope: 'market',
         marketType,
         symbol: null,
@@ -62,13 +76,6 @@ export class AssetConfigService {
         scanInterval: data.scanInterval ?? null,
         maxStrategies: data.maxStrategies ?? null,
         timeframes: data.timeframes ?? null,
-      },
-      update: {
-        ...(data.isActive !== undefined && { isActive: data.isActive }),
-        ...(data.warmupEnabled !== undefined && { warmupEnabled: data.warmupEnabled }),
-        ...(data.scanInterval !== undefined && { scanInterval: data.scanInterval }),
-        ...(data.maxStrategies !== undefined && { maxStrategies: data.maxStrategies }),
-        ...(data.timeframes !== undefined && { timeframes: data.timeframes }),
       },
     });
   }

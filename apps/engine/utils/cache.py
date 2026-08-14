@@ -1,10 +1,40 @@
 """Cache Redis centralisé pour l'engine."""
 import json
-from typing import Any, Optional
+import time
+from typing import Any, Optional, Callable, Awaitable
 
 import redis.asyncio as redis
 
 import config
+
+
+# ── In-memory TTL cache for external data fetchers ──────────────
+_mem_cache: dict[str, tuple[Any, float]] = {}
+
+
+def mem_get(key: str) -> Any | None:
+    entry = _mem_cache.get(key)
+    if entry is None:
+        return None
+    value, expires_at = entry
+    if time.monotonic() > expires_at:
+        _mem_cache.pop(key, None)
+        return None
+    return value
+
+
+def mem_set(key: str, value: Any, ttl: int) -> None:
+    _mem_cache[key] = (value, time.monotonic() + ttl)
+
+
+async def mem_cached(key: str, fetch_fn: Callable[[], Awaitable[Any]], ttl: int = 600) -> Any:
+    cached = mem_get(key)
+    if cached is not None:
+        return cached
+    result = await fetch_fn()
+    if result is not None:
+        mem_set(key, result, ttl)
+    return result
 
 
 class Cache:
