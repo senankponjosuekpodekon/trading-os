@@ -9,7 +9,6 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { EngineKeyGuard } from '../auth/engine-key.guard';
 
 @Controller('signals')
-@UseGuards(JwtAuthGuard)
 export class SignalsController {
   constructor(
     private signalsService: SignalsService,
@@ -19,6 +18,7 @@ export class SignalsController {
   ) {}
 
   @Get()
+  @UseGuards(JwtAuthGuard)
   findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -38,6 +38,7 @@ export class SignalsController {
   }
 
   @Post('scan')
+  @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   triggerScan(
     @Request() req: any,
@@ -50,16 +51,19 @@ export class SignalsController {
   }
 
   @Get('stats')
+  @UseGuards(JwtAuthGuard)
   getStats(@Query('market') market?: string) {
     return this.outcomeService.getStats(market);
   }
 
   @Get('alerts/stats')
+  @UseGuards(JwtAuthGuard)
   getAlertStats(@Request() req: any) {
     return this.signalsService.getAlertStats(req.user.id);
   }
 
   @Get('calibration')
+  @UseGuards(JwtAuthGuard)
   getCalibration(
     @Query('market') market?: string,
     @Query('signalType') signalType?: string,
@@ -68,6 +72,7 @@ export class SignalsController {
   }
 
   @Get('predict-win-rate')
+  @UseGuards(JwtAuthGuard)
   predictWinRate(
     @Query('confidence') confidence: string,
     @Query('market') market?: string,
@@ -79,6 +84,7 @@ export class SignalsController {
   }
 
   @Post('predictor/train')
+  @UseGuards(JwtAuthGuard)
   trainPredictor(
     @Query('market') market?: string,
     @Query('timeframe') timeframe?: string,
@@ -89,31 +95,37 @@ export class SignalsController {
   }
 
   @Post('predictor/predict')
+  @UseGuards(JwtAuthGuard)
   predictSignal(@Body() features: SignalFeatures) {
     return this.signalsService.predictSignalScore(features);
   }
 
   @Get('predictor/status')
+  @UseGuards(JwtAuthGuard)
   predictorStatus() {
     return this.signalsService.getPredictorStatus();
   }
 
   @Get('predictor/weights')
+  @UseGuards(JwtAuthGuard)
   predictorWeights() {
     return this.signalsService.getPredictorFeatureWeights();
   }
 
   @Post('memory/similar')
+  @UseGuards(JwtAuthGuard)
   findSimilarSignals(@Body() dto: any) {
     return this.outcomeService.findSimilar(dto);
   }
 
   @Get('pattern-stats')
+  @UseGuards(JwtAuthGuard)
   getPatternStats() {
     return this.outcomeService.getPatternStats();
   }
 
   @Get('features')
+  @UseGuards(JwtAuthGuard)
   listFeatureSnapshots(
     @Query('market') market?: string,
     @Query('outcome') outcome?: string,
@@ -130,6 +142,7 @@ export class SignalsController {
   }
 
   @Get('features/export')
+  @UseGuards(JwtAuthGuard)
   exportFeatureSnapshots(
     @Query('market') market?: string,
     @Query('outcome') outcome?: string,
@@ -146,6 +159,7 @@ export class SignalsController {
   }
 
   @Get('post-trade-analysis')
+  @UseGuards(JwtAuthGuard)
   getPostTradeAnalysis(
     @Query('market') market?: string,
     @Query('patternName') patternName?: string,
@@ -154,16 +168,19 @@ export class SignalsController {
   }
 
   @Post('pattern-predictor/train')
+  @UseGuards(JwtAuthGuard)
   trainPatternPredictor(@Query('market') market?: string) {
     return this.patternPredictorService.train(market);
   }
 
   @Post('pattern-predictor/predict')
+  @UseGuards(JwtAuthGuard)
   predictPattern(@Body() features: PatternFeaturesInput) {
     return this.patternPredictorService.predict(features);
   }
 
   @Get('pattern-predictor/status')
+  @UseGuards(JwtAuthGuard)
   patternPredictorStatus() {
     return this.patternPredictorService.getStatus();
   }
@@ -176,6 +193,7 @@ export class SignalsController {
   }
 
   @Get('scan-history')
+  @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   async scanHistory(
     @Query('limit') limit?: string,
@@ -190,6 +208,7 @@ export class SignalsController {
   }
 
   @Get('scan-history/db')
+  @UseGuards(JwtAuthGuard)
   async scanHistoryDb(
     @Query('page') page?: string,
     @Query('limit') limit?: string,

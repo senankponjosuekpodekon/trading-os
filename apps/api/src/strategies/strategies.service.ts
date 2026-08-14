@@ -57,7 +57,10 @@ export class StrategiesService {
   }
 
   async toggleUserStrategy(userId: string, strategyId: string, dto: ToggleUserStrategyDto) {
-    await this.findOne(strategyId);
+    const strategy = await this.findOne(strategyId);
+    if (dto.isEnabled && !strategy.isActive) {
+      throw new BadRequestException('Cette stratégie a été désactivée par un administrateur.');
+    }
     if (dto.customRules) validateStrategyRules(dto.customRules);
     if (dto.isEnabled) {
       const existing = await this.prisma.userStrategy.findUnique({

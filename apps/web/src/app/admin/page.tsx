@@ -588,9 +588,25 @@ function MarketsTab() {
       }
       return { prev };
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['admin-markets'] });
-      toast('Configuration marché mise à jour', { type: 'success' });
+      if (vars.isActive !== undefined) {
+        toast(
+          vars.isActive
+            ? `Marché ${vars.marketType} activé — les scans automatiques reprennent.`
+            : `Marché ${vars.marketType} désactivé — les scans automatiques sont arrêtés. Les utilisateurs ne recevront plus de signaux de ce marché.`,
+          { type: vars.isActive ? 'success' : 'warning', title: 'Configuration marché' },
+        );
+      } else if (vars.warmupEnabled !== undefined) {
+        toast(
+          vars.warmupEnabled
+            ? `Warmup activé pour ${vars.marketType} — pré-calcul en arrière-plan.`
+            : `Warmup désactivé pour ${vars.marketType} — économie de CPU, scans à la demande uniquement.`,
+          { type: vars.warmupEnabled ? 'success' : 'warning', title: 'Warmup' },
+        );
+      } else {
+        toast('Configuration marché mise à jour', { type: 'success' });
+      }
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(['admin-markets'], ctx.prev);

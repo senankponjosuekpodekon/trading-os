@@ -164,7 +164,7 @@ async def _try_ingest_signal(result: dict, timeframe: str) -> None:
         if _ingest_client is None or _ingest_client.is_closed:
             _ingest_client = httpx.AsyncClient(timeout=5.0)
         await _ingest_client.post(
-            f"{api_url}/signals/ingest",
+            f"{api_url.rstrip('/')}/api/signals/ingest",
             json=result,
             headers={"X-Engine-Key": api_key},
         )
