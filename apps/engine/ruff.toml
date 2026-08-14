@@ -17,3 +17,4 @@ ignore = [
 
 [lint.per-file-ignores]
 "tests/*" = ["F841", "E402"]  # E402 : sys.path.insert avant les imports
+"main.py" = ["E402"]  # warnings.filterwarnings must run before imports

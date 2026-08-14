@@ -17,6 +17,7 @@ import { RRRatioBadge } from '@/components/ui/RRRatioBadge';
 import { TimeAgo } from '@/components/ui/TimeAgo';
 import { formatDateTime, getTradingSession } from '@/lib/timezone';
 import { useAuthStore } from '@/store/auth.store';
+import { useToast } from '@/hooks/useToast';
 import { Clock, Zap, Crosshair } from 'lucide-react';
 import { OneClickExecute } from './OneClickExecute';
 
@@ -56,6 +57,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const mode = useModeStore(s => s.mode);
   const isBeginner = mode === 'beginner';
   const user = useAuthStore(s => s.user);
+  const { toast } = useToast();
   const [showWhy, setShowWhy] = useState(false);
   const [showWhyNot, setShowWhyNot] = useState(false);
   const [showPatterns, setShowPatterns] = useState(false);
@@ -141,7 +143,10 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {}
+      toast('Infos du signal copiées dans le presse-papiers.', { type: 'success' });
+    } catch {
+      toast('Impossible de copier dans le presse-papiers.', { type: 'error' });
+    }
   };
 
   const beginnerSummary = useMemo(() => buildBeginnerSummary(signal), [signal]);

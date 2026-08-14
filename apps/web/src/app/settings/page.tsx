@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle, Clock } from 'lucide-react';
+import { useToast } from '@/hooks/useToast';
 import Link from 'next/link';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
@@ -61,6 +62,7 @@ export default function SettingsPage() {
     return localStorage.getItem(LS_PROFILE) ?? 'moderate';
   });
   const qc = useQueryClient();
+  const { toast } = useToast();
   const user = useAuthStore(s => s.user);
   const [timezone, setTimezone] = useState<string>(user?.timezone ?? getBrowserTimezone());
 
@@ -105,8 +107,18 @@ export default function SettingsPage() {
       }
       return { previous };
     },
-    onError: (_err, _vars, context) => {
+    onError: (_err: any, _vars, context) => {
       if (context?.previous) qc.setQueryData(['strategies'], context.previous);
+      const msg = _err?.response?.data?.message || 'Erreur lors du basculement de la stratégie.';
+      toast(msg, { type: 'error', title: 'Stratégie' });
+    },
+    onSuccess: (_data, vars) => {
+      toast(
+        vars.isEnabled
+          ? 'Stratégie activée — vous recevrez les signaux de cette stratégie.'
+          : 'Stratégie désactivée — vous ne recevrez plus de signaux de cette stratégie.',
+        { type: vars.isEnabled ? 'success' : 'warning', title: 'Stratégie' },
+      );
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['strategies'] }),
   });

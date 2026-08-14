@@ -386,57 +386,7 @@ export default function AdminPage() {
         )}
 
         {/* Strategies tab */}
-        {tab === 'strategies' && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-800 text-gray-400">
-                  <th className="text-left px-4 py-3">Stratégie</th>
-                  <th className="text-center px-4 py-3">Active</th>
-                  <th className="text-right px-4 py-3">Signaux</th>
-                  <th className="text-right px-4 py-3">Confiance moy.</th>
-                  <th className="text-right px-4 py-3">Trades</th>
-                  <th className="text-right px-4 py-3">Win Rate</th>
-                  <th className="text-right px-4 py-3">PnL total</th>
-                  <th className="text-right px-4 py-3">PnL moy. %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {strategyPerf?.map(s => (
-                  <tr key={s.strategyId} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                    <td className="px-4 py-3 text-white font-medium">{s.name}</td>
-                    <td className="px-4 py-3 text-center">
-                      {s.isActive
-                        ? <CheckCircle2 className="w-4 h-4 text-emerald-400 inline" />
-                        : <XCircle className="w-4 h-4 text-gray-600 inline" />}
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-300">{s.signalsGenerated}</td>
-                    <td className="px-4 py-3 text-right text-gray-300">{s.avgConfidence}%</td>
-                    <td className="px-4 py-3 text-right text-gray-300">{s.tradesClosed}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={s.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}>
-                        {s.winRate}%
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={s.totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                        {s.totalPnl >= 0 ? '+' : ''}{s.totalPnl}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-300">{s.avgPnlPct}%</td>
-                  </tr>
-                ))}
-                {(!strategyPerf || strategyPerf.length === 0) && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                      No strategy performance data yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {tab === 'strategies' && <StrategiesTab />}
         {/* Polling tab */}
         {tab === 'polling' && <PollingTab />}
 
@@ -735,6 +685,111 @@ function MarketsTab() {
             )}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function StrategiesTab() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: strategyPerf } = useQuery<StrategyPerf[]>({
+    queryKey: ['strategy-performance'],
+    queryFn: async () => (await api.get('/strategies/performance')).data,
+  });
+
+  const { data: allStrategies } = useQuery<any[]>({
+    queryKey: ['admin-strategies'],
+    queryFn: async () => (await api.get('/strategies')).data,
+  });
+
+  const toggleStrategy = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) =>
+      (await api.put(`/strategies/${id}`, { isActive })).data,
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['admin-strategies'] });
+      qc.invalidateQueries({ queryKey: ['strategy-performance'] });
+      toast(
+        vars.isActive
+          ? 'Stratégie activée — tous les users peuvent désormais l\'utiliser.'
+          : 'Stratégie désactivée — aucun user ne peut activer cette stratégie. Les users qui l\'avaient activée ne recevront plus de signaux.',
+        { type: vars.isActive ? 'success' : 'warning', title: 'Administration stratégie' },
+      );
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message || 'Erreur lors du basculement.';
+      toast(msg, { type: 'error' });
+    },
+  });
+
+  const strategiesMap = new Map(allStrategies?.map(s => [s.id, s]) ?? []);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-blue-950 border border-blue-800 rounded-xl p-4">
+        <p className="text-sm text-blue-200">
+          Activer ou désactiver des stratégies globalement. Désactiver une stratégie empêche tous les
+          utilisateurs de l&apos;activer dans leurs paramètres. Les signaux déjà générés restent visibles.
+        </p>
+      </div>
+
+      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-800 text-gray-400">
+              <th className="text-left px-4 py-3">Stratégie</th>
+              <th className="text-center px-4 py-3">Statut système</th>
+              <th className="text-right px-4 py-3">Signaux</th>
+              <th className="text-right px-4 py-3">Confiance moy.</th>
+              <th className="text-right px-4 py-3">Win Rate</th>
+              <th className="text-right px-4 py-3">PnL total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {strategyPerf?.map(s => {
+              const full = strategiesMap.get(s.strategyId);
+              const isActive = full?.isActive ?? s.isActive;
+              return (
+                <tr key={s.strategyId} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                  <td className="px-4 py-3 text-white font-medium">{s.name}</td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => toggleStrategy.mutate({ id: s.strategyId, isActive: !isActive })}
+                      disabled={toggleStrategy.isPending}
+                      className={`relative w-12 h-6 rounded-full transition ${
+                        isActive ? 'bg-emerald-600' : 'bg-gray-700'
+                      }`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition ${
+                        isActive ? 'left-6' : 'left-0.5'
+                      }`} />
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-300">{s.signalsGenerated}</td>
+                  <td className="px-4 py-3 text-right text-gray-300">{s.avgConfidence}%</td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={s.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}>
+                      {s.winRate}%
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={s.totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      {s.totalPnl >= 0 ? '+' : ''}{s.totalPnl}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {(!strategyPerf || strategyPerf.length === 0) && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                  Aucune stratégie pour le moment.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
