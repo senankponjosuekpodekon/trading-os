@@ -167,15 +167,13 @@ ACTIVE_SYMBOLS = [
 # Actifs Binance prioritaires → scan rapide (Binance = gratuit, sans limite)
 BINANCE_PRIORITY_SYMBOLS = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
-    "AVAX/USDT", "XRP/USDT", "LINK/USDT", "ADA/USDT",
-    "DOT/USDT", "MATIC/USDT",
+    "XRP/USDT",  # 5 symbols (was 10) to reduce CPU load
 ]
 
 # Actifs Deriv (synthétiques) → scan medium (2 min)
 DERIV_SYMBOLS = [
     "V75", "V25", "V10", "V50", "V100",
-    "BOOM1000", "CRASH1000", "BOOM500", "CRASH500",
-    "JUMP25", "JUMP50", "JUMP75",
+    "BOOM1000", "CRASH1000",  # 7 symbols (was 13) to reduce CPU load
 ]
 
 # Actifs BRVM → scan pendant heures de marché uniquement
@@ -192,20 +190,20 @@ FOREX_COMMODITY_SYMBOLS = [
 ]
 
 # Timeframes par catégorie
-WARMUP_TIMEFRAMES_FAST   = ["15m", "1h"]       # Binance prioritaire — cycle 60s
-WARMUP_TIMEFRAMES_MEDIUM = ["1h", "15m"]       # Deriv synthétiques — cycle 2 min
+WARMUP_TIMEFRAMES_FAST   = ["1h"]              # Binance prioritaire — cycle 3 min (was 15m+1h)
+WARMUP_TIMEFRAMES_MEDIUM = ["1h"]              # Deriv synthétiques — cycle 5 min (was 1h+15m)
 WARMUP_TIMEFRAMES_SLOW   = ["1h", "4h"]        # Forex/Commodités — cycle 5 min
 WARMUP_TIMEFRAMES_BRVM   = ["1h"]               # BRVM — cycle 5 min pendant heures de marché
 WARMUP_TIMEFRAMES_STOCKS  = ["1h", "4h"]        # Actions US — cycle 5 min pendant heures NYSE
 
-WARMUP_INTERVAL_FAST    = 60                   # secondes — Binance prioritaire
-WARMUP_INTERVAL_MEDIUM  = 120                  # secondes — Deriv synthétiques
-WARMUP_INTERVAL_SLOW    = 300                  # secondes — Forex/Commodités
+WARMUP_INTERVAL_FAST    = 180                  # secondes — Binance prioritaire (3 min, était 60s → CPU overload)
+WARMUP_INTERVAL_MEDIUM  = 300                  # secondes — Deriv synthétiques (5 min, était 2 min)
+WARMUP_INTERVAL_SLOW    = 600                  # secondes — Forex/Commodités (10 min, était 5 min)
 WARMUP_INTERVAL_BRVM    = 300                  # secondes — BRVM (heures de marché uniquement)
 WARMUP_INTERVAL_STOCKS  = 300                  # secondes — Actions US (heures NYSE uniquement)
-WARMUP_TTL_FAST         = 90                   # TTL cache pour actifs rapides
-WARMUP_TTL_MEDIUM       = 180                  # TTL cache pour actifs medium
-WARMUP_TTL_SLOW         = 360                  # TTL cache pour actifs lents
+WARMUP_TTL_FAST         = 240                  # TTL cache pour actifs rapides
+WARMUP_TTL_MEDIUM       = 360                  # TTL cache pour actifs medium
+WARMUP_TTL_SLOW         = 720                  # TTL cache pour actifs lents
 WARMUP_TTL_BRVM         = 360                  # TTL cache pour BRVM
 WARMUP_TTL_STOCKS       = 360                  # TTL cache pour Actions US
 
@@ -2083,7 +2081,7 @@ async def warmup_fast():
                 logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 2  # Process 2 symbols at a time to avoid CPU saturation
+        _BATCH_SIZE = 1  # Sequential to minimize CPU spikes
         for timeframe in _timeframes:
             all_syms = list(BINANCE_PRIORITY_SYMBOLS)
             for i in range(0, len(all_syms), _BATCH_SIZE):
@@ -2135,7 +2133,7 @@ async def warmup_medium():
                 logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 2
+        _BATCH_SIZE = 1  # Sequential to minimize CPU spikes
         for timeframe in _timeframes:
             all_syms = list(DERIV_SYMBOLS)
             for i in range(0, len(all_syms), _BATCH_SIZE):
@@ -2184,7 +2182,7 @@ async def warmup_slow():
                 logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 2
+        _BATCH_SIZE = 1  # Sequential to minimize CPU spikes
         for timeframe in _timeframes:
             all_syms = list(FOREX_COMMODITY_SYMBOLS)
             for i in range(0, len(all_syms), _BATCH_SIZE):
@@ -2304,7 +2302,7 @@ async def warmup_stocks():
                 logger.warning("warmup_stocks_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 2
+        _BATCH_SIZE = 1  # Sequential to minimize CPU spikes
         for timeframe in _timeframes:
             all_syms = list(stocks)
             for i in range(0, len(all_syms), _BATCH_SIZE):
