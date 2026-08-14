@@ -21,6 +21,10 @@ jest.mock('@/hooks/useNotifications', () => ({
   useNotifications: jest.fn(),
 }));
 
+jest.mock('@/hooks/useToast', () => ({
+  useToast: jest.fn(() => ({ toast: jest.fn() })),
+}));
+
 jest.mock('@/lib/api', () => ({
   api: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
 }));
