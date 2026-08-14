@@ -397,6 +397,8 @@ def fundamental_score(reports: List[BrvmReport]) -> int:
     )
     if not latest:
         return 0
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
     days = (datetime.now(timezone.utc) - latest).days
     if days <= 7:
         return 20
