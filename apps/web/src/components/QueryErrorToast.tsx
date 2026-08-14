@@ -17,6 +17,10 @@ function isCancelledError(err: any): boolean {
   );
 }
 
+function isAuthError(err: any): boolean {
+  return err?.response?.status === 401;
+}
+
 export function QueryErrorToast() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -26,6 +30,7 @@ export function QueryErrorToast() {
       if (event.type === 'updated' && event.action.type === 'error') {
         const err = event.action.error as any;
         if (isCancelledError(err)) return;
+        if (isAuthError(err)) return;
         const msg = err?.response?.data?.message || err?.message || 'Erreur de chargement';
         toast(msg, { type: 'error', title: 'Erreur' });
       }
@@ -35,6 +40,7 @@ export function QueryErrorToast() {
       if (event.type === 'updated' && event.action.type === 'error') {
         const err = event.action.error as any;
         if (isCancelledError(err)) return;
+        if (isAuthError(err)) return;
         const msg = err?.response?.data?.message || err?.message || 'Erreur lors de l\'opération';
         toast(msg, { type: 'error', title: 'Erreur' });
       }

@@ -2056,19 +2056,18 @@ async def warmup_fast():
                 logger.warning("warmup_fast_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 4  # Process 4 symbols at a time to avoid CPU saturation
+        _BATCH_SIZE = 2  # Process 2 symbols at a time to avoid CPU saturation
         for timeframe in _timeframes:
             all_syms = list(BINANCE_PRIORITY_SYMBOLS)
             for i in range(0, len(all_syms), _BATCH_SIZE):
                 batch = all_syms[i:i + _BATCH_SIZE]
                 tasks = [
-                    _scan_one(sym, timeframe, strat)
+                    _scan_one(sym, timeframe, None)
                     for sym in batch
-                    for strat in (strategies or [None])
                 ]
                 await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_fast_done", timeframe=timeframe,
-                        symbols=len(BINANCE_PRIORITY_SYMBOLS), strategies=len(strategies),
+                        symbols=len(BINANCE_PRIORITY_SYMBOLS),
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
         # Attendre le reste du cycle
         elapsed = time.monotonic() - t0
@@ -2109,18 +2108,17 @@ async def warmup_medium():
                 logger.warning("warmup_medium_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 4
+        _BATCH_SIZE = 2
         for timeframe in _timeframes:
             all_syms = list(DERIV_SYMBOLS)
             for i in range(0, len(all_syms), _BATCH_SIZE):
                 batch = all_syms[i:i + _BATCH_SIZE]
                 tasks = [
-                    _scan_one(sym, timeframe, strat)
+                    _scan_one(sym, timeframe, None)
                     for sym in batch
-                    for strat in (strategies or [None])
                 ]
                 await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS), strategies=len(strategies))
+            logger.info("warmup_medium_done", timeframe=timeframe, symbols=len(DERIV_SYMBOLS))
         elapsed = time.monotonic() - t0
         wait = max(1, _interval - elapsed)
         wait += random.uniform(0, _interval * 0.2)
@@ -2159,18 +2157,17 @@ async def warmup_slow():
                 logger.warning("warmup_slow_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 4
+        _BATCH_SIZE = 2
         for timeframe in _timeframes:
             all_syms = list(FOREX_COMMODITY_SYMBOLS)
             for i in range(0, len(all_syms), _BATCH_SIZE):
                 batch = all_syms[i:i + _BATCH_SIZE]
                 tasks = [
-                    _scan_one(sym, timeframe, strat)
+                    _scan_one(sym, timeframe, None)
                     for sym in batch
-                    for strat in (strategies or [None])
                 ]
                 await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS), strategies=len(strategies))
+            logger.info("warmup_slow_done", timeframe=timeframe, symbols=len(FOREX_COMMODITY_SYMBOLS))
         elapsed = time.monotonic() - t0
         wait = max(1, _interval - elapsed)
         wait += random.uniform(0, _interval * 0.2)
@@ -2280,19 +2277,18 @@ async def warmup_stocks():
                 logger.warning("warmup_stocks_failed", symbol=sym, tf=timeframe,
                                error_type=type(e).__name__, error=repr(e))
 
-        _BATCH_SIZE = 4
+        _BATCH_SIZE = 2
         for timeframe in _timeframes:
             all_syms = list(stocks)
             for i in range(0, len(all_syms), _BATCH_SIZE):
                 batch = all_syms[i:i + _BATCH_SIZE]
                 tasks = [
-                    _scan_one(sym, timeframe, strat)
+                    _scan_one(sym, timeframe, None)
                     for sym in batch
-                    for strat in (strategies or [None])
                 ]
                 await asyncio.gather(*tasks, return_exceptions=True)
             logger.info("warmup_stocks_done", timeframe=timeframe,
-                        symbols=len(stocks), strategies=len(strategies),
+                        symbols=len(stocks),
                         elapsed_ms=round((time.monotonic() - t0) * 1000))
         elapsed = time.monotonic() - t0
         wait = max(1, _interval - elapsed)

@@ -200,7 +200,7 @@ async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) ->
     }
     max_sec = _max_seconds.get(yf_interval, 730 * 86400)
     window  = min(needed_seconds, max_sec)
-    end_dt   = _dt.datetime.utcnow()
+    end_dt   = _dt.datetime.now(_dt.timezone.utc)
     start_dt = end_dt - _dt.timedelta(seconds=window)
 
     try:

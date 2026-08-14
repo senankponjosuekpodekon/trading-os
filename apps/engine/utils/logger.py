@@ -1,10 +1,17 @@
 """Logger structuré pour l'engine."""
+import logging
 import structlog
 
 
 def get_logger(name: str):
     return structlog.get_logger(name)
 
+
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 structlog.configure(
     processors=[

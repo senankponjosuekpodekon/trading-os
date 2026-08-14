@@ -12,7 +12,9 @@ let isRefreshing = false;
 let refreshSubscribers: Array<() => void> = [];
 
 function onRefreshed() {
-  refreshSubscribers.forEach((cb) => cb());
+  refreshSubscribers.forEach((cb, i) => {
+    setTimeout(cb, i * 100);
+  });
   refreshSubscribers = [];
 }
 

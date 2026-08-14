@@ -30,7 +30,7 @@ class Cache:
     async def set(self, key: str, value: Any, ttl: int = 900) -> bool:
         try:
             r = await self.client()
-            await r.setex(key, ttl, json.dumps(value, default=str))
+            await r.set(key, json.dumps(value, default=str), ex=ttl)
             return True
         except Exception:
             return False

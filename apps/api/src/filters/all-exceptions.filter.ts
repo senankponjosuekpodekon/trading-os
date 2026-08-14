@@ -51,6 +51,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       status = exception.getStatus();
       const res = exception.getResponse();
       message = typeof res === 'string' ? res : (res as any).message || message;
+      if (status === HttpStatus.TOO_MANY_REQUESTS) {
+        code = ErrorCode.RATE_LIMITED;
+      }
     } else if (exception instanceof Error) {
       message = isProd ? 'Internal server error' : exception.message;
     }

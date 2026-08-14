@@ -22,7 +22,11 @@ export class AiService {
   }
 
   async health(): Promise<any> {
-    return this.engine.get('/llm/health', { timeout: 5_000 });
+    try {
+      return await this.engine.get('/llm/health', { timeout: 5_000 });
+    } catch {
+      return { status: 'degraded', message: 'Engine LLM health check timed out' };
+    }
   }
 
   async getDailyPulse(refresh = false): Promise<any> {

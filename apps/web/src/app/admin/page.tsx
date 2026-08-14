@@ -576,11 +576,25 @@ function MarketsTab() {
       maxStrategies: params.maxStrategies,
       scanInterval: params.scanInterval,
     })).data,
+    onMutate: async (params) => {
+      await qc.cancelQueries({ queryKey: ['admin-markets'] });
+      const prev = qc.getQueryData<MarketConfig[]>(['admin-markets']);
+      if (prev) {
+        qc.setQueryData<MarketConfig[]>(['admin-markets'], prev.map(m =>
+          m.marketType === params.marketType
+            ? { ...m, isActive: params.isActive ?? m.isActive, warmupEnabled: params.warmupEnabled ?? m.warmupEnabled, maxStrategies: params.maxStrategies ?? m.maxStrategies, scanInterval: params.scanInterval ?? m.scanInterval }
+            : m
+        ));
+      }
+      return { prev };
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-markets'] });
       toast('Configuration marché mise à jour', { type: 'success' });
     },
-    onError: () => toast('Erreur lors de la mise à jour', { type: 'error' }),
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['admin-markets'], ctx.prev);
+    },
   });
 
   if (isLoading) {
