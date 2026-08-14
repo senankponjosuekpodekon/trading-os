@@ -6,6 +6,7 @@ import {
   Activity, AlertTriangle, CheckCircle2, XCircle, Clock,
   Database, Cpu, Zap, TrendingUp, TrendingDown, Brain,
   Server, GitBranch, Layers, BarChart3, RefreshCw, Gauge,
+  Globe, Power,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useToast } from '@/hooks/useToast';
@@ -58,6 +59,38 @@ interface StrategyPerf {
   avgPnlPct: number;
 }
 
+interface ContainerStat {
+  name: string;
+  cpuPerc: string;
+  memUsage: string;
+  memPerc: string;
+}
+
+interface HostCpu {
+  user: string;
+  system: string;
+  idle: string;
+  load1: string;
+  load5: string;
+  load15: string;
+}
+
+interface TopProcess {
+  user: string;
+  pid: string;
+  cpu: string;
+  mem: string;
+  command: string;
+}
+
+interface ContainerInfo {
+  api: any;
+  engine: any;
+  containers: ContainerStat[];
+  hostCpu: HostCpu | null;
+  topProcesses: TopProcess[];
+}
+
 const statusIcon = (status: string) => {
   if (status === 'ok') return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
   if (status === 'warning') return <AlertTriangle className="w-4 h-4 text-amber-400" />;
@@ -81,7 +114,7 @@ function PipelineStep({ label, value, icon }: { label: string; value: number | s
 }
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<'health' | 'dataflow' | 'strategies' | 'polling'>('health');
+  const [tab, setTab] = useState<'health' | 'dataflow' | 'strategies' | 'polling' | 'markets'>('health');
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -100,6 +133,12 @@ export default function AdminPage() {
   const { data: strategyPerf } = useQuery<StrategyPerf[]>({
     queryKey: ['strategy-performance'],
     queryFn: async () => (await api.get('/strategies/performance')).data,
+  });
+
+  const { data: containerInfo } = useQuery<ContainerInfo>({
+    queryKey: ['admin-containers'],
+    queryFn: async () => (await api.get('/admin/ops/containers')).data,
+    refetchInterval: 15000,
   });
 
   return (
@@ -124,6 +163,7 @@ export default function AdminPage() {
             { key: 'dataflow', label: 'Data Flow', icon: <GitBranch className="w-4 h-4" /> },
             { key: 'strategies', label: 'Stratégies', icon: <BarChart3 className="w-4 h-4" /> },
             { key: 'polling', label: 'Polling', icon: <Gauge className="w-4 h-4" /> },
+            { key: 'markets', label: 'Marchés', icon: <Globe className="w-4 h-4" /> },
           ].map(t => (
             <button
               key={t.key}
@@ -204,6 +244,102 @@ export default function AdminPage() {
                 )}
               </div>
             </div>
+
+            {/* CPU Monitoring */}
+            {containerInfo && (
+              <div className="space-y-4">
+                {/* Host CPU bar */}
+                {containerInfo.hostCpu && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                      <Cpu className="w-4 h-4" /> CPU Hôte
+                    </h3>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="flex-1 h-3 bg-gray-800 rounded-full overflow-hidden flex">
+                        <div className="bg-blue-600" style={{ width: `${containerInfo.hostCpu.user}%` }} />
+                        <div className="bg-purple-600" style={{ width: `${containerInfo.hostCpu.system}%` }} />
+                        <div className="bg-emerald-600" style={{ width: `${containerInfo.hostCpu.idle}%` }} />
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <span className="text-blue-400">User: {containerInfo.hostCpu.user}%</span>
+                      <span className="text-purple-400">Sys: {containerInfo.hostCpu.system}%</span>
+                      <span className="text-emerald-400">Idle: {containerInfo.hostCpu.idle}%</span>
+                    </div>
+                    <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                      <span>Load 1m: <span className={parseFloat(containerInfo.hostCpu.load1) > 4 ? 'text-red-400' : 'text-gray-300'}>{containerInfo.hostCpu.load1}</span></span>
+                      <span>5m: <span className={parseFloat(containerInfo.hostCpu.load5) > 4 ? 'text-red-400' : 'text-gray-300'}>{containerInfo.hostCpu.load5}</span></span>
+                      <span>15m: <span className="text-gray-300">{containerInfo.hostCpu.load15}</span></span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Container CPU table */}
+                {containerInfo.containers.length > 0 && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                      <Server className="w-4 h-4" /> Containers Docker
+                    </h3>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-800 text-gray-400">
+                          <th className="text-left py-2">Container</th>
+                          <th className="text-right py-2">CPU</th>
+                          <th className="text-right py-2">Memoire</th>
+                          <th className="text-right py-2">Mem %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {containerInfo.containers.map(c => {
+                          const cpuVal = parseFloat(c.cpuPerc?.replace('%', '') || '0');
+                          return (
+                            <tr key={c.name} className="border-b border-gray-800/50">
+                              <td className="py-2 text-gray-300">{c.name}</td>
+                              <td className={`py-2 text-right font-mono ${cpuVal > 100 ? 'text-red-400' : cpuVal > 50 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                {c.cpuPerc}
+                              </td>
+                              <td className="py-2 text-right text-gray-400 font-mono">{c.memUsage}</td>
+                              <td className="py-2 text-right text-gray-400">{c.memPerc}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Top processes */}
+                {containerInfo.topProcesses.length > 0 && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                      <Activity className="w-4 h-4" /> Top Processus (CPU)
+                    </h3>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-800 text-gray-400">
+                          <th className="text-left py-2">PID</th>
+                          <th className="text-right py-2">CPU %</th>
+                          <th className="text-right py-2">Mem %</th>
+                          <th className="text-left py-2">Commande</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {containerInfo.topProcesses.map((p, i) => (
+                          <tr key={i} className="border-b border-gray-800/50">
+                            <td className="py-2 text-gray-400 font-mono">{p.pid}</td>
+                            <td className={`py-2 text-right font-mono ${parseFloat(p.cpu) > 50 ? 'text-red-400' : parseFloat(p.cpu) > 20 ? 'text-amber-400' : 'text-gray-300'}`}>
+                              {p.cpu}%
+                            </td>
+                            <td className="py-2 text-right text-gray-400 font-mono">{p.mem}%</td>
+                            <td className="py-2 text-gray-500 text-xs truncate max-w-[300px]">{p.command}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -303,6 +439,9 @@ export default function AdminPage() {
         )}
         {/* Polling tab */}
         {tab === 'polling' && <PollingTab />}
+
+        {/* Markets tab */}
+        {tab === 'markets' && <MarketsTab />}
       </div>
     </AppLayout>
   );
@@ -383,6 +522,189 @@ function PollingTab() {
             <RefreshCw className="w-3 h-3 animate-spin" /> Mise à jour...
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface MarketConfig {
+  marketType: string;
+  isActive: boolean;
+  warmupEnabled: boolean;
+  scanInterval: number | null;
+  maxStrategies: number | null;
+  timeframes: string[] | null;
+}
+
+const MARKET_LABELS: Record<string, string> = {
+  CRYPTO: 'Crypto',
+  FOREX: 'Forex',
+  SYNTHETIC: 'Synthétiques (Deriv)',
+  BRVM: 'BRVM',
+  US_STOCK: 'Actions US',
+  COMMODITY: 'Commodités',
+};
+
+const MARKET_COLORS: Record<string, string> = {
+  CRYPTO: 'text-amber-400',
+  FOREX: 'text-blue-400',
+  SYNTHETIC: 'text-purple-400',
+  BRVM: 'text-emerald-400',
+  US_STOCK: 'text-cyan-400',
+  COMMODITY: 'text-orange-400',
+};
+
+function MarketsTab() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: markets, isLoading } = useQuery<MarketConfig[]>({
+    queryKey: ['admin-markets'],
+    queryFn: async () => (await api.get('/admin/markets')).data,
+  });
+
+  const updateMarket = useMutation({
+    mutationFn: async (params: {
+      marketType: string;
+      isActive?: boolean;
+      warmupEnabled?: boolean;
+      maxStrategies?: number | null;
+      scanInterval?: number | null;
+    }) => (await api.put(`/admin/markets/${params.marketType}`, {
+      isActive: params.isActive,
+      warmupEnabled: params.warmupEnabled,
+      maxStrategies: params.maxStrategies,
+      scanInterval: params.scanInterval,
+    })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-markets'] });
+      toast('Configuration marché mise à jour', { type: 'success' });
+    },
+    onError: () => toast('Erreur lors de la mise à jour', { type: 'error' }),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="w-6 h-6 text-gray-500 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-blue-950 border border-blue-800 rounded-xl p-4">
+        <p className="text-sm text-blue-200">
+          Contrôle l&apos;activation des marchés et le pré-calcul (warmup). Désactiver un marché
+          arrête les scans automatiques et le scraping. Les scans à la demande restent disponibles via l&apos;API.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {markets?.map((m) => (
+          <div
+            key={m.marketType}
+            className={`bg-gray-900 border rounded-xl p-5 ${
+              m.isActive ? 'border-gray-800' : 'border-gray-800/50 opacity-60'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Globe className={`w-5 h-5 ${MARKET_COLORS[m.marketType] ?? 'text-gray-400'}`} />
+                <h3 className="text-lg font-semibold text-white">
+                  {MARKET_LABELS[m.marketType] ?? m.marketType}
+                </h3>
+              </div>
+              <button
+                onClick={() => updateMarket.mutate({ marketType: m.marketType, isActive: !m.isActive })}
+                className={`relative w-12 h-6 rounded-full transition ${
+                  m.isActive ? 'bg-emerald-600' : 'bg-gray-700'
+                }`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition ${
+                  m.isActive ? 'left-6' : 'left-0.5'
+                }`} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between py-2 border-b border-gray-800">
+                <div className="flex items-center gap-2">
+                  <Power className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <p className="text-sm text-white font-medium">Warmup (pré-calcul)</p>
+                    <p className="text-xs text-gray-500">Scans automatiques en arrière-plan</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => updateMarket.mutate({ marketType: m.marketType, warmupEnabled: !m.warmupEnabled })}
+                  className={`relative w-10 h-5 rounded-full transition ${
+                    m.warmupEnabled ? 'bg-emerald-600' : 'bg-gray-700'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition ${
+                    m.warmupEnabled ? 'left-5' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+
+              <div className="py-2 border-b border-gray-800">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm text-white font-medium">Max stratégies warmup</p>
+                  <span className="text-sm text-gray-400">
+                    {m.maxStrategies ?? 'Toutes'}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={m.maxStrategies ?? 8}
+                  disabled={!m.warmupEnabled}
+                  onChange={(e) => updateMarket.mutate({
+                    marketType: m.marketType,
+                    maxStrategies: Number(e.target.value),
+                  })}
+                  className="w-full accent-blue-500"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>1</span>
+                  <span>8</span>
+                </div>
+              </div>
+
+              <div className="py-2">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm text-white font-medium">Intervalle scan (s)</p>
+                  <span className="text-sm text-gray-400">
+                    {m.scanInterval ? `${m.scanInterval}s` : 'Défaut'}
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min={30}
+                  max={3600}
+                  step={30}
+                  value={m.scanInterval ?? ''}
+                  disabled={!m.warmupEnabled}
+                  placeholder="Défaut"
+                  onChange={(e) => updateMarket.mutate({
+                    marketType: m.marketType,
+                    scanInterval: e.target.value ? Number(e.target.value) : null,
+                  })}
+                  className="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:border-blue-500 outline-none"
+                />
+              </div>
+            </div>
+
+            {updateMarket.isPending && (
+              <p className="text-xs text-gray-500 mt-3 flex items-center gap-1">
+                <RefreshCw className="w-3 h-3 animate-spin" /> Mise à jour...
+              </p>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

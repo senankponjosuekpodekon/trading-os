@@ -122,17 +122,52 @@ export class AdminOpsController {
     let dockerStats: any[] = [];
     try {
       const { stdout } = await execAsync(
-        'docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep trading-os',
-        { timeout: 3000 },
+        'docker stats --no-stream --format "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}" 2>/dev/null | grep -E "trading-os|netdata|nginx|redis|postgres|uptime"',
+        { timeout: 5000 },
       );
       dockerStats = stdout.trim().split('\n').filter(Boolean).map(line => {
-        const [name, status, ports] = line.split('\t');
-        return { name, status, ports };
+        const [name, cpuPerc, memUsage, memPerc] = line.split('\t');
+        return { name, cpuPerc: cpuPerc?.trim(), memUsage: memUsage?.trim(), memPerc: memPerc?.trim() };
       });
     } catch {
       // docker command not available or no containers
     }
 
-    return { api: apiInfo, engine: engineInfo, containers: dockerStats };
+    // Host CPU overview from top
+    let hostCpu: any = null;
+    try {
+      const { stdout } = await execAsync('top -bn1 | head -5', { timeout: 3000 });
+      const lines = stdout.trim().split('\n');
+      const cpuLine = lines.find(l => l.includes('%Cpu(s)'));
+      if (cpuLine) {
+        const match = cpuLine.match(/([\d.]+)\s+us.*?([\d.]+)\s+sy.*?([\d.]+)\s+id/);
+        if (match) {
+          hostCpu = { user: match[1], system: match[2], idle: match[3] };
+        }
+      }
+      const loadLine = lines.find(l => l.includes('load average'));
+      if (loadLine) {
+        const loadMatch = loadLine.match(/load average:\s+([\d.]+),\s+([\d.]+),\s+([\d.]+)/);
+        if (loadMatch) {
+          hostCpu = { ...hostCpu, load1: loadMatch[1], load5: loadMatch[2], load15: loadMatch[3] };
+        }
+      }
+    } catch {
+      // top not available
+    }
+
+    // Top 5 processes by CPU
+    let topProcesses: any[] = [];
+    try {
+      const { stdout } = await execAsync('ps aux --sort=-%cpu | head -n 6', { timeout: 3000 });
+      topProcesses = stdout.trim().split('\n').slice(1).map(line => {
+        const parts = line.trim().split(/\s+/);
+        return { user: parts[0], pid: parts[1], cpu: parts[2], mem: parts[3], command: parts.slice(10).join(' ').substring(0, 80) };
+      });
+    } catch {
+      // ps not available
+    }
+
+    return { api: apiInfo, engine: engineInfo, containers: dockerStats, hostCpu, topProcesses };
   }
 }

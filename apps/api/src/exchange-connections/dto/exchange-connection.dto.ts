@@ -12,20 +12,20 @@ export enum ExchangeName {
 
 export class CreateExchangeConnectionDto {
   @IsEnum(ExchangeName)
-  exchange: ExchangeName;
+  exchange!: ExchangeName;
 
   @IsString()
   @MinLength(1)
   @MaxLength(60)
-  label: string;
+  label!: string;
 
   @IsString()
   @MinLength(1)
-  apiKey: string;
+  apiKey!: string;
 
   @IsString()
   @MinLength(1)
-  apiSecret: string;
+  apiSecret!: string;
 
   @IsOptional()
   @IsArray()

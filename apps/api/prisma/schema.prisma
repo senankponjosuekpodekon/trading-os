@@ -718,3 +718,21 @@ model DailyReport {
   @@index([date])
   @@map("daily_reports")
 }
+
+model AssetConfig {
+  id            String   @id @default(cuid())
+  scope         String   @default("market") // "market" | "pair"
+  marketType    String   @map("market_type") // CRYPTO, FOREX, SYNTHETIC, BRVM, US_STOCK, COMMODITY
+  symbol        String?  // null when scope=market
+  isActive      Boolean  @default(true) @map("is_active")
+  warmupEnabled Boolean  @default(true) @map("warmup_enabled")
+  scanInterval  Int?     @map("scan_interval") // override warmup cycle in seconds
+  maxStrategies Int?     @map("max_strategies") // override max strategies in warmup
+  timeframes    Json?    // override timeframes array
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([marketType, symbol])
+  @@index([marketType])
+  @@map("asset_config")
+}
