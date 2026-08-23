@@ -18,13 +18,14 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 
 ### 1.2 Gaps principaux
 
-- **Bloquant prod** : scan hardcodé `EMA Trend + RSI` ; `strategy_eval.py` non branché.
-- **Bloquant prod** : aucun `profileSuitability` / filtrage par profil.
-- **Bloquant prod** : tests critiques, migrations Prisma prod, rate limiting manquants.
-- **Important** : signaux réactifs, pas prédictifs (pas de `DPS`/`TPS`/`P(win)`).
-- **Important** : pas de modes d’entrée (`RETEST`, `BREAKOUT`, `LIMIT`, etc.).
-- **Stratégique** : Testeur Lab non déployé.
-- **Stratégique** : on-chain / macro non intégrés.
+- **Bloquant prod** : bouton Exécuter sur `SignalCard` sans intégration exchange (informatif seulement).
+- **Bloquant prod** : activer/désactiver les marchés (crypto, forex, synthetic, brvm, stocks) — config DB + endpoint + UI.
+- **Bloquant prod** : analyse fondamentale pour les actions US (PE, EPS, earnings) manquante.
+- **Important** : bourses africaines (JSE, NGX, NSE, GSE) non intégrées.
+- **Important** : sources RSS africaines dans `news_scraper.py` absentes.
+- **Important** : `warmup_stocks` non vérifié en CI.
+- **Stratégique** : auth sur routes engine (API key / JWT) si exposition externe.
+- **Stratégique** : couverture tests > 80 % sur `signals`, `positions`, `auth`.
 - **Long terme** : agent analyste, DEX avancé, omni-chain — non priorisés.
 
 ---
@@ -169,7 +170,8 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 
 **Objectif** : production sereine.
 
-- [ ] CI/CD (tests + build + deploy). → **tests + build en place** (jobs api/web/engine/docker dans `.github/workflows/ci.yml`) — reste le deploy
+- [x] CI/CD tests + build. ✅ jobs `api`/`web`/`engine`/`docker` verts dans `.github/workflows/ci.yml`
+- [ ] Déploiement auto (push image + run VPS) — hors repo, à configurer côté hébergeur
 - [ ] Sécurité (authz, CORS, secrets, validation inputs).
 - [ ] Performance : workers, queue Redis, pagination, DB.
 - [ ] Monitoring : métriques, alertes, error tracking.
@@ -191,19 +193,21 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 
 ## 4. Prochaines actions immédiates
 
-1. Sprint 0 — stabiliser migrations, tests, rate limiting.
-2. Sprint 1 — brancher `strategy_eval` dans `scan.py` et virer le hardcode.
-3. Sprint 2 — ajouter `profileSuitability` et filtrage par profil.
+### Sprint 9 — Marchés & UX (en cours)
 
+- [ ] Analyse fondamentale actions US : PE, EPS, earnings calendar via FMP / Alpha Vantage.
+- [ ] Market enable/disable : table `market_config`, endpoint, toggle UI, warmup respecte la config.
+- [ ] Bouton Exécuter sur `SignalCard` : intégration exchange pour passer ordres.
+- [ ] Bourses africaines : `base_africa_scraper.py` + route pour JSE / NGX / NSE / GSE.
+- [ ] RSS africains : sources news locales dans `news_scraper.py`.
+- [ ] Vérifier `warmup_stocks` en CI et en prod.
+- [ ] Auth engine : `Depends(verify_api_key)` si routes exposées.
+- [ ] Frontend role-based : rendu conditionnel admin / ops.
 
+### Amélioration continue (non bloquant)
 
-
-
-Optionnel / amélioration continue (non bloquant)
-Vulnérabilités npm : 5 signalées dans le web (1 moderate, 4 high) → npm audit pour voir si elles sont exploitables
-Tests E2E réels : les tests d'intégration mockent Prisma/HTTP ; aucun test contre la vraie DB Postgres que la CI démarre pourtant
-Modules API sans specs : portfolios, journal, notifications, ai (si tu veux une couverture complète)
-Migration Next.js 15 à terme, pour revenir à ESLint 9 (le downgrade vers ESLint 8 est un contournement, ESLint 8 est EOL)
-Dockerfile API non optimisé : npm install sans lockfile ni cache multi-stage — à améliorer quand le build passera
-Prochaine étape immédiate
-Attendre la fin du Docker build (je peux revérifier son statut), puis si OK, builder l'image engine. Après ça, la todo list est vide — le backend est prêt pour un push et une validation CI sur GitHub.
+- Vulnérabilités npm : 5 signalées dans le web (1 moderate, 4 high)
+- Tests E2E réels contre Postgres
+- Couverture tests > 80 % sur `signals`, `positions`, `auth`
+- Migration Next.js 15 / ESLint 9
+- Dockerfile API multi-stage + lockfile

@@ -1,5 +1,7 @@
 # TODO — Items manquants
 
+> ⚠️ **Ce fichier est un inventaire de recherche statique. Le backlog actif est maintenu dans `docs/todo2.md`.**
+
 **Total non cochés :** 248
 
 ## Sommaire des sections

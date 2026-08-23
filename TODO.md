@@ -1,5 +1,7 @@
 # Trading OS — TODO Master
 
+> ⚠️ **Ce fichier est le master list historique. Le backlog actif est maintenu dans `docs/todo2.md`.**
+>
 > Légende : 🤖 = Cascade fait | 👤 = Toi (action externe) | ⚡ = Priorité haute | 🔁 = Récurrent
 
 ---
