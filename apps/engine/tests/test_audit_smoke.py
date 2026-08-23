@@ -114,13 +114,15 @@ class TestCorrelationManagerFeeding:
         assert len(cm._price_history) == 2
 
     def test_scan_py_calls_update_price_history_in_fetch_and_analyze(self):
-        """Verify scan.py source contains update_price_history calls in both paths."""
+        """Verify scan_routes.py + scan_analysis.py contain update_price_history calls."""
         import inspect
-        from routers import scan
-        source = inspect.getsource(scan)
+        from routers import scan_routes, scan_analysis
+        routes_source = inspect.getsource(scan_routes)
+        analysis_source = inspect.getsource(scan_analysis)
         # Both the single-symbol path and scan_multi must call update_price_history
-        assert source.count("update_price_history") >= 2, (
-            "scan.py must call update_price_history at least twice (fetch_and_analyze + scan_multi)"
+        total = routes_source.count("update_price_history") + analysis_source.count("update_price_history")
+        assert total >= 2, (
+            "scan_routes + scan_analysis must call update_price_history at least twice"
         )
 
 
