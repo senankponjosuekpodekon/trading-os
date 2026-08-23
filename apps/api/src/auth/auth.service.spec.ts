@@ -149,6 +149,22 @@ describe('AuthService', () => {
         service.login({ email: 'test@example.com', password: 'password123' }),
       ).rejects.toThrow(UnauthorizedException);
     });
+
+    it('should require 2FA token when TOTP is enabled', async () => {
+      const hashed = await bcrypt.hash('password123', 12);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        email: 'test@example.com',
+        password: hashed,
+        isActive: true,
+        totpEnabled: true,
+        totpSecret: 'secret',
+      });
+
+      await expect(
+        service.login({ email: 'test@example.com', password: 'password123' }),
+      ).rejects.toThrow('2FA token required');
+    });
   });
 
   describe('refresh', () => {
