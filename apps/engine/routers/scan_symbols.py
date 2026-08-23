@@ -24,3 +24,13 @@ FOREX_COMMODITY_SYMBOLS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD",
     "XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD",
 ]
+
+# Actifs précalculés en background
+ACTIVE_SYMBOLS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "AVAX/USDT",
+    "ADA/USDT", "XRP/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT",
+    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD",
+    "XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD",
+    "V75", "V25", "V10",
+    "BOOM1000", "CRASH1000",
+]

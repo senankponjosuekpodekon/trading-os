@@ -75,6 +75,7 @@ from routers.scan_symbols import (
     DERIV_SYMBOLS,
     BRVM_SYMBOLS,
     FOREX_COMMODITY_SYMBOLS,
+    ACTIVE_SYMBOLS,
 )
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
@@ -162,15 +163,6 @@ DEFAULT_STRATEGY = {
     },
 }
 
-# Actifs précalculés en background
-ACTIVE_SYMBOLS = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "AVAX/USDT",
-    "ADA/USDT", "XRP/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT",
-    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD",
-    "XAU/USD", "XAG/USD", "WTI/USD", "BRENT/USD",
-    "V75", "V25", "V10",
-    "BOOM1000", "CRASH1000",
-]
 
 
 # Timeframes par catégorie
