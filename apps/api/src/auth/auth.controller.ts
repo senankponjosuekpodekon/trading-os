@@ -87,7 +87,10 @@ export class AuthController {
         timestamp: new Date().toISOString(),
         error: err instanceof Error ? err.message : String(err),
       }, 'Login failed');
-      throw err;
+      if (err instanceof UnauthorizedException) {
+        throw err;
+      }
+      throw new UnauthorizedException('Invalid credentials');
     }
   }
 

@@ -17,9 +17,33 @@ describe('AuthController (integration)', () => {
       findUnique: jest.fn(async ({ where }: any) =>
         users.find(u => u.email === where.email || u.id === where.id),
       ),
+      findFirst: jest.fn(async ({ where }: any) =>
+        users.find(u => u.emailVerificationToken === where.emailVerificationToken),
+      ),
       create: jest.fn(async ({ data }: any) => {
-        const user = { id: `u-${users.length + 1}`, isActive: true, ...data };
+        const user = {
+          id: `u-${users.length + 1}`,
+          isActive: true,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          emailVerified: false,
+          emailVerificationToken: null,
+          refreshTokenVersion: 0,
+          ...data,
+        };
         users.push(user);
+        return user;
+      }),
+      update: jest.fn(async ({ where, data }: any) => {
+        const user = users.find(u => u.id === where.id);
+        if (!user) return null;
+        if (data.failedLoginAttempts?.increment) {
+          data.failedLoginAttempts = (user.failedLoginAttempts || 0) + data.failedLoginAttempts.increment;
+        }
+        if (data.refreshTokenVersion?.increment) {
+          data.refreshTokenVersion = (user.refreshTokenVersion || 0) + data.refreshTokenVersion.increment;
+        }
+        Object.assign(user, data);
         return user;
       }),
     },
@@ -28,7 +52,7 @@ describe('AuthController (integration)', () => {
     },
     refreshToken: {
       create: jest.fn(async ({ data }: any) => {
-        const token = { id: `rt-${refreshTokens.length + 1}`, ...data };
+        const token = { id: `rt-${refreshTokens.length + 1}`, version: 0, ...data };
         refreshTokens.push(token);
         return token;
       }),

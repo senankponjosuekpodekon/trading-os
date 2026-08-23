@@ -15,6 +15,7 @@ describe('AuthService', () => {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
+      update: jest.fn().mockResolvedValue({ id: 'u1', failedLoginAttempts: 1, refreshTokenVersion: 1 }),
     },
     portfolio: {
       create: jest.fn(),
@@ -64,6 +65,7 @@ describe('AuthService', () => {
         name: 'Test',
         role: 'TRADER',
         isActive: true,
+        refreshTokenVersion: 0,
       });
       mockPrisma.portfolio.create.mockResolvedValue({ id: 'p1', name: 'Mon Portfolio' });
       mockPrisma.refreshToken.create.mockResolvedValue({ id: 'rt1', tokenHash: 'hash' });
@@ -102,6 +104,7 @@ describe('AuthService', () => {
         email: 'test@example.com',
         password: hashed,
         isActive: true,
+        refreshTokenVersion: 0,
       });
       mockPrisma.refreshToken.create.mockResolvedValue({ id: 'rt1', tokenHash: 'hash' });
 
@@ -176,6 +179,7 @@ describe('AuthService', () => {
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         revokedAt: null,
         replacedBy: null,
+        version: 0,
       });
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
@@ -183,7 +187,9 @@ describe('AuthService', () => {
         name: 'Test',
         role: 'TRADER',
         isActive: true,
+        refreshTokenVersion: 0,
       });
+      mockPrisma.user.update.mockResolvedValue({ id: 'u1', refreshTokenVersion: 1 });
       mockPrisma.refreshToken.create.mockResolvedValue({ id: 'rt2', tokenHash: 'new-hash' });
       mockPrisma.refreshToken.update.mockResolvedValue({ id: 'rt1', revokedAt: new Date() });
 
