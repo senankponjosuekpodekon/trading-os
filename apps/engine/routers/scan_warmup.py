@@ -15,7 +15,7 @@ from utils.asset_config import (
     get_timeframes as get_config_timeframes,
 )
 from routers.scan_strategies import _load_active_strategies
-from routers.scan import fetch_and_analyze
+from routers.scan_analysis import fetch_and_analyze
 from routers.scan_fetchers import fetch_klines_fallback
 from routers.scan_market_hours import _is_brvm_open, _is_nyse_open
 from routers.scan_persistence import _persist_scan, _try_ingest_signal, _scan_batch_flusher

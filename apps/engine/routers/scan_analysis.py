@@ -1403,3 +1403,300 @@ def analyze_candles(
     return result
 
 
+
+
+async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[dict] = None, strategy: Optional[dict] = None, bias_regimes: Optional[dict[str, dict]] = None) -> dict:
+    """Fetch klines et analyse un actif — utilisé par warmup et fallback."""
+    # ── Phase J: NYSE session guard for US stocks ──
+    _asset_type = get_asset_type(symbol)
+    if _asset_type == "US_STOCK":
+        from datetime import datetime, timezone as _tz
+        _now = datetime.now(_tz.utc)
+        _hour_min = _now.hour * 60 + _now.minute
+        # NYSE: 14:30–21:00 UTC, Mon–Fri
+        if _now.weekday() >= 5 or _hour_min < 870 or _hour_min >= 1260:
+            return {
+                "symbol": symbol,
+                "signal": "NEUTRAL",
+                "confidence": 0,
+                "reason": "NYSE closed — US stock scanning suspended outside market hours (14:30–21:00 UTC, Mon–Fri)",
+                "asset_type": "US_STOCK",
+            }
+
+    tf = TF_MAP.get(timeframe, "1h")
+    df = await fetch_klines_fallback(
+        symbol,
+        tf,
+        providers=["binance", "deriv", "yfinance", "twelvedata"],
+        timeout=10.0,
+    )
+    if df is None or len(df) < 50:
+        return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
+
+    # Fetch D1/Weekly bias regimes if not provided
+    if bias_regimes is None:
+        bias_regimes = {}
+        for bias_tf in _BIAS_TF:
+            try:
+                df_bias = await asyncio.wait_for(fetch_binance_klines(symbol, bias_tf, limit=100), timeout=3.0)
+                if df_bias is None:
+                    df_bias = await asyncio.wait_for(fetch_yfinance_klines(symbol, bias_tf, limit=100), timeout=5.0)
+                if df_bias is not None and len(df_bias) >= 50:
+                    bias_regimes[bias_tf] = await asyncio.to_thread(
+                        detect_regime, df_bias["high"], df_bias["low"], df_bias["close"]
+                    )
+            except Exception:
+                pass
+
+    # Macro context (economic calendar + DXY) — computed async before sync analysis
+    # Phase F: now applies to FOREX, COMMODITY, and CRYPTO (not just FOREX)
+    forex_context = None
+    news_context = None
+    _asset_type_for_news = get_asset_type(symbol)
+    if _asset_type_for_news in ("FOREX", "COMMODITY", "CRYPTO"):
+        try:
+            _suspend, _news_ctx = await asyncio.wait_for(
+                should_suspend_signal(symbol, _asset_type_for_news),
+                timeout=10.0,
+            )
+            if _asset_type_for_news == "FOREX":
+                forex_context = _news_ctx
+            else:
+                news_context = _news_ctx
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            pass
+
+    # Gold specialist: fetch DXY for gold symbols (inverse correlation)
+    gold_dxy = None
+    if is_gold_symbol(symbol):
+        try:
+            gold_dxy = await asyncio.wait_for(
+                mem_cached("dxy:5d", lambda: get_dxy_momentum(days=5), ttl=300),
+                timeout=5.0,
+            )
+        except Exception:
+            gold_dxy = None
+
+    # Tokenomics risk (crypto) — computed async before sync analysis
+    tokenomics_context = None
+    if get_asset_type(symbol) == "CRYPTO":
+        try:
+            tokenomics_context = await asyncio.wait_for(
+                mem_cached(f"tkn:{symbol}", lambda: fetch_tokenomics(symbol), ttl=600),
+                timeout=3.0,
+            )
+        except Exception as exc:
+            logger.debug("tokenomics_context_failed", symbol=symbol, error=str(exc))
+            tokenomics_context = None
+
+    # Social sentiment (crypto) — computed async before sync analysis
+    social_context = None
+    if get_asset_type(symbol) == "CRYPTO":
+        try:
+            social_context = await asyncio.wait_for(
+                mem_cached(f"soc:{symbol}", lambda: fetch_social_metrics(symbol), ttl=600),
+                timeout=3.0,
+            )
+        except Exception as exc:
+            logger.debug("social_context_failed", symbol=symbol, error=str(exc))
+            social_context = None
+
+    # ── Phase M: X/Twitter sentiment for crypto ──
+    x_sentiment_context = None
+    if get_asset_type(symbol) == "CRYPTO":
+        try:
+            from routers.x_sentiment import fetch_x_sentiment
+            _base = symbol.split("/")[0]
+            x_result = await asyncio.wait_for(
+                mem_cached(f"xsent:{_base}", lambda: fetch_x_sentiment(category="crypto", symbol=_base), ttl=600),
+                timeout=8.0,
+            )
+            if x_result and not x_result.get("error"):
+                x_sentiment_context = {
+                    "overall_label": x_result.get("overall_sentiment", {}).get("overall_label"),
+                    "overall_score": x_result.get("overall_sentiment", {}).get("overall_score", 0),
+                    "tweet_count": x_result.get("overall_sentiment", {}).get("count", 0),
+                    "engagement": x_result.get("engagement", {}),
+                    "source": x_result.get("source"),
+                }
+        except Exception as exc:
+            logger.debug("x_sentiment_context_failed", symbol=symbol, error=str(exc))
+
+    # ── Phase 0++: Market cap tier + Liquidity score (async) ──
+    _mcap_tier = None
+    _liquidity = None
+    _onchain_ctx = None
+    _asset_type_for_risk = get_asset_type(symbol)
+    if _asset_type_for_risk == "CRYPTO":
+        try:
+            _mcap_tier = await asyncio.wait_for(
+                mem_cached(f"mcap:{symbol}", lambda: fetch_market_cap_tier(symbol), ttl=600),
+                timeout=5.0,
+            )
+        except Exception:
+            _mcap_tier = get_market_cap_tier_sync(symbol, "CRYPTO")
+        try:
+            _liquidity = await asyncio.wait_for(
+                mem_cached(f"liq:{symbol}", lambda: compute_liquidity_score(symbol, "CRYPTO"), ttl=600),
+                timeout=5.0,
+            )
+        except Exception:
+            _liquidity = estimate_liquidity_score_sync(symbol, "CRYPTO", df)
+
+    # ── Phase 0++: Red flags checklist for micro/small cap crypto ──
+    _red_flags = None
+    if _asset_type_for_risk == "CRYPTO" and _mcap_tier in ("MICRO", "SMALL"):
+        try:
+            _red_flags = await asyncio.wait_for(
+                mem_cached(f"rf:{symbol}", lambda: check_red_flags(symbol, _mcap_tier), ttl=600),
+                timeout=8.0,
+            )
+        except Exception:
+            _red_flags = {"red_flags": [], "red_flag_count": 0, "danger": False, "warning": None}
+
+    # ── Phase 0++: Fear & Greed for DCA/scale-out logic ──
+    _fg_value = None
+    if _asset_type_for_risk == "CRYPTO":
+        try:
+            _fg = await asyncio.wait_for(
+                mem_cached("fg:global", lambda: fear_greed(), ttl=300),
+                timeout=3.0,
+            )
+            _fg_value = _fg.get("value") if isinstance(_fg, dict) else None
+        except Exception:
+            _fg_value = None
+
+    # ── On-chain context for crypto (funding rate gate) ──
+    if _asset_type_for_risk == "CRYPTO":
+        try:
+            _oc_ctx = await asyncio.wait_for(
+                mem_cached(f"oc:{symbol}", lambda: onchain_context(symbol), ttl=600),
+                timeout=3.0,
+            )
+            _onchain_ctx = {"context": _oc_ctx, "fear_greed": _fg_value}
+        except Exception:
+            _onchain_ctx = None
+
+    # ── Phase L: AI Defense pre-filter for crypto ──
+    if get_asset_type(symbol) == "CRYPTO" and df is not None and len(df) >= 2:
+        try:
+            from ml.ai_defense import run_defense_checks
+            _pc24 = float((df["close"].iloc[-1] / df["close"].iloc[-min(len(df), 24)] - 1) * 100) if len(df) >= 24 else 0
+            _pc1 = float((df["close"].iloc[-1] / df["close"].iloc[-2] - 1) * 100) if len(df) >= 2 else 0
+            _vol24 = float(df["volume"].iloc[-min(len(df), 24):].sum() * df["close"].iloc[-1]) if "volume" in df else 0
+            _defense = await asyncio.to_thread(
+                run_defense_checks,
+                symbol, price_change_24h=_pc24, price_change_1h=_pc1,
+                volume_24h=_vol24, liquidity=_liquidity if _liquidity else 0,
+            )
+            if _defense["recommendation"] == "BLOCK":
+                return {
+                    "symbol": symbol,
+                    "signal": "NEUTRAL",
+                    "confidence": 0,
+                    "reason": f"AI Defense BLOCK: {_defense['alerts'][0]['message'] if _defense['alerts'] else 'critical risk detected'}",
+                    "asset_type": "CRYPTO",
+                    "ai_defense": _defense,
+                }
+        except Exception:
+            pass
+
+    loop = asyncio.get_event_loop()
+    # Feed price history to CorrelationManager
+    try:
+        _risk_engine = get_risk_engine()
+        if df is not None and len(df) >= 10 and "close" in df:
+            _risk_engine.correlation.update_price_history(symbol, df["close"])
+    except Exception:
+        pass
+
+    result = await loop.run_in_executor(
+        _executor,
+        lambda: analyze_candles(
+            symbol, timeframe, df,
+            htf_regime=htf_regime,
+            strategy=strategy,
+            onchain=_onchain_ctx,
+            forex_context=forex_context,
+            tokenomics_context=tokenomics_context,
+            social_context=social_context,
+            bias_regimes=bias_regimes if bias_regimes else None,
+            news_context=news_context,
+            gold_dxy=gold_dxy,
+            market_cap_tier=_mcap_tier,
+            liquidity_data=_liquidity,
+            red_flags_data=_red_flags,
+            fear_greed_value=_fg_value,
+        ),
+    )
+
+    # ── Phase M: Attach X sentiment to result metadata ──
+    if result and isinstance(result, dict) and x_sentiment_context:
+        if "metadata" not in result:
+            result["metadata"] = {}
+        result["metadata"]["x_sentiment"] = x_sentiment_context
+
+    # ── Phase P: On-chain pre-listing signals for crypto ──
+    if result and isinstance(result, dict) and get_asset_type(symbol) == "CRYPTO":
+        try:
+            from routers.onchain_prelisting import analyze_pre_listing_signals
+            _base = symbol.split("/")[0]
+            _chain = "solana" if "SOL" in _base else "ethereum"
+            _onchain = await asyncio.wait_for(
+                analyze_pre_listing_signals(_base, chain=_chain),
+                timeout=8.0,
+            )
+            if _onchain and not _onchain.get("error"):
+                if "metadata" not in result:
+                    result["metadata"] = {}
+                result["metadata"]["onchain_signals"] = {
+                    "signal_score": _onchain.get("signal_score", 0),
+                    "verdict": _onchain.get("verdict"),
+                    "whale_accumulation": _onchain.get("signals", {}).get("whale_accumulation"),
+                    "liquidity_building": _onchain.get("signals", {}).get("liquidity_building"),
+                    "dev_activity": _onchain.get("signals", {}).get("dev_activity"),
+                    "holder_growth": _onchain.get("signals", {}).get("holder_growth"),
+                }
+        except Exception as exc:
+            logger.debug("onchain_signals_failed", symbol=symbol, error=str(exc))
+
+    # ── Phase I: Token Grade 0-100 in scan results ──
+    if result and isinstance(result, dict) and result.get("signal") in ("BUY", "SELL"):
+        try:
+            from ml.token_grade import compute_token_grade
+            _social_score = 50
+            _tokenomics_score = 50
+            if social_context:
+                _social_score = min(100, (social_context.get("galaxy_score", 50)) + 20)
+            if tokenomics_context:
+                _tokenomics_score = max(0, 100 - tokenomics_context.get("risk_score", 50))
+            _tokenomics_penalty = max(0, _tokenomics_score) if _tokenomics_score else None
+            _grade = await asyncio.to_thread(
+                compute_token_grade,
+                symbol,
+                technical_score=result.get("confidence", 50),
+                technical_confidence=result.get("confidence", 50),
+                onchain_bonus=_onchain.get("context", {}).get("fear_greed") if _onchain else None,
+                social_score=_social_score,
+                tokenomics_penalty=_tokenomics_penalty,
+            )
+            result["token_grade"] = _grade
+        except Exception:
+            pass
+
+    return result
+
+
+
+
+
+
+
+
+
+
+
+
+
