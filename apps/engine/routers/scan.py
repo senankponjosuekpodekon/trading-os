@@ -77,7 +77,7 @@ from routers.scan_symbols import (
     FOREX_COMMODITY_SYMBOLS,
     ACTIVE_SYMBOLS,
 )
-from routers.scan_strategies import _load_active_strategies
+from routers.scan_strategies import _load_active_strategies, DEFAULT_STRATEGY
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
     TF_MAP,
@@ -96,62 +96,11 @@ _executor = ThreadPoolExecutor(max_workers=4)  # Match CPU cores to avoid contex
 atexit.register(lambda: _executor.shutdown(wait=False))
 
 
-# ── Default strategy ──────────────────────────────────────────
-# Used when no strategy is provided (no UserStrategy active, fresh install,
-# manual scan without strategy). Ensures all signals go through
-# evaluate_strategy with proper filters (min_confidence, regime, DPS, etc.)
-# instead of the legacy hardcoded pipeline.
-DEFAULT_STRATEGY = {
-    "id": None,
-    "name": "Default",
-    "rules": {
-        "ema_fast": 20,
-        "ema_slow": 50,
-        "ema_trend": 200,
-        "rsi_period": 14,
-        "rsi_oversold": 30,
-        "rsi_overbought": 70,
-        "rsi_bullish_zone": 45,
-        "rsi_bearish_zone": 55,
-        "min_confidence": 40,
-        "min_dps": 0,
-        "volume_spike_min": 1.3,
-        "use_price_action": True,
-        "use_sr_zones": True,
-        "use_smc": True,
-        "use_patterns": True,
-        "atr_min_pct": 0.0,
-        "trigger": "BREAKOUT",
-        "markets": [],
-        "profiles": [],
-        "timeframes": ["1h", "4h"],
-    },
-}
 
 
 
-# Timeframes par catégorie
-WARMUP_TIMEFRAMES_FAST   = ["1h"]              # Binance prioritaire — cycle 3 min (was 15m+1h)
-WARMUP_TIMEFRAMES_MEDIUM = ["1h"]              # Deriv synthétiques — cycle 5 min (was 1h+15m)
-WARMUP_TIMEFRAMES_SLOW   = ["1h", "4h"]        # Forex/Commodités — cycle 5 min
-WARMUP_TIMEFRAMES_BRVM   = ["1h"]               # BRVM — cycle 5 min pendant heures de marché
-WARMUP_TIMEFRAMES_STOCKS  = ["1h", "4h"]        # Actions US — cycle 5 min pendant heures NYSE
-
-WARMUP_INTERVAL_FAST    = 180                  # secondes — Binance prioritaire (3 min, était 60s → CPU overload)
-WARMUP_INTERVAL_MEDIUM  = 300                  # secondes — Deriv synthétiques (5 min, était 2 min)
-WARMUP_INTERVAL_SLOW    = 600                  # secondes — Forex/Commodités (10 min, était 5 min)
-WARMUP_INTERVAL_BRVM    = 300                  # secondes — BRVM (heures de marché uniquement)
-WARMUP_INTERVAL_STOCKS  = 300                  # secondes — Actions US (heures NYSE uniquement)
-WARMUP_TTL_FAST         = 240                  # TTL cache pour actifs rapides
-WARMUP_TTL_MEDIUM       = 360                  # TTL cache pour actifs medium
-WARMUP_TTL_SLOW         = 720                  # TTL cache pour actifs lents
-WARMUP_TTL_BRVM         = 360                  # TTL cache pour BRVM
-WARMUP_TTL_STOCKS       = 360                  # TTL cache pour Actions US
-
-# Compat legacy
-WARMUP_TIMEFRAMES        = WARMUP_TIMEFRAMES_SLOW
-WARMUP_INTERVAL_SECONDS  = WARMUP_INTERVAL_FAST
-WARMUP_TTL_SECONDS       = WARMUP_TTL_FAST
+# TTL for scan cache (legacy constant used outside warmup loops)
+WARMUP_TTL_SECONDS = 240
 
 # Hystérésis flip-flop : mémoire d'état par (symbol, timeframe)
 # Structure : { "BTC/USDT:1h": {"signal": "BUY", "count": 2, "ts": <monotonic>, "history": [...]} }
