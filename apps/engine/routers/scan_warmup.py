@@ -5,14 +5,15 @@ import time
 from utils.logger import get_logger
 from routers.scan_fetchers import fetch_klines_fallback
 from routers.scan_persistence import _scan_batch_flusher
+from routers.scan_symbols import (
+    BINANCE_PRIORITY_SYMBOLS,
+    DERIV_SYMBOLS,
+    FOREX_COMMODITY_SYMBOLS,
+)
+from routers.symbol_mappings import US_STOCK_SYMBOLS
 from routers import scan as _scan
 
 logger = get_logger(__name__)
-
-BINANCE_PRIORITY_SYMBOLS = _scan.BINANCE_PRIORITY_SYMBOLS
-DERIV_SYMBOLS = _scan.DERIV_SYMBOLS
-FOREX_COMMODITY_SYMBOLS = _scan.FOREX_COMMODITY_SYMBOLS
-US_STOCK_SYMBOLS = _scan.US_STOCK_SYMBOLS
 
 
 async def prefetch_klines():
