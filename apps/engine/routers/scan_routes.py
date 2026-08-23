@@ -125,6 +125,12 @@ async def scan_multi(req: ScanRequest):
     loop = asyncio.get_event_loop()
     inc("scan:requests_total")
 
+    # 0. Charger config marchés et filtrer les désactivés
+    await load_asset_config()
+    req.symbols = [s for s in req.symbols if is_market_active(get_asset_type(s))]
+    if not req.symbols:
+        return []
+
     # 0. Séparer BRVM des autres marchés
     brvm_symbols = [s for s in req.symbols if is_brvm_symbol(s)]
     other_symbols = [s for s in req.symbols if s not in brvm_symbols]
