@@ -42,6 +42,21 @@ RSS_FEEDS: dict[str, list[dict]] = {
         {"name": "Jeune Afrique",  "url": "https://www.jeuneafrique.com/feed/"},
         {"name": "Financial Afrik", "url": "https://www.financialafrik.com/feed/"},
     ],
+    "africa": [
+        {"name": "BBC Africa",          "url": "https://feeds.bbci.co.uk/news/world/africa/rss.xml",      "country": "Pan-African"},
+        {"name": "Africanews",          "url": "https://www.africanews.com/rss/",                          "country": "Pan-African"},
+        {"name": "Reuters Africa",      "url": "https://www.reutersagency.com/feed/?taxonomy=regions&primary=74", "country": "Pan-African"},
+        {"name": "News24 South Africa", "url": "https://www.news24.com/feeds/rss",                          "country": "South Africa"},
+        {"name": "Business Day SA",     "url": "https://www.businessday.co.za/feed/",                       "country": "South Africa"},
+        {"name": "The Citizen SA",      "url": "https://citizen.co.za/feed/",                               "country": "South Africa"},
+        {"name": "Premium Times NG",    "url": "https://www.premiumtimesng.com/feed",                       "country": "Nigeria"},
+        {"name": "The Guardian NG",     "url": "https://guardian.ng/feed/",                                 "country": "Nigeria"},
+        {"name": "Daily Nation KE",     "url": "https://www.nation.co.ke/rss",                              "country": "Kenya"},
+        {"name": "The Standard KE",     "url": "https://www.standardmedia.co.ke/rss",                       "country": "Kenya"},
+        {"name": "MyJoyOnline GH",      "url": "https://www.myjoyonline.com/feed/",                         "country": "Ghana"},
+        {"name": "GhanaWeb",            "url": "https://www.ghanaweb.com/rss/news",                         "country": "Ghana"},
+        {"name": "Fratmat CI",          "url": "https://fratmat.info/feed/",                                "country": "Cote d'Ivoire"},
+    ],
 }
 
 # All sources combined
@@ -98,6 +113,7 @@ async def _fetch_single_feed(
                 "title":       title,
                 "url":         url,
                 "source":      feed["name"],
+                "country":     feed.get("country", ""),
                 "published":   pub_str,
                 "summary":     summary,
                 "hash":        _hash(title),
