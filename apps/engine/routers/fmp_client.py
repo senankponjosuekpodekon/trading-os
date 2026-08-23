@@ -8,13 +8,12 @@ import httpx
 import config
 from utils.cache import get_cached, set_cached
 from utils.http import retry_async
-from utils.semaphores import get_semaphore
 from utils.logger import get_logger
 
 
 logger = get_logger(__name__)
 
-FMP_BASE = "https://financialmodelingprep.com/api/v3"
+FMP_BASE = "https://financialmodelingprep.com/stable"
 
 
 def _to_ticker(symbol: str) -> Optional[str]:
@@ -35,24 +34,28 @@ async def _fmp_get(client: httpx.AsyncClient, endpoint: str) -> Any | None:
         logger.debug("fmp_key_missing", endpoint=endpoint)
         return None
 
-    url = f"{FMP_BASE}/{endpoint}?apikey={config.settings.fmp_api_key}"
+    sep = "&" if "?" in endpoint else "?"
+    url = f"{FMP_BASE}/{endpoint}{sep}apikey={config.settings.fmp_api_key}"
 
     async def _request() -> Any:
-        async with get_semaphore("fmp"):
-            response = await client.get(url, timeout=10.0)
-            if response.status_code == 429:
-                logger.warning("fmp_rate_limited", endpoint=endpoint)
-                # Do not retry 429 automatically; caller can fallback.
-                raise httpx.HTTPStatusError(
-                    "Rate limited", request=response.request, response=response
-                )
-            response.raise_for_status()
-            return response.json()
+        response = await client.get(url, timeout=10.0)
+        if response.status_code == 429:
+            logger.warning("fmp_rate_limited", endpoint=endpoint)
+            # Do not retry 429 automatically; caller can fallback.
+            raise httpx.HTTPStatusError(
+                "Rate limited", request=response.request, response=response
+            )
+        response.raise_for_status()
+        return response.json()
 
     try:
         return await retry_async(_request, max_retries=1, base_delay=1.0, source="fmp")
     except Exception as exc:
-        logger.warning("fmp_request_failed", endpoint=endpoint, error=str(exc))
+        safe = str(exc)
+        key = config.settings.fmp_api_key
+        if key:
+            safe = safe.replace(key, "***")
+        logger.warning("fmp_request_failed", endpoint=endpoint, error=safe)
         return None
 
 
@@ -73,27 +76,44 @@ async def _cached_fmp(
 
 
 async def fetch_fmp_profile(symbol: str) -> Optional[dict]:
-    """Return PE, EPS, market cap, dividend and sector info for a stock."""
+    """Return market cap, dividend and sector/company info for a stock."""
     ticker = _to_ticker(symbol)
     if not ticker:
         return None
     async with httpx.AsyncClient() as client:
         data = await _cached_fmp(
-            symbol, client, f"profile/{ticker}", f"fmp:profile:{symbol}"
+            symbol, client, f"profile?symbol={ticker}", f"fmp:profile:{symbol}"
         )
     if not data or not isinstance(data, list) or not data:
         return None
     p = data[0]
     return {
-        "pe": _as_float(p.get("pe")),
-        "eps": _as_float(p.get("eps")),
-        "market_cap": _as_float(p.get("mktCap")),
-        "dividend_yield": _as_float(p.get("lastDiv")),
+        "market_cap": _as_float(p.get("marketCap")),
+        "dividend_yield": _as_float(p.get("lastDividend")),
         "sector": p.get("sector"),
         "industry": p.get("industry"),
         "country": p.get("country"),
         "currency": p.get("currency"),
         "company_name": p.get("companyName"),
+    }
+
+
+async def fetch_fmp_ratios(symbol: str) -> Optional[dict]:
+    """Return PE, EPS (TTM) and dividend yield from the TTM ratios endpoint."""
+    ticker = _to_ticker(symbol)
+    if not ticker:
+        return None
+    async with httpx.AsyncClient() as client:
+        data = await _cached_fmp(
+            symbol, client, f"ratios-ttm?symbol={ticker}", f"fmp:ratios-ttm:{symbol}"
+        )
+    if not data or not isinstance(data, list) or not data:
+        return None
+    r = data[0]
+    return {
+        "pe": _as_float(r.get("priceToEarningsRatioTTM")),
+        "eps": _as_float(r.get("netIncomePerShareTTM")),
+        "dividend_yield": _as_float(r.get("dividendYieldTTM")),
     }
 
 
@@ -104,16 +124,16 @@ async def fetch_fmp_earnings(symbol: str) -> Optional[list[dict]]:
         return None
     async with httpx.AsyncClient() as client:
         data = await _cached_fmp(
-            symbol, client, f"earnings/{ticker}", f"fmp:earnings:{symbol}"
+            symbol, client, f"earnings?symbol={ticker}", f"fmp:earnings:{symbol}"
         )
     if not data or not isinstance(data, list):
         return None
     return [
         {
             "date": e.get("date"),
-            "eps": _as_float(e.get("eps")),
+            "eps": _as_float(e.get("epsActual")),
             "eps_estimated": _as_float(e.get("epsEstimated")),
-            "revenue": _as_float(e.get("revenue")),
+            "revenue": _as_float(e.get("revenueActual")),
             "revenue_estimated": _as_float(e.get("revenueEstimated")),
         }
         for e in data
@@ -121,15 +141,17 @@ async def fetch_fmp_earnings(symbol: str) -> Optional[list[dict]]:
 
 
 async def fetch_fundamentals(symbol: str) -> Optional[dict]:
-    """Combine profile + earnings into a single fundamental snapshot."""
-    profile, earnings = await asyncio.gather(
+    """Combine profile, TTM ratios and earnings into a single snapshot."""
+    profile, ratios, earnings = await asyncio.gather(
         fetch_fmp_profile(symbol),
+        fetch_fmp_ratios(symbol),
         fetch_fmp_earnings(symbol),
     )
     if profile is None:
         return None
     return {
         "symbol": symbol,
+        **(ratios or {}),
         **profile,
         "earnings": earnings or [],
     }
