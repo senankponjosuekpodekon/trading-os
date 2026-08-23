@@ -15,17 +15,11 @@ async def get_klines(
 ):
     """Retourne les klines OHLCV pour n'importe quel actif via la chaîne de fallback scan.py."""
     from routers.scan import (
-        fetch_binance_klines, fetch_twelvedata_klines,
-        fetch_yfinance_klines, fetch_deriv_klines, TF_MAP,
+        fetch_klines_fallback,
+        TF_MAP,
     )
     tf = TF_MAP.get(interval, interval)
-    df = await fetch_binance_klines(symbol, tf)
-    if df is None:
-        df = await fetch_deriv_klines(symbol, tf)
-    if df is None:
-        df = await fetch_twelvedata_klines(symbol, tf)
-    if df is None:
-        df = await fetch_yfinance_klines(symbol, tf)
+    df = await fetch_klines_fallback(symbol, tf)
     if df is None or len(df) < 2:
         raise HTTPException(status_code=404, detail=f"Aucune donnée pour {symbol} / {interval}")
     # Trier par time croissant et supprimer les doublons

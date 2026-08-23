@@ -11,10 +11,7 @@ import asyncio
 import os
 
 from routers.scan import (
-    fetch_binance_klines,
-    fetch_deriv_klines,
-    fetch_twelvedata_klines,
-    fetch_yfinance_klines,
+    fetch_klines_fallback,
     analyze_candles,
     TF_MAP,
     _TF_HIERARCHY,
@@ -150,13 +147,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
     # Récupérer plus de données (max Binance = 1000 bougies)
     limit = min(req.lookback_bars + 50, 1000)
-    df = await fetch_binance_klines(req.symbol, tf, limit=limit)
-    if df is None:
-        df = await fetch_deriv_klines(req.symbol, tf, limit=limit)
-    if df is None:
-        df = await fetch_twelvedata_klines(req.symbol, tf, limit=limit)
-    if df is None:
-        df = await fetch_yfinance_klines(req.symbol, tf, limit=limit)
+    df = await fetch_klines_fallback(req.symbol, tf, limit=limit, timeout=12.0)
 
     if df is None or len(df) < 60:
         raise ValueError("Pas assez de données historiques")

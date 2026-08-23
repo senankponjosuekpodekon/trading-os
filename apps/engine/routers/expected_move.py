@@ -95,21 +95,12 @@ def compute_expected_move_from_dataframe(
 
 async def _fetch_klines(symbol: str, timeframe: str, limit: int) -> pd.DataFrame | None:
     from routers.scan import (
-        fetch_binance_klines,
-        fetch_deriv_klines,
-        fetch_twelvedata_klines,
-        fetch_yfinance_klines,
+        fetch_klines_fallback,
         TF_MAP,
     )
 
     tf = TF_MAP.get(timeframe, timeframe)
-    df = await fetch_binance_klines(symbol, tf, limit)
-    if df is None:
-        df = await fetch_deriv_klines(symbol, tf, limit)
-    if df is None:
-        df = await fetch_twelvedata_klines(symbol, tf, limit)
-    if df is None:
-        df = await fetch_yfinance_klines(symbol, tf, limit)
+    df = await fetch_klines_fallback(symbol, tf, limit=limit, timeout=12.0)
     return df
 
 

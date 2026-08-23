@@ -79,6 +79,7 @@ from routers.scan_fetchers import (
     fetch_deriv_klines,
     fetch_yfinance_klines,
     fetch_binance_klines,
+    fetch_klines_fallback,
 )
 
 logger = get_logger(__name__)

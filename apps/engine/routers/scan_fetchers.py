@@ -305,3 +305,69 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
             error_type=type(exc).__name__, error=repr(exc),
         )
         return None
+
+
+# ── Parallel klines fallback ─────────────────────────────────────────
+_PROVIDER_FUNCS = {
+    "binance": fetch_binance_klines,
+    "deriv": fetch_deriv_klines,
+    "twelvedata": fetch_twelvedata_klines,
+    "yfinance": fetch_yfinance_klines,
+}
+
+DEFAULT_PROVIDER_ORDER = ["binance", "deriv", "twelvedata", "yfinance"]
+
+
+async def fetch_klines_fallback(
+    symbol: str,
+    interval: str,
+    limit: int = 300,
+    providers: Optional[list[str]] = None,
+    timeout: float = 10.0,
+) -> Optional[pd.DataFrame]:
+    """Try several kline providers in parallel and return the first non-empty
+    DataFrame according to the requested priority order.
+    """
+    order = providers if providers is not None else DEFAULT_PROVIDER_ORDER
+    tasks = {
+        name: asyncio.create_task(
+            _PROVIDER_FUNCS[name](symbol, interval, limit),
+            name=name,
+        )
+        for name in order
+    }
+    pending = set(tasks.values())
+    results: dict[str, Optional[pd.DataFrame]] = {}
+    start = time.monotonic()
+
+    try:
+        while pending:
+            remaining = timeout - (time.monotonic() - start)
+            if remaining <= 0:
+                break
+            done, pending = await asyncio.wait(
+                pending,
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=remaining,
+            )
+            if not done:
+                break
+            for task in done:
+                name = task.get_name()
+                try:
+                    df = task.result()
+                except Exception:
+                    df = None
+                results[name] = df
+
+            for name in order:
+                df = results.get(name)
+                if df is not None and not df.empty:
+                    for t in pending:
+                        t.cancel()
+                    return df
+    finally:
+        for t in pending:
+            t.cancel()
+
+    return None
