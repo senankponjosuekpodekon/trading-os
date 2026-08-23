@@ -58,17 +58,22 @@ enum BillingInterval {
 }
 
 model User {
-  id           String         @id @default(cuid())
-  email        String         @unique
-  password     String
-  name         String
-  role         UserRole       @default(TRADER)
-  isActive     Boolean        @default(true)
-  timezone     String         @default("UTC")
-  totpSecret   String?        @map("totp_secret")
-  totpEnabled  Boolean        @default(false) @map("totp_enabled")
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id                       String         @id @default(cuid())
+  email                    String         @unique
+  password                 String
+  name                     String
+  role                     UserRole       @default(TRADER)
+  isActive                 Boolean        @default(true)
+  timezone                 String         @default("UTC")
+  totpSecret               String?        @map("totp_secret")
+  totpEnabled              Boolean        @default(false) @map("totp_enabled")
+  failedLoginAttempts      Int            @default(0) @map("failed_login_attempts")
+  lockedUntil              DateTime?      @map("locked_until")
+  emailVerified            Boolean        @default(false) @map("email_verified")
+  emailVerificationToken   String?        @map("email_verification_token")
+  refreshTokenVersion      Int            @default(0) @map("refresh_token_version")
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
 
   portfolios   Portfolio[]
   journal      JournalEntry[]
@@ -134,6 +139,7 @@ model RefreshToken {
   expiresAt    DateTime  @map("expires_at")
   revokedAt    DateTime? @map("revoked_at")
   replacedBy   String?   @map("replaced_by")
+  version      Int       @default(0) @map("version")
   createdAt    DateTime  @default(now()) @map("created_at")
   userAgent    String?   @map("user_agent")
   ip           String?   @map("ip")

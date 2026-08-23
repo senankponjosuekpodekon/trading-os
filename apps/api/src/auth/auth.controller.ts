@@ -1,7 +1,7 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, IsEmail } from 'class-validator';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -17,6 +17,16 @@ class LogoutDto {
   @IsString()
   @IsOptional()
   refresh_token?: string;
+}
+
+class VerifyEmailDto {
+  @IsString()
+  token!: string;
+}
+
+class ResendVerificationDto {
+  @IsEmail()
+  email!: string;
 }
 
 @Controller('auth')
@@ -77,7 +87,7 @@ export class AuthController {
         timestamp: new Date().toISOString(),
         error: err instanceof Error ? err.message : String(err),
       }, 'Login failed');
-      throw new UnauthorizedException('Invalid credentials');
+      throw err;
     }
   }
 
@@ -109,5 +119,18 @@ export class AuthController {
       await this.authService.logout(refreshToken);
     }
     this.clearAuthCookies(res);
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    // TODO: wire SMTP sender (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
+    return { queued: true, email: dto.email };
   }
 }

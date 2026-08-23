@@ -85,9 +85,18 @@ class Cache:
 cache = Cache()
 
 
-async def get_cached(key: str) -> Any | None:
-    return await cache.get(key)
+async def get_cached(key: str, ttl: int = 900) -> Any | None:
+    """L1 in-memory then L2 Redis lookup."""
+    value = mem_get(key)
+    if value is not None:
+        return value
+    value = await cache.get(key)
+    if value is not None:
+        mem_set(key, value, ttl)
+    return value
 
 
 async def set_cached(key: str, value: Any, ttl: int = 900) -> bool:
+    """Write to both L1 in-memory and L2 Redis."""
+    mem_set(key, value, ttl)
     return await cache.set(key, value, ttl)
