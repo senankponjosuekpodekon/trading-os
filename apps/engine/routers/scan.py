@@ -81,6 +81,7 @@ from routers.scan_fetchers import (
     fetch_binance_klines,
     fetch_klines_fallback,
 )
+from routers.scan_market_hours import _is_brvm_open, _is_nyse_open
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=4)  # Match CPU cores to avoid context-switch overhead
@@ -207,11 +208,6 @@ WARMUP_TTL_MEDIUM       = 360                  # TTL cache pour actifs medium
 WARMUP_TTL_SLOW         = 720                  # TTL cache pour actifs lents
 WARMUP_TTL_BRVM         = 360                  # TTL cache pour BRVM
 WARMUP_TTL_STOCKS       = 360                  # TTL cache pour Actions US
-
-# BRVM market hours: Mon-Fri 10:00-14:30 UTC
-BRVM_OPEN_HOUR   = 10
-BRVM_CLOSE_HOUR   = 14
-BRVM_CLOSE_MIN    = 30
 
 # Compat legacy
 WARMUP_TIMEFRAMES        = WARMUP_TIMEFRAMES_SLOW
@@ -2199,20 +2195,6 @@ async def warmup_slow():
         await asyncio.sleep(wait)
 
 
-def _is_brvm_open() -> bool:
-    """Check if BRVM market is currently open (Mon-Fri 10:00-14:30 UTC)."""
-    now = time.gmtime()
-    if now.tm_wday >= 5:  # Saturday=5, Sunday=6
-        return False
-    hour = now.tm_hour
-    minute = now.tm_min
-    if hour < BRVM_OPEN_HOUR or hour > BRVM_CLOSE_HOUR:
-        return False
-    if hour == BRVM_CLOSE_HOUR and minute > BRVM_CLOSE_MIN:
-        return False
-    return True
-
-
 async def warmup_brvm():
     """Boucle BRVM — actions BRVM, cycle 5 min, uniquement pendant les heures de marché.
     BRVM: Lundi-Vendredi 10:00-14:30 UTC.
@@ -2255,13 +2237,6 @@ async def warmup_brvm():
         await asyncio.sleep(wait)
 
 
-def _is_nyse_open() -> bool:
-    """Check if NYSE is currently open (Mon-Fri 14:30-21:00 UTC)."""
-    now = time.gmtime()
-    if now.tm_wday >= 5:
-        return False
-    hour_min = now.tm_hour * 60 + now.tm_min
-    return 870 <= hour_min < 1260  # 14:30 - 21:00 UTC
 
 
 async def warmup_stocks():
