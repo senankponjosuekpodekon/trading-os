@@ -82,6 +82,7 @@ from routers.scan_asset import get_asset_type
 from routers.scan_ta import ema, rsi, atr, macd, bollinger
 from routers.scan_timeframes import _TF_HIERARCHY, _BIAS_TF
 from routers.scan_synthetic import _analyze_synthetic_candles
+from routers.scan_moonshot import _compute_moonshot_tp
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
     TF_MAP,
@@ -118,30 +119,6 @@ class ScanRequest(BaseModel):
 
 
 
-
-def _compute_moonshot_tp(signal: str, entry: float | None, tp1: float | None, tp2: float | None, market_cap_tier: str) -> dict | None:
-    """For MICRO cap crypto, add moonshot take-profit: sell 50% at 2x entry.
-
-    Returns None if not applicable (non-MICRO or no entry price).
-    """
-    if market_cap_tier != "MICRO" or entry is None or entry <= 0:
-        return None
-
-    if signal == "BUY":
-        tp_moonshot = round(entry * 2.0, 6)  # 2x entry
-        tp_3x = round(entry * 3.0, 6)       # 3x for trailing moon
-    elif signal == "SELL":
-        tp_moonshot = round(entry * 0.5, 6)  # 50% of entry (2x inverse)
-        tp_3x = round(entry * 0.33, 6)      # 33% of entry (3x inverse)
-    else:
-        return None
-
-    return {
-        "tp_moonshot_2x": tp_moonshot,
-        "tp_moonshot_3x": tp_3x,
-        "sell_pct_at_2x": 50,  # sell 50% at 2x
-        "description": "Moonshot TP: sell 50% at 2x, trail rest to 3x",
-    }
 
 
 def analyze_candles(
