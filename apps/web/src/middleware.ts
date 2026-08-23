@@ -18,6 +18,7 @@ export function middleware(request: NextRequest) {
   // Origines externes auxquelles le navigateur a besoin de se connecter
   // (fetch/XHR/WebSocket) — dérivées des mêmes variables d'env que le reste de l'app.
   const WIDGET_ORIGIN = 'https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app';
+  const VERCEL_ORIGIN = 'https://vercel.com';
 
   const connectSrc = [
     "'self'",
@@ -30,18 +31,19 @@ export function middleware(request: NextRequest) {
     'https://*.ingest.sentry.io',
     'https://*.ingest.us.sentry.io',
     WIDGET_ORIGIN,
+    VERCEL_ORIGIN,
   ]
     .filter(Boolean)
     .join(' ');
 
   const cspHeader = `
     default-src 'self';
-    script-src 'self' 'unsafe-inline' ${WIDGET_ORIGIN};
+    script-src 'self' 'unsafe-inline' ${WIDGET_ORIGIN} ${VERCEL_ORIGIN};
     style-src 'self' 'unsafe-inline' ${WIDGET_ORIGIN};
     img-src 'self' data: blob: ${WIDGET_ORIGIN};
     font-src 'self' data: ${WIDGET_ORIGIN};
     connect-src ${connectSrc};
-    frame-src 'self' ${WIDGET_ORIGIN};
+    frame-src 'self' ${WIDGET_ORIGIN} ${VERCEL_ORIGIN};
     worker-src 'self';
     object-src 'none';
     base-uri 'self';
