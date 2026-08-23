@@ -1,4 +1,5 @@
 'use client';
+import Image from 'next/image';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -111,7 +112,14 @@ export default function TwoFactorPage() {
               <form onSubmit={handleEnable} className="space-y-4 border-t border-gray-800 pt-4">
                 <p className="text-gray-300 text-sm">Scannez ce QR code avec votre application d’authentification.</p>
                 <div className="flex justify-center">
-                  <img src={setupMutation.data.qrCode} alt="QR Code 2FA" className="rounded-lg border border-gray-800" />
+                  <Image
+                    src={setupMutation.data.qrCode}
+                    alt="QR Code 2FA"
+                    width={200}
+                    height={200}
+                    unoptimized
+                    className="rounded-lg border border-gray-800"
+                  />
                 </div>
                 <div className="text-center">
                   <p className="text-xs text-gray-500 mb-1">Secret</p>

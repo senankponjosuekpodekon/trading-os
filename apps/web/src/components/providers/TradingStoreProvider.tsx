@@ -82,7 +82,7 @@ export function TradingStoreProvider({ children }: { children: React.ReactNode }
       if (retryTimer) clearTimeout(retryTimer);
       wsRef.current?.close();
     };
-  }, [setPrice, setWsConnected, setSignals]);
+  }, [setPrice, setWsConnected, setSignals, toast]);
 
   // ── Polling signaux REST (fallback si WS ne les push pas) ───────────────
   useEffect(() => {
