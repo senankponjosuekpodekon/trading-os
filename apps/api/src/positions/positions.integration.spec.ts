@@ -3,7 +3,7 @@ import { INestApplication, CanActivate, ExecutionContext, ValidationPipe } from 
 import { ConfigModule } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { of } from 'rxjs';
-import * as request from 'supertest';
+import request from 'supertest';
 import { PositionsModule } from './positions.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';

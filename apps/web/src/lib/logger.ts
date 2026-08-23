@@ -1,4 +1,4 @@
-"""Structured logger for the web frontend."""
+// Structured logger for the web frontend.
 /* eslint-disable no-console */
 type LogArgs = unknown[];
 

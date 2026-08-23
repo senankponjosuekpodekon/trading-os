@@ -3,7 +3,7 @@ import { INestApplication, CanActivate, ExecutionContext } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { of } from 'rxjs';
-import * as request from 'supertest';
+import request from 'supertest';
 import { BacktestModule } from './backtest.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';

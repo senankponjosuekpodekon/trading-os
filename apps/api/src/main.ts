@@ -5,7 +5,7 @@ import helmet from 'helmet';
 import { auditEnv } from './common/security/env-audit';
 import { randomUUID } from 'crypto';
 import * as Sentry from '@sentry/node';
-import * as cookieParser from 'cookie-parser';
+import cookieParser from 'cookie-parser';
 import { PricesProxyService } from './prices-proxy/prices-proxy.service';
 
 const logger = new Logger('Bootstrap');

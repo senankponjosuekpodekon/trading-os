@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, CanActivate, ExecutionContext } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import * as request from 'supertest';
+import request from 'supertest';
 import { NotificationsModule } from './notifications.module';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
