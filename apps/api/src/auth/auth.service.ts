@@ -2,6 +2,8 @@ import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/co
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
+import { UserRole } from '@prisma/client';
+import type { User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { rlsContext } from '../prisma/rls-context';
 import { AuditService } from '../audit/audit.service';
@@ -30,7 +32,7 @@ export class AuthService {
         email: dto.email,
         password: hashed,
         name: dto.name,
-        role: (dto.role as any) ?? 'TRADER',
+        role: (dto.role as UserRole) ?? UserRole.TRADER,
       },
     });
 
@@ -53,7 +55,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = (await this.prisma.user.findUnique({ where: { email: dto.email } })) as any;
+    const user: User | null = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     const valid = await bcrypt.compare(dto.password, user.password);
@@ -63,6 +65,7 @@ export class AuthService {
 
     if (user.totpEnabled) {
       if (!dto.totpToken) throw new UnauthorizedException('2FA token required');
+      if (!user.totpSecret) throw new UnauthorizedException('Invalid 2FA token');
       const verified = this.twoFactor.verifyToken(user.totpSecret, dto.totpToken);
       if (!verified) throw new UnauthorizedException('Invalid 2FA token');
     }
