@@ -18,6 +18,7 @@
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
     "typeRoots": ["../../node_modules/@types", "./node_modules/@types"],
+    "types": ["jest", "node"],
     "moduleResolution": "node",
     "noEmitOnError": false,
     "paths": {
