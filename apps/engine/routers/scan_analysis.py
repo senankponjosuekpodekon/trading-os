@@ -78,6 +78,7 @@ from routers.scan_symbols import (
 from routers.scan_strategies import _load_active_strategies, DEFAULT_STRATEGY
 from routers.scan_hysteresis import _signal_state, apply_hysteresis_and_persistence
 from routers.scan_asset import get_asset_type
+from routers.fmp_client import fetch_fundamentals
 from routers.scan_ta import ema, rsi, atr, macd, bollinger
 from routers.scan_timeframes import _TF_HIERARCHY, _BIAS_TF
 from routers.scan_synthetic import _analyze_synthetic_candles
@@ -1685,6 +1686,14 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             result["token_grade"] = _grade
         except Exception:
             pass
+
+    try:
+        if get_asset_type(symbol) == "US_STOCK":
+            fundamentals = await asyncio.wait_for(fetch_fundamentals(symbol), timeout=8.0)
+            if fundamentals:
+                result["fundamentals"] = fundamentals
+    except Exception:
+        pass
 
     return result
 
