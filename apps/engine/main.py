@@ -82,16 +82,23 @@ async def lifespan(app: FastAPI):
         return _cb
 
     price_task = asyncio.create_task(ws.price_broadcaster())
+    binance_task = asyncio.create_task(ws.binance_price_listener())
     warmup_task = asyncio.create_task(scan.warmup_features())
     from utils.crons import run_all_crons
     cron_task = asyncio.create_task(run_all_crons())
-    for t, name in [(price_task, "price_broadcaster"), (warmup_task, "warmup_features"), (cron_task, "crons")]:
+    for t, name in [
+        (price_task, "price_broadcaster"),
+        (binance_task, "binance_price_listener"),
+        (warmup_task, "warmup_features"),
+        (cron_task, "crons"),
+    ]:
         t.add_done_callback(_log_task_death(name))
     yield
     price_task.cancel()
+    binance_task.cancel()
     warmup_task.cancel()
     cron_task.cancel()
-    for task in (price_task, warmup_task, cron_task):
+    for task in (price_task, binance_task, warmup_task, cron_task):
         try:
             await asyncio.wait_for(task, timeout=5.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):

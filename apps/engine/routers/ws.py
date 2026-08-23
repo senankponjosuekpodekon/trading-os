@@ -11,14 +11,14 @@ from typing import Set
 
 from utils.deriv_symbols import to_wire_symbol
 
-from utils.http import retry_async
 from utils.logger import get_logger
-from utils.circuit_breaker import BREAKERS, State as BreakerState
 
 router = APIRouter()
 logger = get_logger(__name__)
 
-BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
+BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/" + "/".join(
+    f"{s.lower()}@ticker" for s in SYMBOLS_BINANCE
+)
 SYMBOLS_BINANCE   = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
     "AVAXUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT",
@@ -143,73 +143,73 @@ async def _fetch_deriv_prices() -> dict:
     return prices
 
 
+async def binance_price_listener():
+    """Flux temps réel Binance via WebSocket combined ticker stream."""
+    while True:
+        try:
+            import websockets as _ws
+            async with _ws.connect(
+                BINANCE_WS_URL,
+                ping_interval=20,
+                ping_timeout=10,
+            ) as ws:
+                async for raw in ws:
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    sym = data.get("s")
+                    quote = data.get("c")
+                    if sym and quote:
+                        _last_prices[sym.upper()] = float(quote)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("binance_ws_error", error=str(exc))
+            await asyncio.sleep(2)
+
+
 async def price_broadcaster():
-    """Tâche de fond : fetch prix Binance toutes les 3s, Deriv toutes les 10s, Forex/Commodités toutes les 30s."""
+    """Tâche de fond : Diffuse Deriv toutes les 10s, Forex/Commodités toutes les 30s.
+    Les prix Binance sont alimentés en temps réel par binance_price_listener()."""
     _yf_counter    = 0   # toutes les 10 itérations = 30s
     _deriv_counter = 0   # toutes les  3 itérations = 10s
-    async with httpx.AsyncClient(timeout=10) as client:
-        while True:
-            try:
-                prices = {}
+    while True:
+        try:
+            prices = {}
 
-                # --- Binance (toutes les 3s) — skip if circuit breaker OPEN ---
-                _binance_breaker = BREAKERS.get("binance_realtime")
-                if not _binance_breaker or _binance_breaker.state != BreakerState.OPEN.value:
-                    async def _fetch_prices():
-                        resp = await client.get(
-                            BINANCE_PRICE_URL,
-                            params={"symbols": json.dumps(SYMBOLS_BINANCE, separators=(',', ':'))},
-                        )
-                        resp.raise_for_status()
-                        return resp.json()
+            # --- Deriv (toutes les 10s ~ 3 cycles) ---
+            _deriv_counter += 1
+            if _deriv_counter >= 3:
+                _deriv_counter = 0
+                try:
+                    deriv_prices = await asyncio.wait_for(_fetch_deriv_prices(), timeout=8.0)
+                    prices.update(deriv_prices)
+                except Exception as exc:
+                    logger.debug("deriv_prices_fetch_failed", error=str(exc))
 
-                    data = await retry_async(
-                        _fetch_prices,
-                        max_retries=1,
-                        base_delay=0.5,
-                        exceptions=(httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException),
-                        on_retry=lambda attempt, exc: logger.debug(
-                            "binance_price_retry",
-                            attempt=attempt,
-                            error_type=type(exc).__name__,
-                            error=repr(exc),
-                        ),
-                        source="binance_realtime",
+            # --- yfinance Forex/Commodités (toutes les 30s ~ 10 cycles) ---
+            _yf_counter += 1
+            if _yf_counter >= 10:
+                _yf_counter = 0
+                try:
+                    loop = asyncio.get_event_loop()
+                    yf_prices = await asyncio.wait_for(
+                        loop.run_in_executor(None, _fetch_yf_prices_sync),
+                        timeout=20.0
                     )
-                    prices = {item["symbol"]: float(item["price"]) for item in data}
+                    prices.update(yf_prices)
+                except Exception as exc:
+                    logger.debug("yfinance_prices_fetch_failed", error=str(exc))
 
-                # --- Deriv (toutes les 10s ~ 3 cycles) ---
-                _deriv_counter += 1
-                if _deriv_counter >= 3:
-                    _deriv_counter = 0
-                    try:
-                        deriv_prices = await asyncio.wait_for(_fetch_deriv_prices(), timeout=8.0)
-                        prices.update(deriv_prices)
-                    except Exception as exc:
-                        logger.debug("deriv_prices_fetch_failed", error=str(exc))
-
-                # --- yfinance Forex/Commodités (toutes les 30s ~ 10 cycles) ---
-                _yf_counter += 1
-                if _yf_counter >= 10:
-                    _yf_counter = 0
-                    try:
-                        loop = asyncio.get_event_loop()
-                        yf_prices = await asyncio.wait_for(
-                            loop.run_in_executor(None, _fetch_yf_prices_sync),
-                            timeout=20.0
-                        )
-                        prices.update(yf_prices)
-                    except Exception as exc:
-                        logger.debug("yfinance_prices_fetch_failed", error=str(exc))
-
-                _last_prices.update(prices)
-                if _price_clients:
-                    await broadcast(_price_clients, {"type": "prices", "data": _last_prices})
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.debug("price_broadcast_failed", error_type=type(e).__name__, error=repr(e))
-            await asyncio.sleep(3 + random.uniform(0, 0.5))
+            _last_prices.update(prices)
+            if _price_clients:
+                await broadcast(_price_clients, {"type": "prices", "data": _last_prices})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug("price_broadcast_failed", error_type=type(e).__name__, error=repr(e))
+        await asyncio.sleep(3 + random.uniform(0, 0.5))
 
 
 def set_latest_signals(signals: list):
