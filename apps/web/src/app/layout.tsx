@@ -12,7 +12,11 @@ export const metadata: Metadata = {
     apple: '/icon-192.svg',
     shortcut: '/icon-192.svg',
   },
-  appleWebApp: { capable: true, statusBarStyle: 'black-translucent' },
+  appleWebApp: { capable: false, statusBarStyle: 'black-translucent' },
+  other: {
+    'mobile-web-app-capable': 'yes',
+    'apple-mobile-web-app-status-bar-style': 'black-translucent',
+  },
 };
 
 export const viewport: Viewport = {

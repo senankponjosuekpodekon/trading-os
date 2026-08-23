@@ -11,6 +11,17 @@ export function ServiceWorkerRegistration() {
         .then((registration) => {
           // eslint-disable-next-line no-console
           console.log('SW registered: ', registration.scope);
+
+          // If an updated SW is waiting, claim it and reload once so the new bundle is used
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            if (!newWorker) return;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+                window.location.reload();
+              }
+            });
+          });
         })
         .catch((error) => {
           // eslint-disable-next-line no-console
