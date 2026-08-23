@@ -1,6 +1,16 @@
-import axios from 'axios';
+import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+export interface ApiError {
+  status: number;
+  message: string;
+  code?: string;
+}
+
+interface RetryRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
+}
 
 export const api = axios.create({
   baseURL: `${API_URL}/api`,
@@ -33,9 +43,11 @@ async function doRefresh() {
 
 api.interceptors.response.use(
   (res) => res,
-  async (err) => {
-    const original = err.config;
-    if (err.response?.status === 401 && typeof window !== 'undefined' && !original._retry) {
+  async (err: AxiosError) => {
+    const original = err.config as RetryRequestConfig | undefined;
+    const status = err.response?.status;
+
+    if (status === 401 && typeof window !== 'undefined' && original && !original._retry) {
       original._retry = true;
 
       if (!isRefreshing) {
@@ -53,12 +65,34 @@ api.interceptors.response.use(
         }
       }
 
-      return new Promise((resolve) => {
+      return new Promise<AxiosResponse>((resolve) => {
         addRefreshSubscriber(() => {
           resolve(api(original));
         });
       });
     }
+
+    if (status && status >= 500) {
+      // eslint-disable-next-line no-console
+      console.error('[API] server error', status, err.message);
+    }
+
     return Promise.reject(err);
   },
 );
+
+export function handleApiError(error: unknown): ApiError {
+  if (axios.isAxiosError(error)) {
+    const data = (error.response?.data ?? {}) as { message?: string; error?: string; code?: string };
+    const message = data.message ?? data.error ?? error.message ?? 'Erreur réseau';
+    return {
+      status: error.response?.status ?? 0,
+      message,
+      code: data.code ?? error.code,
+    };
+  }
+  if (error instanceof Error) {
+    return { status: 0, message: error.message, code: 'UNKNOWN' };
+  }
+  return { status: 0, message: 'Erreur inconnue', code: 'UNKNOWN' };
+}
