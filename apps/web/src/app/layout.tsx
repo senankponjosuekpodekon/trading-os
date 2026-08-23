@@ -30,6 +30,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased bg-gray-950 text-gray-100" style={{ fontFamily: 'var(--font-sans)' }}>
         <Providers>{children}</Providers>
         <ServiceWorkerRegistration />
+        <script
+          src="https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app/api/widget/embed.js"
+          data-agent="f37e3ebd-eba2-4dc9-9ca6-c3444e12811c"
+          data-color="#4f46e5"
+          data-title="Chat IA"
+          data-position="bottom-right"
+          data-api="https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app/api">
+        </script>
       </body>
     </html>
   );
