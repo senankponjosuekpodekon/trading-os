@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import pytest
 from unittest.mock import patch
 
-from routers import scan as scan_module
+from routers import scan_warmup as scan_module
 
 
 class _StopLoop(Exception):
