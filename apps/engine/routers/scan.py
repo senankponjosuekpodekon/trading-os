@@ -1,5 +1,4 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
 from typing import List, Optional
 from collections import defaultdict
 import json
@@ -83,6 +82,7 @@ from routers.scan_ta import ema, rsi, atr, macd, bollinger
 from routers.scan_timeframes import _TF_HIERARCHY, _BIAS_TF
 from routers.scan_synthetic import _analyze_synthetic_candles
 from routers.scan_moonshot import _compute_moonshot_tp
+from routers.scan_models import ScanRequest
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
     TF_MAP,
@@ -109,11 +109,6 @@ WARMUP_TTL_SECONDS = 240
 
 router = APIRouter()
 
-
-class ScanRequest(BaseModel):
-    symbols: List[str]
-    timeframe: str = "1h"
-    strategies: List[dict] = []
 
 
 
