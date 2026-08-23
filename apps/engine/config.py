@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     binance_api_secret: str = Field(default="", validation_alias="BINANCE_API_SECRET")
     twelve_data_api_key: str = Field(default="", validation_alias="TWELVE_DATA_API_KEY")
     deriv_api_token: str = Field(default="", validation_alias="DERIV_API_TOKEN")
+    fmp_api_key: str = Field(default="", validation_alias="FMP_API_KEY")
 
     # ── On-chain / Social / Funding ────────────────────────────────
     coinalyze_api_key: str = Field(default="", validation_alias="COINALYZE_API_KEY")
@@ -83,6 +84,8 @@ def load_settings() -> Settings:
         print("[WARN] TWELVE_DATA_API_KEY absent — les données Forex seront mockées.", file=sys.stderr)
     if not settings.sentry_dsn:
         print("[WARN] SENTRY_DSN_ENGINE absent — aucune remontée d'erreurs moteur.", file=sys.stderr)
+    if not settings.fmp_api_key:
+        print("[WARN] FMP_API_KEY absent — les données fondamentales seront désactivées.", file=sys.stderr)
     if not settings.coinalyze_api_key:
         print("[WARN] COINALYZE_API_KEY absent — liquidations/OI/funding seront mockées.", file=sys.stderr)
     if not settings.etherscan_api_key:

@@ -10,6 +10,7 @@ import asyncio
 SEMAPHORE_LIMITS: dict[str, int] = {
     "binance":    10,   # fast, generous
     "twelvedata": 1,    # 1 req/s free tier
+    "fmp":        1,    # 1 req/s free tier
     "coingecko":  3,
     "newsapi":    1,
     "lunarcrush": 2,
