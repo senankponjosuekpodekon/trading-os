@@ -79,6 +79,7 @@ from routers.scan_symbols import (
 )
 from routers.scan_strategies import _load_active_strategies, DEFAULT_STRATEGY
 from routers.scan_hysteresis import _signal_state, apply_hysteresis_and_persistence
+from routers.scan_asset import get_asset_type
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
     TF_MAP,
@@ -104,23 +105,6 @@ atexit.register(lambda: _executor.shutdown(wait=False))
 WARMUP_TTL_SECONDS = 240
 
 router = APIRouter()
-
-def get_asset_type(symbol: str) -> str:
-    """Classify an internal symbol into CRYPTO | FOREX | SYNTHETIC | BRVM | COMMODITY | US_STOCK | UNKNOWN."""
-    if symbol in SYMBOL_TO_BINANCE or symbol.endswith("/USDT"):
-        return "CRYPTO"
-    if symbol in SYNTHETIC_SYMBOLS:
-        return "SYNTHETIC"
-    if symbol in US_STOCK_SYMBOLS:
-        return "US_STOCK"
-    if is_brvm_symbol(symbol):
-        return "BRVM"
-    if symbol in COMMODITY_SYMBOLS:
-        return "COMMODITY"
-    if symbol in FOREX_SYMBOLS or ("/" in symbol and len(symbol.split("/")) == 2):
-        return "FOREX"
-    return "UNKNOWN"
-
 
 
 class ScanRequest(BaseModel):
