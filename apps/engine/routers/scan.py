@@ -1771,13 +1771,12 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             }
 
     tf = TF_MAP.get(timeframe, "1h")
-    df = await fetch_binance_klines(symbol, tf)
-    if df is None:
-        df = await fetch_deriv_klines(symbol, tf)
-    if df is None:
-        df = await fetch_yfinance_klines(symbol, tf)
-    if df is None:
-        df = await fetch_twelvedata_klines(symbol, tf)
+    df = await fetch_klines_fallback(
+        symbol,
+        tf,
+        providers=["binance", "deriv", "yfinance", "twelvedata"],
+        timeout=10.0,
+    )
     if df is None or len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
 
@@ -2333,11 +2332,12 @@ async def prefetch_klines():
 
     async def _safe_fetch(sym: str):
         try:
-            df = await fetch_binance_klines(sym, tf)
-            if df is None:
-                df = await fetch_deriv_klines(sym, tf)
-            if df is None:
-                df = await fetch_yfinance_klines(sym, tf)
+            df = await fetch_klines_fallback(
+                sym,
+                tf,
+                providers=["binance", "deriv", "yfinance"],
+                timeout=6.0,
+            )
             return sym, df is not None
         except Exception:
             return sym, False
