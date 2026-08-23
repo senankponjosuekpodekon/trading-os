@@ -23,6 +23,7 @@ from routers import (
     indicators,
     analyze,
     scan,
+    scan_warmup,
     ws,
     risk,
     probability,
@@ -83,7 +84,7 @@ async def lifespan(app: FastAPI):
 
     price_task = asyncio.create_task(ws.price_broadcaster())
     binance_task = asyncio.create_task(ws.binance_price_listener())
-    warmup_task = asyncio.create_task(scan.warmup_features())
+    warmup_task = asyncio.create_task(scan_warmup.warmup_features())
     from utils.crons import run_all_crons
     cron_task = asyncio.create_task(run_all_crons())
     for t, name in [
