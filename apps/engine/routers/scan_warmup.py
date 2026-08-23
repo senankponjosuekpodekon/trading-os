@@ -14,6 +14,7 @@ from utils.asset_config import (
     get_scan_interval,
     get_timeframes as get_config_timeframes,
 )
+from routers.brvm import analyze_brvm_symbols
 from routers.scan_strategies import _load_active_strategies
 from routers.scan_analysis import fetch_and_analyze
 from routers.scan_fetchers import fetch_klines_fallback

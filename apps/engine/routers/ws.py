@@ -16,15 +16,16 @@ from utils.logger import get_logger
 router = APIRouter()
 logger = get_logger(__name__)
 
-BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/" + "/".join(
-    f"{s.lower()}@ticker" for s in SYMBOLS_BINANCE
-)
-SYMBOLS_BINANCE   = [
+SYMBOLS_BINANCE = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
     "AVAXUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT",
     "MATICUSDT", "ATOMUSDT", "LTCUSDT", "XRPUSDT",
     "DOGEUSDT", "TRXUSDT", "TONUSDT", "PAXGUSDT",
 ]
+
+BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/" + "/".join(
+    f"{s.lower()}@ticker" for s in SYMBOLS_BINANCE
+)
 
 # Mapping symbole interne → ticker yfinance pour prix snapshot Forex/Commodités
 YF_PRICE_SYMBOLS: dict = {

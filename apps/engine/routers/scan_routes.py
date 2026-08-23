@@ -1,90 +1,50 @@
 from fastapi import APIRouter
-from typing import List, Optional
+from typing import Optional
 from collections import defaultdict
 import json
 import asyncio
 import time
-import random
 import pandas as pd
 import atexit
 from concurrent.futures import ThreadPoolExecutor
 
-from routers.price_action import detect_market_structure, price_action_bonus
-from routers.synthetic_engine import analyze_synthetic, evaluate_synthetic_strategy, SYMBOL_TO_DERIV as SYNTHETIC_SYMBOLS
-from routers.boom_crash_model import analyze_boom_crash
-from routers.sr_zones import get_sr_zones, sr_bonus
-from routers.patterns import scan_last_patterns, patterns_bonus
-from patterns.detector import detect_all as detect_chart_patterns
-from patterns.confluence import score_pattern_confluence
-from routers.regime import detect_regime, regime_bonus, regime_filter
-from routers.smc import analyze_smc, smc_bonus
+from routers.regime import detect_regime
 from routers import ws as ws_module
 from routers.news import get_news_sentiment, NewsRequest
 from routers.news_scraper import scrape_all_sources, aggregate_sentiment
 from routers.brvm import is_brvm_symbol, analyze_brvm_symbols
 from routers.forex_context import get_dxy_momentum
-from routers.gold_specialist import is_gold_symbol, gold_specialist_bonus, gold_atr_adjustment, get_session_info as gold_session_info
+from routers.gold_specialist import is_gold_symbol
 from routers.news_filter import should_suspend_signal
 from routers.portfolio_risk import analyze_portfolio_risk, get_cluster
-from routers.strategy_eval import parse_rules, evaluate_strategy, derive_profile_suitability
-from routers.onchain import is_crypto_symbol, onchain_context, onchain_bonus
+from routers.onchain import is_crypto_symbol, onchain_context
 from routers.onchain_advanced import (
     get_advanced_onchain_context,
-    advanced_onchain_bonus,
 )
-from routers.tokenomics import fetch_tokenomics, tokenomics_penalty
-from routers.social_sentiment import fetch_social_metrics, social_bonus
+from routers.tokenomics import fetch_tokenomics
+from routers.social_sentiment import fetch_social_metrics
 from routers.macro import fear_greed
-from features.market_concept_layer import compute_market_concept_vector
-from features.market_embedding import build_market_embedding
-from ml.feature_factory import build_feature_vector
 import config
-from utils.cache import get_cached, set_cached, cache, mem_cached
+from utils.cache import get_cached, set_cached, cache
 from utils.logger import get_logger
-from utils.circuit_breaker import BREAKERS, State as BreakerState
 from utils.market_context import get_signal_context
 from utils.metrics import inc, observe
-from utils.session import get_session_info
 from risk.engine import get_risk_engine
-from risk.discipline_controller import TradeDecision
 from risk.market_cap import fetch_market_cap_tier, get_market_cap_tier_sync
-from risk.liquidity import compute_liquidity_score, estimate_liquidity_score_sync
-from risk.signal_quality_filter import apply_quality_gate, get_quality_size_multiplier
-from risk.risk_level import compute_risk_level, get_max_position_pct
+from risk.liquidity import compute_liquidity_score
 from risk.red_flags import check_red_flags
-from risk.dca_tranches import compute_dca_tranches, compute_scale_out
-from utils.correlation import set_correlation_id, clear_correlation_id
 from utils.asset_config import (
     load_asset_config,
     is_market_active,
-    is_warmup_enabled,
-    get_max_strategies,
-    get_scan_interval,
-    get_timeframes as get_config_timeframes,
 )
 from routers.scan_persistence import (
     _persist_scan,
-    _scan_batch_flusher,
-    _try_ingest_signal,
-    _get_scan_pool,
 )
-from routers.scan_symbols import (
-    BINANCE_PRIORITY_SYMBOLS,
-    DERIV_SYMBOLS,
-    BRVM_SYMBOLS,
-    FOREX_COMMODITY_SYMBOLS,
-    ACTIVE_SYMBOLS,
-)
-from routers.scan_strategies import _load_active_strategies, DEFAULT_STRATEGY
 from routers.scan_hysteresis import _signal_state, apply_hysteresis_and_persistence
 from routers.scan_asset import get_asset_type
-from routers.scan_ta import ema, rsi, atr, macd, bollinger
 from routers.scan_timeframes import _TF_HIERARCHY, _BIAS_TF
-from routers.scan_synthetic import _analyze_synthetic_candles
-from routers.scan_moonshot import _compute_moonshot_tp
 from routers.scan_models import ScanRequest
 from routers.symbol_mappings import (
-    SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
     TF_MAP,
 )
 from routers.scan_fetchers import (
@@ -92,9 +52,8 @@ from routers.scan_fetchers import (
     fetch_deriv_klines,
     fetch_yfinance_klines,
     fetch_binance_klines,
-    fetch_klines_fallback,
 )
-from routers.scan_market_hours import _is_brvm_open, _is_nyse_open
+from routers.scan_analysis import analyze_candles
 
 logger = get_logger(__name__)
 _executor = ThreadPoolExecutor(max_workers=4)  # Match CPU cores to avoid context-switch overhead
@@ -102,21 +61,10 @@ atexit.register(lambda: _executor.shutdown(wait=False))
 
 
 
-
-
 # TTL for scan cache (legacy constant used outside warmup loops)
 WARMUP_TTL_SECONDS = 240
 
 router = APIRouter()
-
-
-
-
-
-
-
-
-from routers.scan_analysis import analyze_candles, fetch_and_analyze
 
 @router.post("/multi")
 async def scan_multi(req: ScanRequest):

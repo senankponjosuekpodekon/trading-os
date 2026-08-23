@@ -1,4 +1,4 @@
-"""Structured logger for API scripts and non-NestJS code."""
+// Structured logger for API scripts and non-NestJS code.
 /* eslint-disable no-console */
 type LogArgs = unknown[];
 
