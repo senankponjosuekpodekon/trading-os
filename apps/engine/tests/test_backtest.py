@@ -67,7 +67,7 @@ async def test_run_backtest_includes_pattern_breakdown(monkeypatch):
     async def fake_fetch(*args, **kwargs):
         return df
 
-    monkeypatch.setattr("routers.backtest.fetch_binance_klines", fake_fetch)
+    monkeypatch.setattr("routers.backtest.fetch_klines_fallback", fake_fetch)
 
     req = BacktestRequest(
         symbol="TEST/USDT",
@@ -97,7 +97,7 @@ def test_backtest_pattern_stats_endpoint(monkeypatch):
     async def fake_fetch(*args, **kwargs):
         return df
 
-    monkeypatch.setattr("routers.backtest.fetch_binance_klines", fake_fetch)
+    monkeypatch.setattr("routers.backtest.fetch_klines_fallback", fake_fetch)
 
     client = TestClient(app)
     resp = client.post("/backtest/pattern-stats", json={
