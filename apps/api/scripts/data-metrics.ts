@@ -1,3 +1,4 @@
+import { logger } from '../src/common/logger';
 import { Prisma, PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -45,52 +46,52 @@ async function main() {
     select: { createdAt: true },
   });
 
-  console.log('── Signal Feature Metrics ───────────────────────────────');
-  console.log(`Total snapshots      : ${totalSnapshots}`);
-  console.log(`Snapshots w/ outcome : ${closedSnapshots} (${formatPct(closedSnapshots, totalSnapshots)})`);
+  logger.info('── Signal Feature Metrics ───────────────────────────────');
+  logger.info(`Total snapshots      : ${totalSnapshots}`);
+  logger.info(`Snapshots w/ outcome : ${closedSnapshots} (${formatPct(closedSnapshots, totalSnapshots)})`);
   if (lastSnapshot) {
-    console.log(`Last snapshot        : ${lastSnapshot.createdAt.toISOString()}`);
+    logger.info(`Last snapshot        : ${lastSnapshot.createdAt.toISOString()}`);
   }
-  console.log('');
+  logger.info('');
 
-  console.log('Outcome distribution');
+  logger.info('Outcome distribution');
   if (!outcomeCounts.length) {
-    console.log('  (no outcomes yet)');
+    logger.info('  (no outcomes yet)');
   } else {
     outcomeCounts.forEach(({ outcome, count }) => {
       const label = outcome ?? 'UNKNOWN';
       const value = toNumber(count);
-      console.log(`  ${label.padEnd(10)} : ${value} (${formatPct(value, closedSnapshots)})`);
+      logger.info(`  ${label.padEnd(10)} : ${value} (${formatPct(value, closedSnapshots)})`);
     });
   }
-  console.log('');
+  logger.info('');
 
-  console.log('Snapshots by market');
+  logger.info('Snapshots by market');
   if (!marketCounts.length) {
-    console.log('  (no snapshots yet)');
+    logger.info('  (no snapshots yet)');
   } else {
     marketCounts.forEach(({ market, count }) => {
       const value = toNumber(count);
-      console.log(`  ${(market ?? 'UNKNOWN').padEnd(10)} : ${value} (${formatPct(value, totalSnapshots)})`);
+      logger.info(`  ${(market ?? 'UNKNOWN').padEnd(10)} : ${value} (${formatPct(value, totalSnapshots)})`);
     });
   }
-  console.log('');
+  logger.info('');
 
-  console.log('Snapshots by timeframe');
+  logger.info('Snapshots by timeframe');
   if (!timeframeCounts.length) {
-    console.log('  (no snapshots yet)');
+    logger.info('  (no snapshots yet)');
   } else {
     timeframeCounts.forEach(({ timeframe, count }) => {
       const value = toNumber(count);
-      console.log(`  ${(timeframe ?? 'UNKNOWN').padEnd(8)} : ${value} (${formatPct(value, totalSnapshots)})`);
+      logger.info(`  ${(timeframe ?? 'UNKNOWN').padEnd(8)} : ${value} (${formatPct(value, totalSnapshots)})`);
     });
   }
-  console.log('──────────────────────────────────────────────────────────────');
+  logger.info('──────────────────────────────────────────────────────────────');
 }
 
 main()
   .catch((error) => {
-    console.error('data-metrics failed:', error);
+    logger.error('data-metrics failed:', error);
     process.exitCode = 1;
   })
   .finally(async () => {

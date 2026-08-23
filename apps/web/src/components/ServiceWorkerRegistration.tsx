@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 'use client';
 import { useEffect } from 'react';
 
@@ -9,8 +10,7 @@ export function ServiceWorkerRegistration() {
       navigator.serviceWorker
         .register('/sw.js')
         .then((registration) => {
-          // eslint-disable-next-line no-console
-          console.log('SW registered: ', registration.scope);
+                    logger.info('SW registered: ', registration.scope);
 
           // If an updated SW is waiting, claim it and reload once so the new bundle is used
           registration.addEventListener('updatefound', () => {
@@ -24,8 +24,7 @@ export function ServiceWorkerRegistration() {
           });
         })
         .catch((error) => {
-          // eslint-disable-next-line no-console
-          console.warn('SW registration failed: ', error);
+                    logger.warn('SW registration failed: ', error);
         });
     });
   }, []);

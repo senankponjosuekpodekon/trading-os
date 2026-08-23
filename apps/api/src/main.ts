@@ -8,6 +8,8 @@ import * as Sentry from '@sentry/node';
 import * as cookieParser from 'cookie-parser';
 import { PricesProxyService } from './prices-proxy/prices-proxy.service';
 
+const logger = new Logger('Bootstrap');
+
 async function bootstrap() {
   const sentryDsn = process.env.SENTRY_DSN_API;
   if (sentryDsn) {
@@ -64,7 +66,7 @@ async function bootstrap() {
 
   // ── Security env audit ─────────────────────────────────────────────
   if (!process.env.JWT_SECRET) {
-    console.error('[FATAL] JWT_SECRET is not set. Refusing to start.');
+    logger.error('[FATAL] JWT_SECRET is not set. Refusing to start.');
     process.exit(1);
   }
   auditEnv(new Logger('SecurityAudit'));
@@ -75,7 +77,7 @@ async function bootstrap() {
   // ── Proxy WS /ws/prices + /ws/signals vers l'engine (interne, non exposé) ──
   app.get(PricesProxyService).attach(app.getHttpServer());
 
-  console.log(`Trading OS API running on port ${port} [${process.env.NODE_ENV ?? 'development'}]`);
+  logger.log(`Trading OS API running on port ${port} [${process.env.NODE_ENV ?? 'development'}]`);
 }
 
 bootstrap();

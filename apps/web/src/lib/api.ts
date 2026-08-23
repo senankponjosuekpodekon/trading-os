@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -73,8 +74,7 @@ api.interceptors.response.use(
     }
 
     if (status && status >= 500) {
-      // eslint-disable-next-line no-console
-      console.error('[API] server error', status, err.message);
+            logger.error('[API] server error', status, err.message);
     }
 
     return Promise.reject(err);

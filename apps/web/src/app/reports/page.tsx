@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 'use client';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -140,7 +141,7 @@ function ReportDetail({ report }: { report: any }) {
         a.click();
         URL.revokeObjectURL(a.href);
       })
-      .catch(err => console.error('Download failed:', err));
+      .catch(err => logger.error('Download failed:', err));
   };
 
   return (

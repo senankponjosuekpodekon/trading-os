@@ -1,3 +1,4 @@
+import { logger } from '../src/common/logger';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
@@ -479,13 +480,13 @@ async function main() {
     }
   }
 
-  console.log('✅ Seed completed');
-  console.log(`   Markets: ${markets.length}`);
-  console.log(`   Assets:  ${assets.length}`);
-  console.log(`   Strategies: ${allStrategies.length} (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing, Synthetic Mean Reversion)`);
-  console.log(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
+  logger.info('✅ Seed completed');
+  logger.info(`   Markets: ${markets.length}`);
+  logger.info(`   Assets:  ${assets.length}`);
+  logger.info(`   Strategies: ${allStrategies.length} (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing, Synthetic Mean Reversion)`);
+  logger.info(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
 }
 
 main()
-  .catch(console.error)
+  .catch(logger.error)
   .finally(() => prisma.$disconnect());

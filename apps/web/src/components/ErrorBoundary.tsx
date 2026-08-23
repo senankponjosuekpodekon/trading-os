@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 'use client';
 
 import { Component, ErrorInfo, ReactNode } from 'react';
@@ -24,7 +25,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('React error boundary caught:', error, info.componentStack);
+    logger.error('React error boundary caught:', error, info.componentStack);
     if (Sentry.getCurrentHub().getClient()) {
       Sentry.captureException(error, {
         tags: { boundary: 'client' },

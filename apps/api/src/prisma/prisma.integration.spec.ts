@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { logger } from '../common/logger';
 import { PrismaModule } from './prisma.module';
 import { PrismaService } from './prisma.service';
 
@@ -27,7 +28,7 @@ describe('PrismaService integration', () => {
 
   it('connects to the database and can run a raw query', async () => {
     if (!connected) {
-      console.log('Skipping integration test: database not available');
+      logger.info('Skipping integration test: database not available');
       return;
     }
     const result = await prisma.$queryRawUnsafe<{ now: Date }[]>(`SELECT NOW() as now`);

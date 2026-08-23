@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { logger } from '../common/logger';
 
 /**
  * Prisma client for integration tests.
@@ -34,8 +35,7 @@ export async function resetTestDatabase() {
     } catch (e: any) {
       // Some tables may not exist in every migration state; ignore.
       if (!e?.message?.includes('does not exist')) {
-        // eslint-disable-next-line no-console
-        console.warn(`Failed to truncate ${table}: ${e.message}`);
+        logger.warn(`Failed to truncate ${table}: ${e.message}`);
       }
     }
   }
