@@ -13,6 +13,39 @@ _active_strategies_ts: float = 0
 _active_strategies_lock = asyncio.Lock()
 
 
+# ── Default strategy ──────────────────────────────────────────
+# Used when no strategy is provided (no UserStrategy active, fresh install,
+# manual scan without strategy). Ensures all signals go through
+# evaluate_strategy with proper filters (min_confidence, regime, DPS, etc.)
+# instead of the legacy hardcoded pipeline.
+DEFAULT_STRATEGY = {
+    "id": None,
+    "name": "Default",
+    "rules": {
+        "ema_fast": 20,
+        "ema_slow": 50,
+        "ema_trend": 200,
+        "rsi_period": 14,
+        "rsi_oversold": 30,
+        "rsi_overbought": 70,
+        "rsi_bullish_zone": 45,
+        "rsi_bearish_zone": 55,
+        "min_confidence": 40,
+        "min_dps": 0,
+        "volume_spike_min": 1.3,
+        "use_price_action": True,
+        "use_sr_zones": True,
+        "use_smc": True,
+        "use_patterns": True,
+        "atr_min_pct": 0.0,
+        "trigger": "BREAKOUT",
+        "markets": [],
+        "profiles": [],
+        "timeframes": ["1h", "4h"],
+    },
+}
+
+
 async def _load_active_strategies() -> list[dict]:
     """Charge les stratégies actives depuis la DB (cache 60s)."""
     global _active_strategies_cache, _active_strategies_ts
