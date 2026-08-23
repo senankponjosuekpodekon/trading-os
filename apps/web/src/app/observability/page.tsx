@@ -4,7 +4,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 import {
   Activity, AlertTriangle, CheckCircle2, Clock, Gauge,
-  ShieldAlert, RefreshCw, XCircle, Zap, TrendingDown,
+  ShieldAlert, RefreshCw, XCircle, Zap, TrendingDown, ExternalLink,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -171,6 +171,15 @@ export default function ObservabilityPage() {
               Métriques temps réel du moteur — auto-refresh 10s
             </p>
           </div>
+          <a
+            href={process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3003'}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg transition-colors border border-emerald-500/20"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Logs Grafana
+          </a>
           <button
             onClick={() => reset.mutate()}
             disabled={reset.isPending}
