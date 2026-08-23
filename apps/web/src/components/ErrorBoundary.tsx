@@ -1,6 +1,6 @@
-import { logger } from '@/lib/logger';
 'use client';
 
+import { logger } from '@/lib/logger';
 import { Component, ErrorInfo, ReactNode } from 'react';
 import * as Sentry from '@sentry/nextjs';
 
