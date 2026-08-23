@@ -78,6 +78,7 @@ from routers.scan_symbols import (
     ACTIVE_SYMBOLS,
 )
 from routers.scan_strategies import _load_active_strategies, DEFAULT_STRATEGY
+from routers.scan_hysteresis import _signal_state, apply_hysteresis_and_persistence
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, US_STOCK_SYMBOLS, FOREX_SYMBOLS, COMMODITY_SYMBOLS,
     TF_MAP,
@@ -101,17 +102,6 @@ atexit.register(lambda: _executor.shutdown(wait=False))
 
 # TTL for scan cache (legacy constant used outside warmup loops)
 WARMUP_TTL_SECONDS = 240
-
-# Hystérésis flip-flop : mémoire d'état par (symbol, timeframe)
-# Structure : { "BTC/USDT:1h": {"signal": "BUY", "count": 2, "ts": <monotonic>, "history": [...]} }
-# Un signal est «hystérésis-confirmé» seulement après 2 scans consécutifs dans la même direction.
-# Bande morte asymmétrique : repasser NEUTRAL exige score < 25, pas juste < 40.
-# persistence_score (Sprint 4) : enrichit l'hystérésis binaire par un score continu 0-100%
-# = fraction des N derniers scans allant dans la même direction que le signal actuel.
-_signal_state: dict[str, dict] = {}
-_HYSTERESIS_CONFIRM = 2   # scans consécutifs pour confirmer
-_HYSTERESIS_TTL     = 3600  # réinitialise l'état après 1h sans scan
-_PERSISTENCE_WINDOW = 5    # fenêtre glissante (nb de scans) pour le persistence_score
 
 router = APIRouter()
 
@@ -174,71 +164,6 @@ _TF_HIERARCHY: dict[str, tuple[str, str]] = {
 # Ces regimes sont utilisés comme couche de bias (bonus/malus léger) et non comme filtre bloquant.
 _BIAS_TF: tuple[str, str] = ("1d", "1w")
 
-
-def apply_hysteresis_and_persistence(
-    results: list,
-    timeframe: str,
-    signal_state: dict,
-    now_mono: float,
-) -> None:
-    """
-    Hystérésis flip-flop + persistence_score (Sprint 4), mutation in-place de `results`.
-    Règles :
-      - Un signal BUY/SELL doit être produit _HYSTERESIS_CONFIRM fois consécutivement pour être "confirmé".
-      - Un signal confirmé repasse NEUTRAL seulement si la confidence descend sous 25 (bande morte).
-      - L'état expire après _HYSTERESIS_TTL secondes sans scan.
-      - persistence_score (0-100%) : fraction des _PERSISTENCE_WINDOW derniers scans allant
-        dans la même direction que le signal courant — enrichit le compteur binaire d'hystérésis.
-    """
-    for r in results:
-        sig = r.get("signal", "NEUTRAL")
-        key = f"{r['symbol']}:{timeframe}:{r.get('strategy_id', 'default')}"
-        state = signal_state.get(key)
-
-        # Expiration TTL
-        if state and (now_mono - state["ts"]) > _HYSTERESIS_TTL:
-            state = None
-            signal_state.pop(key, None)
-
-        if sig in ("BUY", "SELL"):
-            if state and state["signal"] == sig:
-                state["count"] = min(state["count"] + 1, _HYSTERESIS_CONFIRM + 1)
-                state["ts"] = now_mono
-            else:
-                # Nouvelle direction — réinitialiser compteur et historique
-                state = {"signal": sig, "count": 1, "ts": now_mono, "history": []}
-                signal_state[key] = state
-
-            history = state.setdefault("history", [])
-            history.append(sig)
-            del history[:-_PERSISTENCE_WINDOW]
-            r["persistence_score"] = round(100 * history.count(sig) / _PERSISTENCE_WINDOW, 2)
-
-            # Pas encore confirmé : dégrader en NEUTRAL pour les notifications
-            # (le signal reste dans results avec signal_pending=True pour info)
-            if state["count"] < _HYSTERESIS_CONFIRM:
-                r["signal_pending"] = True
-        else:
-            if state:
-                history = state.setdefault("history", [])
-                history.append("NEUTRAL")
-                del history[:-_PERSISTENCE_WINDOW]
-
-            # Signal NEUTRAL : si l'état précédent était confirmé, appliquer bande morte
-            if state and state.get("count", 0) >= _HYSTERESIS_CONFIRM:
-                conf = r.get("confidence", 0)
-                if conf >= 25:
-                    # Score encore dans la bande morte → maintenir le signal précédent
-                    r["signal"] = state["signal"]
-                    r["signal_sticky"] = True
-                    history = state.get("history", [])
-                    r["persistence_score"] = round(100 * history.count(state["signal"]) / _PERSISTENCE_WINDOW, 2)
-                else:
-                    signal_state.pop(key, None)
-                    r["persistence_score"] = 0
-            else:
-                signal_state.pop(key, None)
-                r["persistence_score"] = 0
 
 
 def _analyze_synthetic_candles(symbol: str, timeframe: str, df: pd.DataFrame, strategy: Optional[dict] = None) -> dict:
