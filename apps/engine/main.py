@@ -57,6 +57,7 @@ from routers import (
     pre_listing,
     developer_activity,
     whale_tracker,
+    coinalyze,
     onchain_prelisting,
     scientific_backtest_router,
     phase_d,
@@ -214,6 +215,7 @@ app.include_router(x_sentiment.router, prefix="/social", tags=["X Sentiment"])
 app.include_router(pre_listing.router, prefix="/alpha", tags=["Pre-Listing Alpha"])
 app.include_router(developer_activity.router, prefix="/dev", tags=["Developer Activity"])
 app.include_router(whale_tracker.router, prefix="/whales", tags=["Whale Tracker"])
+app.include_router(coinalyze.router, prefix="/coinalyze", tags=["Coinalyze"])
 app.include_router(onchain_prelisting.router, prefix="/onchain", tags=["On-Chain Pre-Listing"])
 app.include_router(scientific_backtest_router.router, tags=["Scientific Backtest"])
 app.include_router(phase_d.router, tags=["Phase D — Market Memory + Agents"])
