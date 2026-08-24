@@ -1,5 +1,5 @@
 """
-Pre-Listing Alpha — Phase N
+Pre-Listing Alpha -- Phase N
 Detects and analyzes upcoming token listings (IDO, IEO, ICO, presales)
 before they hit major CEXes. Combines multiple sources to find asymmetric
 opportunities.
@@ -96,7 +96,7 @@ def _compute_asymmetric_score(
     # 1. Funding progress (0-20 pts)
     if funding_pct >= 100:
         score += 15
-        opportunities.append(f"Fully funded ({funding_pct:.0f}%) — strong demand")
+        opportunities.append(f"Fully funded ({funding_pct:.0f}%) -- strong demand")
     elif funding_pct >= 75:
         score += 10
         opportunities.append(f"Near fully funded ({funding_pct:.0f}%)")
@@ -104,10 +104,10 @@ def _compute_asymmetric_score(
         score += 5
     elif funding_pct > 0:
         score -= 5
-        risks.append(f"Low funding ({funding_pct:.0f}%) — weak demand signal")
+        risks.append(f"Low funding ({funding_pct:.0f}%) -- weak demand signal")
     else:
         score -= 10
-        risks.append("No funding yet — unproven demand")
+        risks.append("No funding yet -- unproven demand")
 
     # 2. Audit status (0-15 pts)
     if audit_status == "audited":
@@ -115,7 +115,7 @@ def _compute_asymmetric_score(
         opportunities.append("Smart contract audited")
     elif audit_status == "not_audited":
         score -= 15
-        risks.append("No audit — smart contract risk")
+        risks.append("No audit -- smart contract risk")
     else:
         score -= 5
         risks.append("Audit status unknown")
@@ -131,7 +131,7 @@ def _compute_asymmetric_score(
         score += 5
     elif social_buzz == 0:
         score -= 10
-        risks.append("Zero social presence — possible scam")
+        risks.append("Zero social presence -- possible scam")
 
     # 4. Online presence (0-10 pts)
     if has_website and has_twitter:
@@ -140,15 +140,15 @@ def _compute_asymmetric_score(
         score += 5
     else:
         score -= 15
-        risks.append("No website or Twitter — high scam probability")
+        risks.append("No website or Twitter -- high scam probability")
 
     # 5. Listing type bonus (0-10 pts)
     type_bonuses = {"IEO": 10, "IDO": 7, "ICO": 3, "PRESALE": -5, "FAIR_LAUNCH": 8}
     score += type_bonuses.get(listing_type, 0)
     if listing_type == "IEO":
-        opportunities.append("IEO — exchange-backed listing (higher trust)")
+        opportunities.append("IEO -- exchange-backed listing (higher trust)")
     elif listing_type == "PRESALE":
-        risks.append("Presale — highest risk, no exchange guarantee")
+        risks.append("Presale -- highest risk, no exchange guarantee")
 
     # 6. Platform reputation (0-10 pts)
     reputable_platforms = {"Binance Launchpad", "Coinlist", "Polkastarter", "DAO Maker", "Seedify"}
@@ -159,7 +159,7 @@ def _compute_asymmetric_score(
         score += 3
     else:
         score -= 5
-        risks.append("Unknown launchpad — verify credibility")
+        risks.append("Unknown launchpad -- verify credibility")
 
     # 7. GitHub developer activity (0-15 pts)
     if github_commits_30d >= 30:
@@ -205,12 +205,12 @@ def _compute_asymmetric_score(
             score += 5
         elif top_holder_pct > 70:
             score -= 10
-            risks.append("High concentration — whale dump risk")
+            risks.append("High concentration -- whale dump risk")
 
     # 11. Red flags detection
     if not has_website and not has_twitter:
         score -= 20
-        risks.append("CRITICAL: No online presence — likely scam")
+        risks.append("CRITICAL: No online presence -- likely scam")
 
     score = max(0, min(100, score))
     return score, risks, opportunities
@@ -226,7 +226,7 @@ async def _fetch_coingecko_upcoming() -> List[Dict[str, Any]]:
                 params={"include_platform": "true"},
             )
             r.raise_for_status()
-            # This gives us all coins — we'd filter for recent ones
+            # This gives us all coins -- we'd filter for recent ones
             # In production, use the /coins/markets endpoint with new=true
             return []
     except Exception as exc:
@@ -235,7 +235,7 @@ async def _fetch_coingecko_upcoming() -> List[Dict[str, Any]]:
 
 
 async def _fetch_coingecko_trending() -> List[Dict[str, Any]]:
-    """Fetch trending coins from CoinGecko — often includes pre-listing buzz."""
+    """Fetch trending coins from CoinGecko -- often includes pre-listing buzz."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{COINGECKO_BASE}/search/trending")
@@ -260,7 +260,7 @@ async def _fetch_coingecko_trending() -> List[Dict[str, Any]]:
 
 
 async def _fetch_dex_new_pairs() -> List[Dict[str, Any]]:
-    """Fetch newly created DEX pairs — potential pre-listing or just-listed tokens."""
+    """Fetch newly created DEX pairs -- potential pre-listing or just-listed tokens."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # DexScreener: search for "new" keyword
@@ -505,7 +505,7 @@ async def _fetch_coingecko_supply(symbol: str) -> dict | None:
 
 
 async def _fetch_token_unlocks(symbol: str) -> dict | None:
-    """TokenUnlocks — fetch vesting info. Falls back to free CoinGecko supply."""
+    """TokenUnlocks -- fetch vesting info. Falls back to free CoinGecko supply."""
     token = os.getenv("TOKENUNLOCKS_API_KEY")
     if token:
         try:
@@ -557,6 +557,37 @@ async def _fetch_reddit_mentions(query: str) -> dict | None:
             }
     except Exception as exc:
         logger.debug("reddit_mentions_failed", query=query, error=str(exc))
+        return None
+
+
+async def _fetch_lunarcrush_mentions(symbol: str) -> dict | None:
+    """LunarCrush v4 -- social volume as primary source. Falls back to 0 if no key."""
+    token = os.getenv("LUNARCRUSH_API_KEY")
+    if not token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"https://lunarcrush.com/api4/public/coins/{symbol.upper()}/time-series/v2",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"bucket": "day", "interval": "1w"},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            series = data.get("data")
+            if not isinstance(series, list) or not series:
+                return None
+            latest = series[-1]
+            return {
+                "mentions": int(latest.get("posts_active", 0) or 0),
+                "interactions_24h": int(latest.get("interactions", 0) or 0),
+                "sentiment": float(latest.get("sentiment", 0) or 0),
+                "galaxy_score": float(latest.get("galaxy_score", 0) or 0),
+                "source": "lunarcrush",
+            }
+    except Exception as exc:
+        logger.debug("lunarcrush_mentions_failed", symbol=symbol, error=str(exc))
         return None
 
 
@@ -647,7 +678,7 @@ async def _fetch_parse_icodrops(
 
 async def _fetch_icodrops() -> list[dict]:
     """
-    ICO Drops source — currently unavailable via free/automated channels.
+    ICO Drops source -- currently unavailable via free/automated channels.
 
     - The WordPress REST endpoint (/wp-json/wp/v2/posts) returns 404.
     - The public HTML pages are JavaScript-rendered, so plain httpx scraping
@@ -697,10 +728,18 @@ async def _enrich_project(p: Dict[str, Any]) -> None:
         p["healthy_unlocks"] = tu.get("healthy")
         p["next_unlock_pct"] = tu.get("next_unlock_pct")
 
-    # CryptoPanic mentions
-    cp = await _fetch_cryptopanic_mentions(symbol)
-    if cp:
-        p["cryptopanic_mentions"] = cp.get("mentions", 0)
+    # LunarCrush social volume (primary)
+    lc = await _fetch_lunarcrush_mentions(symbol)
+    if lc:
+        p["lunarcrush_mentions"] = lc.get("mentions", 0)
+        p["lunarcrush_interactions"] = lc.get("interactions_24h", 0)
+        p["lunarcrush_sentiment"] = lc.get("sentiment", 0)
+        p["lunarcrush_galaxy"] = lc.get("galaxy_score", 0)
+    else:
+        # CryptoPanic + Reddit fallback
+        cp = await _fetch_cryptopanic_mentions(symbol)
+        if cp:
+            p["cryptopanic_mentions"] = cp.get("mentions", 0)
 
 
 async def discover_pre_listing(
@@ -753,8 +792,8 @@ async def discover_pre_listing(
         listing_type = p.get("listing_type", "IDO")
         platform = p.get("platform", "")
 
-        # Social buzz = base + CryptoPanic mentions
-        social_buzz = p.get("cryptopanic_mentions", 0)
+        # Social buzz = base + LunarCrush (or CryptoPanic fallback)
+        social_buzz = p.get("lunarcrush_mentions") or p.get("cryptopanic_mentions", 0)
         if p.get("source") == "coingecko_trending":
             social_buzz += 200
         elif p.get("volume_24h", 0) > 500_000:
@@ -817,7 +856,7 @@ async def discover_endpoint(
     include_trending: bool = Query(True),
     refresh: bool = Query(False),
 ):
-    """GET /pre-listing/discover — Discover pre-listing opportunities."""
+    """GET /pre-listing/discover -- Discover pre-listing opportunities."""
     now = time.monotonic()
     if not refresh and _cache["data"] and (now - _cache["ts"]) < _CACHE_TTL:
         return _cache["data"]
@@ -838,7 +877,7 @@ async def discover_endpoint(
 @router.get("/pre-listing/analyze/{symbol}")
 async def analyze_project(symbol: str):
     """
-    GET /pre-listing/analyze/{symbol} — Deep analysis of a specific pre-listing project.
+    GET /pre-listing/analyze/{symbol} -- Deep analysis of a specific pre-listing project.
     Aggregates all available data for comprehensive risk/reward assessment.
     """
     # Search across sources for this symbol
@@ -859,15 +898,17 @@ async def analyze_project(symbol: str):
             "message": f"Project {symbol} not found in pre-listing sources",
         }
 
-    # Enrich with GitHub, TVL, unlocks, CryptoPanic
+    # Enrich with GitHub, TVL, unlocks, LunarCrush
     await _enrich_project(project)
 
     # Compute score
     funding_pct = project.get("funding_pct", 0)
+    social_buzz = project.get("lunarcrush_mentions") or project.get("cryptopanic_mentions", 0)
+    project["social_buzz"] = social_buzz
     score, risks, opportunities = _compute_asymmetric_score(
         funding_pct=funding_pct,
         audit_status=project.get("audit_status", "unknown"),
-        social_buzz=project.get("social_buzz", 0),
+        social_buzz=social_buzz,
         has_website=bool(project.get("website")),
         has_twitter=bool(project.get("twitter")),
         listing_type=project.get("listing_type", "IDO"),
