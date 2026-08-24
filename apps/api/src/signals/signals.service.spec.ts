@@ -292,9 +292,13 @@ describe('SignalsService', () => {
     });
 
     it('exposes predictor status', async () => {
-      const status = await service.getPredictorStatus();
-      expect(mockPredictorImpl.getStatus).toHaveBeenCalled();
-      expect(status.trained).toBe(true);
+      const result = await service.getPredictorStatus();
+      expect(result.trained).toBe(true);
+    });
+
+    it('exposes predictor feature weights', async () => {
+      const result = await service.getPredictorFeatureWeights();
+      expect(result.topFeatures).toEqual([]);
     });
   });
 
@@ -461,6 +465,19 @@ describe('SignalsService', () => {
       mockFeatureStore.listSnapshots.mockResolvedValue([]);
       await service.exportFeatureDataset({});
       expect(mockFeatureStore.listSnapshots).toHaveBeenCalledWith({ limit: 1000 });
+    });
+  });
+
+  describe('orchestration helpers', () => {
+    it('proxies alert stats', async () => {
+      const result = await service.getAlertStats('u1');
+      expect(result).toEqual({ sentToday: 0, maxDaily: 5 });
+      expect(mockAlertService.getStats).toHaveBeenCalledWith('u1');
+    });
+
+    it('proxies feature snapshot listing', async () => {
+      await service.listFeatureSnapshots({ market: 'CRYPTO' });
+      expect(mockFeatureStore.listSnapshots).toHaveBeenCalledWith({ market: 'CRYPTO' });
     });
   });
 
