@@ -1,16 +1,12 @@
+'use client';
 import { Suspense } from 'react';
-import { notFound } from 'next/navigation';
+import { notFound, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 
 const ChartView = dynamic(
   () => import('@/components/chart/ChartView').then(mod => mod.ChartView),
   { ssr: false, loading: () => <div className="h-[500px] flex items-center justify-center text-gray-600">Chargement…</div> },
 );
-
-interface PageProps {
-  params: { symbol: string };
-  searchParams: { tf?: string };
-}
 
 function Fallback() {
   return (
@@ -20,12 +16,15 @@ function Fallback() {
   );
 }
 
-export default function ChartSymbolPage({ params, searchParams }: PageProps) {
-  const symbol = decodeURIComponent(params.symbol);
-  if (!symbol.includes('/')) {
+export default function ChartSymbolPage() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const rawSymbol = params.symbol as string;
+  const symbol = rawSymbol ? decodeURIComponent(rawSymbol) : '';
+  if (!symbol || !symbol.includes('/')) {
     notFound();
   }
-  const tf = typeof searchParams.tf === 'string' ? searchParams.tf : '1h';
+  const tf = searchParams.get('tf') ?? '1h';
   return (
     <Suspense fallback={<Fallback />}>
       <ChartView mode="dynamic" initialSymbol={symbol} initialTf={tf} />

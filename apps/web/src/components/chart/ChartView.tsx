@@ -593,7 +593,7 @@ export function ChartView({ initialSymbol, initialTf, mode }: ChartViewProps) {
             </div>
           ) : (
             <CandlestickChart
-              data={liveKlines}
+              data={liveKlines ?? []}
               markers={allMarkers}
               height={chartHeight}
               showVolume={true}

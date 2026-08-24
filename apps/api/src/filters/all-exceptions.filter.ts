@@ -72,7 +72,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     this.logger.error(errorPayload);
 
-    if (Sentry.getCurrentHub().getClient()) {
+    if (Sentry.getClient()) {
       Sentry.captureException(exception instanceof Error ? exception : new Error(String(exception)), {
         tags: { module: 'api' },
         extra: errorPayload,

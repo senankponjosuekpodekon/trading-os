@@ -485,17 +485,17 @@ export class PositionsService {
     }
 
     // 4. SL/TP coherence relative to livePrice
-    if (isBuy && livePrice >= sl) {
+    if (isBuy && livePrice <= sl) {
       this.logger.warn(
-        `GATE REJECT [SL_ABOVE_ENTRY] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
+        `GATE REJECT [SL_HIT] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
       );
-      return { ok: false, reason: `Live price ${livePrice} is at or above stop loss ${sl} for BUY`, zone };
+      return { ok: false, reason: `Live price ${livePrice} is at or below stop loss ${sl} for BUY`, zone };
     }
-    if (!isBuy && livePrice <= sl) {
+    if (!isBuy && livePrice >= sl) {
       this.logger.warn(
-        `GATE REJECT [SL_BELOW_ENTRY] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
+        `GATE REJECT [SL_HIT] signal=${signal.id} livePrice=${livePrice} sl=${sl} type=${portfolioType}`,
       );
-      return { ok: false, reason: `Live price ${livePrice} is at or below stop loss ${sl} for SELL`, zone };
+      return { ok: false, reason: `Live price ${livePrice} is at or above stop loss ${sl} for SELL`, zone };
     }
 
     // 5. R:R check at livePrice (warn-only for now)

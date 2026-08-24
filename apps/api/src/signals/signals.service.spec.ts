@@ -37,6 +37,10 @@ describe('SignalsService', () => {
     signalLog: {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
+    scanHistory: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
   };
 
   const mockEngineHttp = {
@@ -127,6 +131,22 @@ describe('SignalsService', () => {
   });
 
   describe('triggerScan', () => {
+    it('should save high-confidence SELL signals', async () => {
+      mockEngineHttp.post.mockResolvedValue({
+        results: [
+          { symbol: 'BTC/USDT', signal: 'SELL', confidence: 80, timeframe: '1h', entry_price: 100, stop_loss: 110, take_profit_1: 90, take_profit_2: 80, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'sell', news_sentiment: { score: -0.3 }, feature_vector: { levels: { trend: 0.3 } } },
+        ],
+      });
+      mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1', market: { name: 'CRYPTO' } });
+      mockPrisma.signal.create.mockResolvedValue({ id: 'sig2' });
+
+      const result = await service.triggerScan(['BTC/USDT'], '1h');
+
+      expect(result.saved).toHaveLength(1);
+      expect(mockPrisma.signal.create).toHaveBeenCalled();
+    });
+
     it('should save high-confidence BUY signals and notify', async () => {
       mockRegimePredict.mockResolvedValueOnce({ regimes: ['NORMAL'] });
       const fetchSpy = jest
@@ -161,6 +181,31 @@ describe('SignalsService', () => {
         direction: 'BUY',
       }));
       fetchSpy.mockRestore();
+    });
+
+    it('handles missing expected move data', async () => {
+      const fetchSpy = jest
+        .spyOn<any, any>(service as any, 'fetchExpectedMove')
+        .mockResolvedValue(null);
+      mockEngineHttp.post.mockResolvedValue({
+        results: [
+          { symbol: 'BTC/USDT', signal: 'BUY', confidence: 80, timeframe: '1h', entry_price: 100, stop_loss: 90, take_profit_1: 120, take_profit_2: 130, risk_reward: 2, indicators: {}, price_action: {}, sr_zones: {}, patterns: {}, regime: {}, smc: {}, explanation: 'test' },
+        ],
+      });
+      mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1' });
+      mockPrisma.signal.create.mockResolvedValue({ id: 'sig1' });
+
+      const result = await service.triggerScan(['BTC/USDT'], '1h');
+
+      expect(result.saved).toHaveLength(1);
+      fetchSpy.mockRestore();
+    });
+
+    it('rethrows engine scan errors', async () => {
+      mockEngineHttp.post.mockRejectedValue(new Error('engine down'));
+
+      await expect(service.triggerScan(['BTC/USDT'], '1h')).rejects.toThrow('Engine scan failed: engine down');
     });
 
     it('should not notify signals below 70 confidence', async () => {
@@ -329,6 +374,123 @@ describe('SignalsService', () => {
       jest.spyOn(service, 'trainPredictor').mockRejectedValue(new Error('training failed'));
 
       await expect(service.scheduledPredictorTraining()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('findByAsset', () => {
+    it('returns active signals for an asset', async () => {
+      mockPrisma.signal.findMany.mockResolvedValue([{ id: 's1', asset: { symbol: 'BTC/USDT' } }]);
+
+      const result = await service.findByAsset('a1');
+
+      expect(result).toHaveLength(1);
+      expect(mockPrisma.signal.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { assetId: 'a1', isActive: true },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        }),
+      );
+    });
+  });
+
+  describe('findScanHistory', () => {
+    it('returns paginated scan history with all filters', async () => {
+      mockPrisma.scanHistory.findMany.mockResolvedValue([{ id: 'h1' }]);
+      mockPrisma.scanHistory.count.mockResolvedValue(1);
+
+      const result = await service.findScanHistory({
+        page: 1,
+        limit: 20,
+        strategyId: 's1',
+        strategyName: 'Stoch',
+        symbol: 'BTC/USDT',
+        signal: 'BUY',
+        timeframe: '1h',
+      });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.total).toBe(1);
+      expect(mockPrisma.scanHistory.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            strategyId: 's1',
+            strategyName: 'Stoch',
+            symbol: 'BTC/USDT',
+            signal: 'BUY',
+            timeframe: '1h',
+          },
+        }),
+      );
+    });
+
+    it('returns second page', async () => {
+      mockPrisma.scanHistory.findMany.mockResolvedValue([]);
+      mockPrisma.scanHistory.count.mockResolvedValue(30);
+
+      const result = await service.findScanHistory({ page: 2, limit: 10 });
+
+      expect(result.page).toBe(2);
+      expect(result.totalPages).toBe(3);
+    });
+  });
+
+  describe('exportFeatureDataset', () => {
+    it('maps snapshots to CSV-ready rows', async () => {
+      mockFeatureStore.listSnapshots.mockResolvedValue([
+        {
+          signalId: 's1',
+          signal: { id: 's1', signal: 'BUY', confidence: 80, timeframe: '1h', createdAt: new Date(), asset: { market: { name: 'CRYPTO' }, symbol: 'BTC/USDT' } },
+          outcome: 'WIN',
+          pnl: 12,
+          features: { rsi: 60 },
+          concept: 'breakout',
+          embedding: [1, 2],
+        },
+      ]);
+
+      const result = await service.exportFeatureDataset({ market: 'CRYPTO', limit: 500 });
+
+      expect(result[0].symbol).toBe('BTC/USDT');
+      expect(result[0].market).toBe('CRYPTO');
+      expect(result[0].direction).toBe('BUY');
+      expect(mockFeatureStore.listSnapshots).toHaveBeenCalledWith({ market: 'CRYPTO', limit: 500 });
+    });
+
+    it('defaults limit to 1000', async () => {
+      mockFeatureStore.listSnapshots.mockResolvedValue([]);
+      await service.exportFeatureDataset({});
+      expect(mockFeatureStore.listSnapshots).toHaveBeenCalledWith({ limit: 1000 });
+    });
+  });
+
+  describe('ingestSignal', () => {
+    it('returns null when input is empty', async () => {
+      expect(await service.ingestSignal(null as any)).toBeNull();
+      expect(await service.ingestSignal({ signal: 'BUY' } as any)).toBeNull();
+    });
+
+    it('returns null for NEUTRAL signal', async () => {
+      const result = await service.ingestSignal({ signal: 'NEUTRAL', confidence: 80 });
+      expect(result).toBeNull();
+    });
+
+    it('returns null when confidence < 70', async () => {
+      const result = await service.ingestSignal({ signal: 'BUY', confidence: 50 });
+      expect(result).toBeNull();
+    });
+
+    it('returns saved signal on success', async () => {
+      const saveSpy = jest.spyOn(service as any, 'saveSignals').mockResolvedValue([{ id: 's1' }]);
+      const result = await service.ingestSignal({ signal: 'BUY', confidence: 80, symbol: 'BTC/USDT' });
+      expect(result).toEqual({ id: 's1' });
+      expect(saveSpy).toHaveBeenCalledWith([{ signal: 'BUY', confidence: 80, symbol: 'BTC/USDT' }], '*');
+    });
+
+    it('returns null and warns when save fails', async () => {
+      jest.spyOn(service as any, 'saveSignals').mockRejectedValue(new Error('db'));
+      const result = await service.ingestSignal({ signal: 'BUY', confidence: 80, symbol: 'BTC/USDT' });
+      expect(result).toBeNull();
     });
   });
 });

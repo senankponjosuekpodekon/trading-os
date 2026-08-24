@@ -51,8 +51,8 @@ services:
 
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/api/Dockerfile
     container_name: trading-os-api
     ports:
       - "3002:3001"

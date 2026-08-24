@@ -3,14 +3,17 @@ FROM node:24-alpine AS builder
 
 WORKDIR /app
 
+# Copy root package.json + lockfile for reproducible workspace install
 COPY package*.json ./
+COPY . .
+
 RUN npm config set fetch-retries 5 \
     && npm config set fetch-retry-mintimeout 20000 \
     && npm config set fetch-retry-maxtimeout 120000 \
     && npm config set fetch-timeout 300000 \
-    && npm install
+    && npm ci
 
-COPY . .
+WORKDIR /app/apps/api
 
 RUN npx prisma generate && npm run build
 
@@ -22,17 +25,20 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package*.json ./
+COPY . .
+
 RUN npm config set fetch-retries 5 \
     && npm config set fetch-retry-mintimeout 20000 \
     && npm config set fetch-retry-maxtimeout 120000 \
     && npm config set fetch-timeout 300000 \
-    && npm install --omit=dev
+    && npm ci --omit=dev
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/prisma ./prisma
-COPY entrypoint.sh ./entrypoint.sh
+WORKDIR /app/apps/api
+
+COPY --from=builder /app/apps/api/dist ./dist
+COPY --from=builder /app/apps/api/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/apps/api/prisma ./prisma
+COPY --from=builder /app/apps/api/entrypoint.sh ./entrypoint.sh
 
 RUN chmod +x entrypoint.sh && apk add --no-cache wget
 

@@ -65,11 +65,13 @@ describe('AssetConfigService', () => {
   it('upsertMarket creates a new market config when none exists', async () => {
     prisma.assetConfig.findFirst = jest.fn().mockResolvedValue(null);
     await service.upsertMarket('CRYPTO', { isActive: false });
-    expect(prisma.assetConfig.create).toHaveBeenCalledWith(expect.objectContaining({
-      scope: 'market',
-      marketType: 'CRYPTO',
-      symbol: null,
-      isActive: false,
-    }));
+    expect(prisma.assetConfig.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        scope: 'market',
+        marketType: 'CRYPTO',
+        symbol: null,
+        isActive: false,
+      }),
+    });
   });
 });

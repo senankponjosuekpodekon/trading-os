@@ -26,7 +26,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     logger.error('React error boundary caught:', error, info.componentStack);
-    if (Sentry.getCurrentHub().getClient()) {
+    if (Sentry.getClient()) {
       Sentry.captureException(error, {
         tags: { boundary: 'client' },
         extra: { componentStack: info.componentStack },
