@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle, Clock } from 'lucide-react';
+import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle, Clock, BarChart3 } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 import Link from 'next/link';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -166,6 +166,12 @@ export default function SettingsPage() {
               className="flex items-center gap-2 px-4 py-2 border border-gray-700 hover:border-emerald-500/40 text-gray-300 hover:text-white rounded-lg text-sm transition-colors">
               <Shield className="w-4 h-4" />2FA
             </Link>
+            {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+              <Link href="/settings/markets"
+                className="flex items-center gap-2 px-4 py-2 border border-gray-700 hover:border-emerald-500/40 text-gray-300 hover:text-white rounded-lg text-sm transition-colors">
+                <BarChart3 className="w-4 h-4" />Marchés
+              </Link>
+            )}
             <button onClick={() => setShowForm(v => !v)}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-lg text-sm transition-colors">
               <Plus className="w-4 h-4" />{showForm ? 'Annuler' : 'Nouvelle stratégie'}

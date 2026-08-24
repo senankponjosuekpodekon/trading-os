@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import { Portfolio, Signal, PortfolioSummary, ExpectedMoveResponse } from '@/types';
 import Link from 'next/link';
 import { ExpectedMoveWidget } from './_components/ExpectedMoveWidget';
+import { MacroRotationWidget } from './_components/MacroRotationWidget';
 
 function StatCard({ label, value, sub, trend, icon }: { label: string; value: string | React.ReactNode; sub?: string; trend?: 'up' | 'down' | 'neutral'; icon?: React.ReactNode }) {
   return (
@@ -270,6 +271,8 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
+
+        <MacroRotationWidget />
 
         <ExpectedMoveWidget
           data={expectedMove}

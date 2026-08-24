@@ -24,6 +24,31 @@ async function main() {
     });
   }
 
+  const marketConfigs = [
+    { marketType: 'CRYPTO', isActive: true, warmupEnabled: true },
+    { marketType: 'FOREX', isActive: true, warmupEnabled: true },
+    { marketType: 'SYNTHETIC', isActive: true, warmupEnabled: true },
+    { marketType: 'BRVM', isActive: true, warmupEnabled: true },
+    { marketType: 'US_STOCK', isActive: true, warmupEnabled: true },
+    { marketType: 'COMMODITY', isActive: true, warmupEnabled: true },
+  ];
+
+  for (const cfg of marketConfigs) {
+    const existing = await prisma.assetConfig.findFirst({
+      where: { marketType: cfg.marketType, symbol: null, scope: 'market' },
+    });
+    if (existing) {
+      await prisma.assetConfig.update({
+        where: { id: existing.id },
+        data: { isActive: cfg.isActive, warmupEnabled: cfg.warmupEnabled },
+      });
+    } else {
+      await prisma.assetConfig.create({
+        data: { ...cfg, scope: 'market', symbol: null },
+      });
+    }
+  }
+
   const crypto = await prisma.market.findUnique({ where: { name: 'Crypto' } });
   const forex  = await prisma.market.findUnique({ where: { name: 'Forex' } });
   const synth  = await prisma.market.findUnique({ where: { name: 'Synthetic' } });

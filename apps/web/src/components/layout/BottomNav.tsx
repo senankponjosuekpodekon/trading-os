@@ -3,22 +3,26 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LayoutDashboard, TrendingUp, Briefcase, MessageSquare, ShieldAlert } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useAuthStore } from '@/store/auth.store';
 
 const nav = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
   { href: '/signals',   label: 'Signaux',  icon: TrendingUp },
   { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
   { href: '/copilot',   label: 'Copilot',   icon: MessageSquare },
-  { href: '/admin',     label: 'Admin',     icon: ShieldAlert },
+  { href: '/admin',     label: 'Admin',     icon: ShieldAlert, adminOnly: true },
 ];
 
 export function BottomNav() {
   const pathname = usePathname();
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const visibleNav = nav.filter(item => !item.adminOnly || isAdmin);
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-gray-900 border-t border-gray-800">
       <div className="flex items-center justify-around h-16">
-        {nav.map(({ href, label, icon: Icon }) => (
+        {visibleNav.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}

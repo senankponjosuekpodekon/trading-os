@@ -39,6 +39,7 @@ from risk.signal_quality_filter import apply_quality_gate, get_quality_size_mult
 from risk.risk_level import compute_risk_level, get_max_position_pct
 from risk.red_flags import check_red_flags
 from risk.dca_tranches import compute_dca_tranches, compute_scale_out
+from risk.macro_rotation import compute_macro_rotation
 from utils.correlation import set_correlation_id, clear_correlation_id
 from routers.scan_strategies import DEFAULT_STRATEGY
 from routers.scan_asset import get_asset_type
@@ -1591,6 +1592,41 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             fear_greed_value=_fg_value,
         ),
     )
+
+    # ── Phase 0++: Macro rotation adjustment for crypto ──
+    if result and isinstance(result, dict) and get_asset_type(symbol) == "CRYPTO":
+        try:
+            _macro = await asyncio.wait_for(
+                mem_cached("macro:rotation", lambda: compute_macro_rotation(), ttl=600),
+                timeout=5.0,
+            )
+            _phase = _macro.get("phase", "UNKNOWN")
+            _base = symbol.split("/")[0]
+            _macro_bonus = 0
+            if _phase == "BTC":
+                _macro_bonus = 10 if _base == "BTC" else (-5 if _base == "ETH" else -10)
+            elif _phase == "ETH":
+                _macro_bonus = 10 if _base == "ETH" else (-5 if _base == "BTC" else 0)
+            elif _phase == "ALTCOINS":
+                _macro_bonus = 10 if _base in ("SOL", "AVAX", "LINK", "DOT", "ADA", "NEAR", "ARB", "OP", "MATIC", "ATOM") else (-5 if _base in ("BTC", "ETH") else 5)
+            elif _phase == "MEMECOINS":
+                _macro_bonus = 5 if _mcap_tier in ("MICRO", "SMALL") else (-15 if _base in ("BTC", "ETH") else -5)
+            elif _phase == "RISK_OFF":
+                _macro_bonus = -15
+            if _macro_bonus != 0 and "confidence" in result:
+                result["confidence"] = max(0, min(100, result["confidence"] + _macro_bonus))
+                if "metadata" not in result:
+                    result["metadata"] = {}
+                result["metadata"]["macro_rotation"] = {
+                    "phase": _phase,
+                    "phase_label": _macro.get("phase_label"),
+                    "bonus": _macro_bonus,
+                    "implication": _macro.get("implication"),
+                    "warning": _macro.get("warning"),
+                    "confidence": _macro.get("confidence"),
+                }
+        except Exception as exc:
+            logger.debug("macro_rotation_failed", symbol=symbol, error=str(exc))
 
     # ── Phase M: Attach X sentiment to result metadata ──
     if result and isinstance(result, dict) and x_sentiment_context:

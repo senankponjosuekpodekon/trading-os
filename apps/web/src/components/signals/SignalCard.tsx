@@ -84,6 +84,8 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const ob = smc.ob ?? {};
   const liq = smc.liquidity ?? {};
   const news = (signal.metadata as any)?.news_sentiment;
+  const fundamentals = (signal.metadata as any)?.fundamentals;
+  const macro = (signal.metadata as any)?.macro_rotation;
   const marketContext = (signal.metadata as any)?.marketContext ?? {};
   const expectedMoveEngine = (signal.metadata as any)?.expected_move_engine as ExpectedMoveResponse | null;
   const expectedMoveSummary = (signal.metadata as any)?.expected_move_summary ?? null;
@@ -569,6 +571,67 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
                   <ExternalLink className="w-2.5 h-2.5 text-gray-600 group-hover:text-violet-400 mt-0.5 shrink-0" />
                   <span className="text-xs text-gray-500 group-hover:text-gray-300 line-clamp-1 transition-colors">{a.title}</span>
                 </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Macro rotation phase */}
+      {macro && (
+        <div className="mb-3 p-2 rounded-lg border border-amber-500/20 bg-amber-500/5">
+          <div className="flex items-center gap-2">
+            <Activity className="w-3 h-3 text-amber-400" />
+            <span className="text-xs text-amber-400 font-medium">Rotation</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+              macro.phase === 'BTC' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' :
+              macro.phase === 'ETH' ? 'text-blue-400 border-blue-400/30 bg-blue-400/10' :
+              macro.phase === 'ALTCOINS' ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' :
+              macro.phase === 'MEMECOINS' ? 'text-purple-400 border-purple-400/30 bg-purple-400/10' :
+              macro.phase === 'RISK_OFF' ? 'text-red-400 border-red-400/30 bg-red-400/10' :
+              'text-gray-400 border-gray-600 bg-gray-700'
+            }`}>
+              {macro.phase_label}
+            </span>
+            {macro.bonus != null && (
+              <span className={`text-[10px] font-mono ${macro.bonus > 0 ? 'text-emerald-400' : macro.bonus < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                {macro.bonus > 0 ? '+' : ''}{macro.bonus}
+              </span>
+            )}
+          </div>
+          {macro.warning && (
+            <p className="text-[10px] text-yellow-400 mt-1">{macro.warning}</p>
+          )}
+          {macro.implication && (
+            <p className="text-[10px] text-gray-400 mt-1">{macro.implication}</p>
+          )}
+        </div>
+      )}
+
+      {/* US Stock fundamentals (PE, EPS, earnings) */}
+      {fundamentals && (
+        <div className="mb-3 p-2 rounded-lg border border-blue-500/20 bg-blue-500/5">
+          <div className="flex items-center gap-2 mb-1.5">
+            <BarChart2 className="w-3 h-3 text-blue-400" />
+            <span className="text-xs text-blue-400 font-medium">Fondamentaux</span>
+            {fundamentals.pe != null && (
+              <span className="text-[10px] text-gray-400">P/E {fundamentals.pe.toFixed(2)}</span>
+            )}
+            {fundamentals.eps != null && (
+              <span className="text-[10px] text-gray-400">EPS {fundamentals.eps.toFixed(2)}</span>
+            )}
+            {fundamentals.dividend_yield != null && fundamentals.dividend_yield > 0 && (
+              <span className="text-[10px] text-gray-400">Div {fundamentals.dividend_yield.toFixed(2)}%</span>
+            )}
+          </div>
+          {fundamentals.earnings?.length > 0 && (
+            <div className="space-y-1">
+              {fundamentals.earnings.slice(0, 2).map((e: any, i: number) => (
+                <div key={i} className="text-[11px] text-gray-400 flex items-center justify-between">
+                  <span className="text-gray-300">{new Date(e.date).toLocaleDateString('fr-FR')}</span>
+                  <span className="font-mono text-emerald-400">EPS {e.eps ?? '—'}</span>
+                  <span className="font-mono text-gray-400">est. {e.eps_estimated ?? '—'}</span>
+                </div>
               ))}
             </div>
           )}

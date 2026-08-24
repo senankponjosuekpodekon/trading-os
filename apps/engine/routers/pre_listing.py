@@ -22,10 +22,13 @@ Analysis:
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -76,6 +79,11 @@ def _compute_asymmetric_score(
     has_twitter: bool,
     listing_type: str,
     platform: str,
+    github_commits_30d: int = 0,
+    tvl_millions: float = 0,
+    tvl_growing: bool = False,
+    healthy_unlocks: bool | None = None,
+    top_holder_pct: float | None = None,
 ) -> tuple[int, List[str], List[str]]:
     """
     Compute 0-100 asymmetric opportunity score for pre-listing projects.
@@ -153,7 +161,53 @@ def _compute_asymmetric_score(
         score -= 5
         risks.append("Unknown launchpad — verify credibility")
 
-    # 7. Red flags detection
+    # 7. GitHub developer activity (0-15 pts)
+    if github_commits_30d >= 30:
+        score += 15
+        opportunities.append(f"Active dev team ({github_commits_30d} commits/30j)")
+    elif github_commits_30d >= 10:
+        score += 8
+        opportunities.append(f"Steady development ({github_commits_30d} commits/30j)")
+    elif github_commits_30d > 0:
+        score += 3
+    elif has_website or has_twitter:
+        # only penalize if project claims to exist but no commits
+        score -= 5
+        risks.append("No recent GitHub activity")
+
+    # 8. TVL growth (0-15 pts)
+    if tvl_millions >= 10:
+        score += 15
+        opportunities.append(f"Strong TVL ${tvl_millions:.1f}M")
+    elif tvl_millions >= 1:
+        score += 10
+        opportunities.append(f"Growing TVL ${tvl_millions:.1f}M")
+    elif tvl_millions > 0:
+        score += 5
+    if tvl_millions > 0 and not tvl_growing:
+        score -= 3
+        risks.append("TVL not growing")
+
+    # 9. Token unlock / vesting health (0-10 pts)
+    if healthy_unlocks is True:
+        score += 10
+        opportunities.append("Healthy vesting schedule (> 12 mois team)")
+    elif healthy_unlocks is False:
+        score -= 10
+        risks.append("Team vesting < 12 mois or heavy upcoming unlock")
+
+    # 10. Holder concentration (0-10 pts)
+    if top_holder_pct is not None:
+        if top_holder_pct < 30:
+            score += 10
+            opportunities.append("Low top-holder concentration")
+        elif top_holder_pct < 50:
+            score += 5
+        elif top_holder_pct > 70:
+            score -= 10
+            risks.append("High concentration — whale dump risk")
+
+    # 11. Red flags detection
     if not has_website and not has_twitter:
         score -= 20
         risks.append("CRITICAL: No online presence — likely scam")
@@ -277,6 +331,333 @@ async def _fetch_cryptorank_idos() -> List[Dict[str, Any]]:
         return []
 
 
+def _extract_github_repo(website: str, name: str) -> str | None:
+    """Try to extract github.com/owner/repo from a project website."""
+    if not website:
+        return None
+    m = re.search(r"github\.com/([^\s\"<>/]+/[^\s\"<>/]+)", website)
+    if m:
+        return m.group(1).rstrip("/")
+    # try common docs link
+    if "github.com" in website:
+        parsed = urlparse(website)
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) >= 2:
+            return f"{parts[0]}/{parts[1]}"
+    return None
+
+
+async def _fetch_github_activity(repo: str) -> dict | None:
+    """Fetch GitHub activity for a repo."""
+    if not repo:
+        return None
+    headers = {}
+    token = os.getenv("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # repo info
+            r = await client.get(f"https://api.github.com/repos/{repo}", headers=headers)
+            if r.status_code != 200:
+                return None
+            info = r.json()
+            # commits last 30 days
+            since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            c = await client.get(
+                f"https://api.github.com/repos/{repo}/commits",
+                headers=headers,
+                params={"since": since, "per_page": 100},
+            )
+            commits = c.json() if c.status_code == 200 else []
+            return {
+                "stars": int(info.get("stargazers_count", 0)),
+                "commits_30d": min(len(commits), 100),
+                "updated_at": info.get("updated_at"),
+                "repo": repo,
+            }
+    except Exception as exc:
+        logger.debug("github_activity_failed", repo=repo, error=str(exc))
+        return None
+
+
+_DFLLAMA_PROTOCOLS: list[dict] | None = None
+_DFLLAMA_TS: float = 0.0
+_DFLLAMA_TTL = 1800  # 30 min
+
+
+async def _fetch_defillama_protocols() -> list[dict]:
+    """Fetch DeFiLlama protocols list (cached 30 min)."""
+    global _DFLLAMA_PROTOCOLS, _DFLLAMA_TS
+    now = time.monotonic()
+    if _DFLLAMA_PROTOCOLS and (now - _DFLLAMA_TS) < _DFLLAMA_TTL:
+        return _DFLLAMA_PROTOCOLS
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get("https://api.llama.fi/protocols")
+            r.raise_for_status()
+            _DFLLAMA_PROTOCOLS = r.json()
+            _DFLLAMA_TS = now
+            return _DFLLAMA_PROTOCOLS
+    except Exception as exc:
+        logger.warning("defillama_protocols_failed", error=str(exc))
+        return []
+
+
+async def _match_defillama_protocol(name: str, symbol: str) -> dict | None:
+    """Match a project by name or symbol in DeFiLlama protocols."""
+    protocols = await _fetch_defillama_protocols()
+    if not protocols:
+        return None
+    name_lower = name.lower()
+    symbol_lower = symbol.lower()
+    for p in protocols:
+        p_name = (p.get("name") or "").lower()
+        p_symbol = (p.get("symbol") or "").lower()
+        p_slug = (p.get("slug") or "").lower()
+        if (
+            p_name == name_lower
+            or p_slug == name_lower.replace(" ", "-")
+            or p_symbol == symbol_lower
+        ):
+            return p
+    return None
+
+
+async def _fetch_defillama_tvl(name: str, symbol: str) -> dict | None:
+    """Fetch TVL for a protocol via DeFiLlama."""
+    proto = await _match_defillama_protocol(name, symbol)
+    if not proto:
+        return None
+    try:
+        slug = proto.get("slug")
+        if not slug:
+            return None
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"https://api.llama.fi/protocol/{slug}")
+            r.raise_for_status()
+            data = r.json()
+            tvl = data.get("tvl")
+            current_tvl = float(tvl[-1].get("totalLiquidityUSD", 0)) if tvl and isinstance(tvl, list) else 0
+            # Compare current TVL to average of previous 7 days
+            points = [float(pt.get("totalLiquidityUSD", 0) or 0) for pt in tvl[-8:] if pt.get("totalLiquidityUSD")]
+            if len(points) >= 2:
+                current = points[-1]
+                avg_prev = sum(points[:-1]) / (len(points) - 1)
+            else:
+                current = current_tvl
+                avg_prev = current_tvl
+            return {
+                "tvl_usd": round(current, 2),
+                "tvl_millions": round(current / 1_000_000, 2),
+                "tvl_growing": current > avg_prev,
+                "chain": (proto.get("chain") or data.get("chain") or ""),
+                "github": proto.get("github") or data.get("github"),
+            }
+    except Exception as exc:
+        logger.debug("defillama_tvl_failed", name=name, error=str(exc))
+        return None
+
+
+async def _fetch_token_unlocks(symbol: str) -> dict | None:
+    """TokenUnlocks — fetch vesting info. Requires TOKENUNLOCKS_API_KEY."""
+    token = os.getenv("TOKENUNLOCKS_API_KEY")
+    if not token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.tokenunlocks.com/api/v1/unlock",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"symbol": symbol.upper()},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            # Simplified: look for next unlock within 30 days and team %
+            return {
+                "next_unlock_pct": float(data.get("next_unlock_pct", 0) or 0),
+                "team_vesting_months": float(data.get("team_vesting_months", 0) or 0),
+                "healthy": data.get("team_vesting_months", 0) >= 12,
+            }
+    except Exception as exc:
+        logger.debug("token_unlocks_failed", symbol=symbol, error=str(exc))
+        return None
+
+
+async def _fetch_reddit_mentions(query: str) -> dict | None:
+    """Free social mentions from Reddit search JSON."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            headers = {"User-Agent": "trading-os/1.0 (mention tracker)"}
+            r = await client.get(
+                "https://www.reddit.com/search.json",
+                headers=headers,
+                params={
+                    "q": query,
+                    "limit": 25,
+                    "sort": "new",
+                    "t": "week",
+                },
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            posts = data.get("data", {}).get("children", [])
+            titles = [p.get("data", {}).get("title") for p in posts if p.get("data")]
+            return {
+                "mentions": len(posts),
+                "latest_title": titles[0] if titles else None,
+                "source": "reddit",
+            }
+    except Exception as exc:
+        logger.debug("reddit_mentions_failed", query=query, error=str(exc))
+        return None
+
+
+async def _fetch_cryptopanic_mentions(query: str) -> dict | None:
+    """CryptoPanic mentions count, falls back to Reddit if no key."""
+    token = os.getenv("CRYPTOPANIC_API_KEY")
+    if token:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    "https://cryptopanic.com/api/v1/posts/",
+                    params={"auth_token": token, "currencies": query.upper(), "kind": "news"},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    return {
+                        "mentions": len(data.get("results", [])),
+                        "latest_title": (data.get("results") or [{}])[0].get("title"),
+                        "source": "cryptopanic",
+                    }
+        except Exception as exc:
+            logger.debug("cryptopanic_failed", query=query, error=str(exc))
+    # Free fallback
+    return await _fetch_reddit_mentions(query)
+
+
+PARSE_ICODROPS_ID = "76b07962-2f33-4a7c-95ed-74dfc5509dba"
+
+
+async def _fetch_parse_icodrops(
+    status: str = "upcoming",
+    page: int = 1,
+    limit: int = 10,
+) -> list[dict]:
+    """
+    Parse-managed ICO Drops API.
+    Requires PARSE_API_KEY. Free tier: 200 credits, 5 req/min.
+    Endpoints: get_upcoming_icos, get_active_icos, get_ended_icos
+    """
+    token = os.getenv("PARSE_API_KEY")
+    if not token:
+        return []
+    if status not in {"upcoming", "active", "ended"}:
+        status = "upcoming"
+    endpoint = f"get_{status}_icos"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(
+                f"https://api.parse.bot/scraper/{PARSE_ICODROPS_ID}/{endpoint}",
+                headers={"X-API-Key": token, "User-Agent": "trading-os/1.0"},
+                params={"page": page, "limit": limit},
+            )
+            if r.status_code != 200:
+                logger.warning("parse_icodrops_failed", status=status, code=r.status_code)
+                return []
+            data = r.json()
+            items = data.get("projects") if isinstance(data, dict) else data
+            if not isinstance(items, list):
+                return []
+
+            projects = []
+            for item in items:
+                ecosystems = item.get("ecosystems") or []
+                categories = item.get("categories") or []
+                projects.append({
+                    "name": item.get("name", ""),
+                    "symbol": (item.get("ticker") or "").upper(),
+                    "listing_type": (item.get("round") or "ICO").upper().replace(" ", "_"),
+                    "platform": "ICO Drops (Parse)",
+                    "status": status,
+                    "start_date": item.get("date", ""),
+                    "fundraising_goal": float(item.get("pre_valuation") or 0),
+                    "funds_raised": float(item.get("raised") or 0),
+                    "website": item.get("url", ""),
+                    "twitter": "",
+                    "chain": ecosystems[0] if isinstance(ecosystems, list) and ecosystems else "",
+                    "ecosystems": ecosystems,
+                    "categories": categories,
+                    "investors": item.get("investors") or [],
+                    "slug": item.get("slug", ""),
+                    "source": "parse_icodrops",
+                })
+            return projects
+    except Exception as exc:
+        logger.warning("parse_icodrops_error", status=status, error=str(exc))
+        return []
+
+
+async def _fetch_icodrops() -> list[dict]:
+    """
+    ICO Drops source — currently unavailable via free/automated channels.
+
+    - The WordPress REST endpoint (/wp-json/wp/v2/posts) returns 404.
+    - The public HTML pages are JavaScript-rendered, so plain httpx scraping
+      does not expose the ICO list reliably.
+    - A paid API or headless-browser scraper would be needed to make this
+      source production-grade.
+
+    Returns an empty list while logging the limitation.
+    """
+    logger.debug("icodrops_unavailable", reason="wp-json 404, js-rendered html")
+    return []
+
+
+async def _enrich_project(p: Dict[str, Any]) -> None:
+    """Enrich a single project with GitHub, TVL, unlocks, social."""
+    name = p.get("name", "")
+    symbol = p.get("symbol", "")
+    if not name or not symbol:
+        return
+
+    # DeFiLlama TVL + chain + github
+    df = await _fetch_defillama_tvl(name, symbol)
+    if df:
+        p["tvl_usd"] = df.get("tvl_usd", 0)
+        p["tvl_millions"] = df.get("tvl_millions", 0)
+        p["tvl_growing"] = df.get("tvl_growing", False)
+        if df.get("github"):
+            p["github"] = df.get("github")
+        if df.get("chain"):
+            p["chain"] = df.get("chain")
+
+    # GitHub activity
+    repo = _extract_github_repo(p.get("github") or p.get("website") or "", name)
+    if not repo and (p.get("github") or "").startswith("github.com/"):
+        # direct github link
+        repo = p.get("github", "").replace("https://", "").replace("http://", "").lstrip("/")
+        repo = re.sub(r"^github\.com/", "", repo).split("?")[0]
+    if repo and "/" in repo and not repo.startswith("http"):
+        gh = await _fetch_github_activity(repo)
+        if gh:
+            p["github_commits_30d"] = gh.get("commits_30d", 0)
+            p["github_stars"] = gh.get("stars", 0)
+
+    # TokenUnlocks vesting
+    tu = await _fetch_token_unlocks(symbol)
+    if tu:
+        p["healthy_unlocks"] = tu.get("healthy")
+        p["next_unlock_pct"] = tu.get("next_unlock_pct")
+
+    # CryptoPanic mentions
+    cp = await _fetch_cryptopanic_mentions(symbol)
+    if cp:
+        p["cryptopanic_mentions"] = cp.get("mentions", 0)
+
+
 async def discover_pre_listing(
     *,
     min_score: int = 40,
@@ -292,6 +673,8 @@ async def discover_pre_listing(
     if include_trending:
         tasks.append(_fetch_coingecko_trending())
     tasks.append(_fetch_cryptorank_idos())
+    tasks.append(_fetch_parse_icodrops(status="upcoming", limit=10))
+    tasks.append(_fetch_icodrops())
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -309,6 +692,10 @@ async def discover_pre_listing(
             seen.add(key)
             unique.append(p)
 
+    # Enrich with GitHub, TVL, unlocks, CryptoPanic
+    if unique:
+        await asyncio.gather(*(_enrich_project(p) for p in unique), return_exceptions=True)
+
     # Score each project
     scored: List[Dict[str, Any]] = []
     for p in unique:
@@ -321,12 +708,12 @@ async def discover_pre_listing(
         listing_type = p.get("listing_type", "IDO")
         platform = p.get("platform", "")
 
-        # Estimate social buzz (would be enriched from X/Reddit in production)
-        social_buzz = 0
+        # Social buzz = base + CryptoPanic mentions
+        social_buzz = p.get("cryptopanic_mentions", 0)
         if p.get("source") == "coingecko_trending":
-            social_buzz = 200  # Trending on CoinGecko = decent buzz
+            social_buzz += 200
         elif p.get("volume_24h", 0) > 500_000:
-            social_buzz = 100
+            social_buzz += 100
 
         audit = "unknown"
         if p.get("source") == "cryptorank" and p.get("audit_status"):
@@ -340,6 +727,11 @@ async def discover_pre_listing(
             has_twitter=has_twitter,
             listing_type=listing_type,
             platform=platform,
+            github_commits_30d=p.get("github_commits_30d", 0),
+            tvl_millions=p.get("tvl_millions", 0),
+            tvl_growing=p.get("tvl_growing", False),
+            healthy_unlocks=p.get("healthy_unlocks"),
+            top_holder_pct=p.get("top_holder_pct"),
         )
 
         p["funding_pct"] = round(funding_pct, 1)
@@ -422,6 +814,9 @@ async def analyze_project(symbol: str):
             "message": f"Project {symbol} not found in pre-listing sources",
         }
 
+    # Enrich with GitHub, TVL, unlocks, CryptoPanic
+    await _enrich_project(project)
+
     # Compute score
     funding_pct = project.get("funding_pct", 0)
     score, risks, opportunities = _compute_asymmetric_score(
@@ -432,6 +827,11 @@ async def analyze_project(symbol: str):
         has_twitter=bool(project.get("twitter")),
         listing_type=project.get("listing_type", "IDO"),
         platform=project.get("platform", ""),
+        github_commits_30d=project.get("github_commits_30d", 0),
+        tvl_millions=project.get("tvl_millions", 0),
+        tvl_growing=project.get("tvl_growing", False),
+        healthy_unlocks=project.get("healthy_unlocks"),
+        top_holder_pct=project.get("top_holder_pct"),
     )
 
     # Verdict

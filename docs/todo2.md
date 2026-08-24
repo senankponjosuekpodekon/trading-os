@@ -195,14 +195,14 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 
 ### Sprint 9 — Marchés & UX (en cours)
 
-- [ ] Analyse fondamentale actions US : PE, EPS, earnings calendar via FMP / Alpha Vantage.
-- [ ] Market enable/disable : table `market_config`, endpoint, toggle UI, warmup respecte la config.
-- [ ] Bouton Exécuter sur `SignalCard` : intégration exchange pour passer ordres.
-- [ ] Bourses africaines : `base_africa_scraper.py` + route pour JSE / NGX / NSE / GSE.
-- [ ] RSS africains : sources news locales dans `news_scraper.py`.
-- [ ] Vérifier `warmup_stocks` en CI et en prod.
-- [ ] Auth engine : `Depends(verify_api_key)` si routes exposées.
-- [ ] Frontend role-based : rendu conditionnel admin / ops.
+- [x] Analyse fondamentale actions US : PE, EPS, earnings calendar via FMP / Alpha Vantage.
+- [x] Market enable/disable : table `market_config`, endpoint, toggle UI, warmup respecte la config.
+- [x] Bouton Exécuter sur `SignalCard` : intégration exchange pour passer ordres.
+- [x] Bourses africaines : `base_africa_scraper.py` + route pour JSE / NGX / NSE / GSE.
+- [x] RSS africains : sources news locales dans `news_scraper.py`.
+- [x] Vérifier `warmup_stocks` en CI et en prod.
+- [x] Auth engine : `Depends(verify_api_key)` si routes exposées.
+- [x] Frontend role-based : rendu conditionnel admin / ops.
 
 ### Amélioration continue (non bloquant)
 

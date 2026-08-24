@@ -96,7 +96,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 #### ⚡ Priorité haute — Fondations qualité data
 
-- [ ] 🤖 ⚡ **`risk_level` sur signaux** (EXTREME/HIGH/MODERATE/LOW)
+- [x] 🤖 ⚡ **`risk_level` sur signaux** (EXTREME/HIGH/MODERATE/LOW)
   - Calculé à partir de : asset type + liquidité + volatilité + market cap tier
   - EXTREME = micro-cap crypto + faible liquidité + volatilité extrême
   - HIGH = small-cap crypto ou forex émergent
@@ -105,14 +105,14 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Stocké dans `metadata.risk_level` + affiché en frontend (badge coloré sur SignalCard)
   - Filtre optionnel : `?risk_level=MODERATE` sur `/signals`
 
-- [ ] 🤖 ⚡ **`market_cap_tier` dans `get_cluster()`** (MICRO/SMALL/MID/LARGE)
+- [x] 🤖 ⚡ **`market_cap_tier` dans `get_cluster()`** (MICRO/SMALL/MID/LARGE)
   - Étendre `portfolio_risk.py::ASSET_CLUSTERS` avec market cap tier pour les actifs crypto
   - MICRO < $50M | SMALL $50M-$500M | MID $500M-$10B | LARGE > $10B
   - Source : CoinGecko API (déjà utilisé) ou cache manuel mis à jour mensuellement
   - Impact : `risk_level` dérive directement de ce tier + volatilité
   - Permet d'adapter le sizing : MICRO = max 1% capital, LARGE = max 5%
 
-- [ ] 🤖 ⚡ **`liquidity_score` au moteur** (0-100)
+- [x] 🤖 ⚡ **`liquidity_score` au moteur** (0-100)
   - Composantes : depth du carnet d'ordres, volume profile 24h, bid-ask spread
   - Source : Binance API (depth20) pour crypto, Twelve Data pour forex
   - Score < 30 = liquidité critique → SL élargi + warning "Exit difficile"
@@ -122,34 +122,34 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 #### Priorité moyenne — Stratégie & gestion de risque
 
-- [ ] 🤖 **Take-profit moonshot** (sell 50% à 2x) en plus du R:R standard
+- [x] 🤖 **Take-profit moonshot** (sell 50% à 2x) en plus du R:R standard
   - Règle Ezenwaogene : "sell 50% quand le prix double → récupération de l'investissement initial"
   - Ajouter `tp_moonshot` dans `risk.py::calc_targets()` quand `market_cap_tier == MICRO`
   - `tp_moonshot = entry * 2.0` + `tp_moonshot_pct = 50%` (taille de sortie)
   - Les TP1/TP2 standards restent pour les 50% restants
   - Frontend : afficher le TP moonshot avec mention "Récupération capital"
 
-- [ ] 🤖 **Fear & Greed Index — seuil d'accumulation**
+- [x] 🤖 **Fear & Greed Index — seuil d'accumulation**
   - Déjà implémenté dans `macro.py` pour le scoring crypto (±20/15 pts)
   - Étendre : seuil < 20 = signal d'accumulation (tranche deployment)
   - Déclencher une notification "Opportunité d'accumulation BTC/ETH" aux profils INVESTOR
   - Connecter au tranche/DCA logic (item suivant)
 
-- [ ] 🤖 **Tranche/DCA logic** — déploiement progressif en 4 tranches
+- [x] 🤖 **Tranche/DCA logic** — déploiement progressif en 4 tranches
   - Stratégie Ezenwaogene : diviser 80% en 4 buckets, déployer un à chaque leg down
   - Crashes -30% à -50% depuis les highs → déclencher une tranche
   - Implémenter dans `portfolio_risk.py` : `tranche_plan(capital, asset, current_drawdown)`
   - Notification : "Tranche 2/4 déployée — BTC à -35% du high"
   - Dashboard : suivi des tranches déployées vs en attente
 
-- [ ] 🤖 **Red flags checklist en metadata** pour micro-caps
+- [x] 🤖 **Red flags checklist en metadata** pour micro-caps
   - 10 red flags de l'article : anon team, unlocked liquidity, whale concentration, no audit, fake social, aggressive influencer, no product, copy-paste website, suspicious APY, token taxes
   - Source : on-chain data (holder distribution via Etherscan/BSCScan) + manual flags
   - Stocké dans `metadata.red_flags[]` + `metadata.red_flag_count`
   - Si `red_flag_count >= 5` → signal désactivé + warning "Projet à risque extrême"
   - Frontend : icône ⚠️ avec tooltip listant les red flags
 
-- [ ] 🤖 **Allocation 80/20 par profil** dans `portfolio_risk.py`
+- [x] 🤖 **Allocation 80/20 par profil** dans `portfolio_risk.py`
   - 80% Accumulation Portfolio : BTC/ETH uniquement, tranche DCA lors de crashes
   - 20% Moonshot Portfolio : max 1-2% par token, assume total loss
   - Implémenter `compute_allocation_profile(capital, profile)` → `{accumulation, moonshot, per_token_max}`
@@ -158,7 +158,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 #### Priorité basse — Affinement
 
-- [ ] 🤖 **Macro rotation signal** (BTC → ETH → altcoins → small-cap → memecoins)
+- [x] 🤖 **Macro rotation signal** (BTC → ETH → altcoins → small-cap → memecoins)
   - Détecter la phase de bull run pour adapter le scoring
   - Phase 1 (BTC leads) → prioriser signaux BTC
   - Phase 4 (memecoins catch fire) → alerte "Rotation vers small-cap/memecoins"
@@ -486,7 +486,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Entraînement : `POST /ml/train` → charge journal → fit modèle → sauvegarde
   - Shadow mode d'abord → comparer ML vs manuel sans risque
 
-- [ ] 🤖 **`engine/ml/regime_classifier.py`** — Hidden Markov Model
+- [x] 🤖 **`engine/ml/regime_classifier.py`** — Hidden Markov Model
   - Détecter régimes : Bull / Bear / Sideways / Transition
   - Par actif + par timeframe
   - Améliore le `regime.py` actuel (actuellement règles statiques)
@@ -540,7 +540,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 > Inspiré de l'analyse on-chain pre-ICO/presale — détecter AVANT le marché
 
-- [ ] 🤖 **`engine/routers/presale_scanner.py`** — Détection early stage
+- [x] 🤖 **`engine/routers/presale_scanner.py`** — Détection early stage (implémenté dans `pre_listing.py`)
   - Sources : CoinGecko upcoming listings, ICO Drops API, CryptoPanic nouveaux tokens
   - Critères d'éligibilité automatique :
     - Developer activity GitHub > seuil (commits actifs)
