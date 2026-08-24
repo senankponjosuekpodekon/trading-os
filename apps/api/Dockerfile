@@ -11,7 +11,7 @@ RUN npm config set fetch-retries 5 \
     && npm config set fetch-retry-mintimeout 20000 \
     && npm config set fetch-retry-maxtimeout 120000 \
     && npm config set fetch-timeout 300000 \
-    && npm ci
+    && npm install --force
 
 WORKDIR /app/apps/api
 
@@ -31,12 +31,12 @@ RUN npm config set fetch-retries 5 \
     && npm config set fetch-retry-mintimeout 20000 \
     && npm config set fetch-retry-maxtimeout 120000 \
     && npm config set fetch-timeout 300000 \
-    && npm ci --omit=dev
+    && npm install --force --omit=dev
 
 WORKDIR /app/apps/api
 
 COPY --from=builder /app/apps/api/dist ./dist
-COPY --from=builder /app/apps/api/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/.prisma /app/node_modules/.prisma
 COPY --from=builder /app/apps/api/prisma ./prisma
 COPY --from=builder /app/apps/api/entrypoint.sh ./entrypoint.sh
 

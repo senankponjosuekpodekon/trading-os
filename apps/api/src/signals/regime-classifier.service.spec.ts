@@ -50,6 +50,12 @@ describe('RegimeClassifierService', () => {
 
       await expect(service.train([1, 2, 3])).rejects.toThrow('boom');
     });
+
+    it('should log non-Error POST rejections', async () => {
+      (mockHttp.post as any).mockReturnValue(throwError(() => 'string boom'));
+
+      await expect(service.train([1, 2, 3])).rejects.toBe('string boom');
+    });
   });
 
   describe('predict', () => {

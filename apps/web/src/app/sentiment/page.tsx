@@ -2,7 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
-import { Youtube, MessageCircle, Twitter, RefreshCw, TrendingUp, TrendingDown, Minus, ThumbsUp, Eye } from 'lucide-react';
+import { Youtube, MessageCircle, Twitter, RefreshCw, TrendingUp, TrendingDown, Minus, ThumbsUp, Eye, Newspaper, Gauge } from 'lucide-react';
 import { useState } from 'react';
 
 type Tab = 'youtube' | 'reddit' | 'x';
@@ -25,6 +25,24 @@ export default function SentimentPage() {
       return res.data;
     },
     staleTime: 1000 * 60 * 10,
+  });
+
+  const { data: fearGreed } = useQuery({
+    queryKey: ['fear-greed'],
+    queryFn: async () => (await api.get('/scraper/fear-greed')).data,
+    staleTime: 1000 * 60 * 30,
+  });
+
+  const { data: socialAggregate } = useQuery({
+    queryKey: ['social-aggregate', category],
+    queryFn: async () => (await api.post('/social/sentiment/aggregate', { category })).data,
+    staleTime: 1000 * 60 * 10,
+  });
+
+  const { data: news } = useQuery({
+    queryKey: ['news-articles', category],
+    queryFn: async () => (await api.get('/news/articles', { params: { category } })).data,
+    staleTime: 1000 * 60 * 15,
   });
 
   const handleRefresh = async () => {
@@ -85,6 +103,38 @@ export default function SentimentPage() {
         </div>
 
         {/* Category selector */}
+        {/* Aggregate + Fear-Greed */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {fearGreed && (
+            <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex items-center gap-4">
+              <Gauge className={`w-8 h-8 ${
+                (fearGreed.value || 50) >= 75 ? 'text-red-400' :
+                (fearGreed.value || 50) >= 55 ? 'text-yellow-400' :
+                (fearGreed.value || 50) >= 45 ? 'text-gray-400' :
+                'text-emerald-400'
+              }`} />
+              <div>
+                <p className="text-xs text-gray-500">Fear & Greed</p>
+                <p className="text-xl font-bold text-white">{fearGreed.value ?? '—'}</p>
+                <p className="text-xs text-gray-400">{fearGreed.classification || 'neutral'}</p>
+              </div>
+            </div>
+          )}
+          {socialAggregate && (
+            <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl">
+              <p className="text-xs text-gray-500 mb-1">Social aggregate ({category})</p>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const sc = sentimentLabel(socialAggregate.overall_label || 'neutral');
+                  return <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-md text-sm font-medium border ${sc.color}`}>{sc.icon} {socialAggregate.overall_label || 'neutral'}</span>;
+                })()}
+                <span className="text-sm text-gray-300">{(socialAggregate.overall_score || 0).toFixed(3)}</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">{socialAggregate.count || 0} sources analyzed</p>
+            </div>
+          )}
+        </div>
+
         <div className="flex gap-2">
           {['crypto', 'forex', 'gold', 'us_stocks'].map((c) => (
             <button
@@ -191,6 +241,33 @@ export default function SentimentPage() {
               )}
             </div>
           </>
+        )}
+
+        {/* News feed */}
+        {news && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+              <Newspaper className="w-4 h-4" /> News Feed
+            </h3>
+            <div className="space-y-3">
+              {(news.articles || news || []).slice(0, 10).map((item: any, i: number) => (
+                <div key={i} className="flex items-start justify-between gap-4 p-3 bg-gray-800/30 rounded-lg">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white truncate">{item.title}</p>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                      <span>{item.source}</span>
+                      {item.published_at && <span>{new Date(item.published_at).toLocaleDateString()}</span>}
+                      {item.sentiment && <span className={`${item.sentiment === 'positive' ? 'text-emerald-400' : item.sentiment === 'negative' ? 'text-red-400' : 'text-gray-400'}`}>{item.sentiment}</span>}
+                    </div>
+                  </div>
+                  {item.url && (
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:text-blue-300 shrink-0">→</a>
+                  )}
+                </div>
+              ))}
+              {(news.articles || news || []).length === 0 && <p className="text-gray-500 text-sm">No news articles available.</p>}
+            </div>
+          </div>
         )}
       </div>
     </AppLayout>

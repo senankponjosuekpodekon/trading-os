@@ -1,8 +1,9 @@
 'use client';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageSkeleton } from '@/components/ui/PageSkeleton';
-import { Bitcoin, Cpu, Gauge, Wallet, TrendingUp, Database } from 'lucide-react';
+import { Bitcoin, Cpu, Gauge, Wallet, TrendingUp, Database, Percent, Layers, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface BtcData {
@@ -36,6 +37,8 @@ function Metric({ label, value, sub, icon: Icon, color }: { label: string; value
 }
 
 export default function OnChainPage() {
+  const [symbol, setSymbol] = useState('BTC/USDT');
+
   const { data: btc, isLoading: btcLoading } = useQuery<BtcData | null>({
     queryKey: ['on-chain-btc'],
     queryFn: async () => (await api.get('/market-data/on-chain/btc')).data,
@@ -45,6 +48,24 @@ export default function OnChainPage() {
     queryKey: ['on-chain-eth'],
     queryFn: async () => (await api.get('/market-data/on-chain/eth')).data,
     staleTime: 300_000,
+  });
+
+  const { data: btcDominance } = useQuery({
+    queryKey: ['onchain-btc-dominance'],
+    queryFn: async () => (await api.get('/onchain/btc-dominance')).data,
+    staleTime: 300_000,
+  });
+
+  const { data: funding } = useQuery({
+    queryKey: ['onchain-funding', symbol],
+    queryFn: async () => (await api.get(`/onchain/funding/${symbol}`)).data,
+    staleTime: 120_000,
+  });
+
+  const { data: basis } = useQuery({
+    queryKey: ['onchain-spot-perp-basis', symbol],
+    queryFn: async () => (await api.get(`/onchain/spot-perp-basis/${symbol}`)).data,
+    staleTime: 120_000,
   });
 
   if (btcLoading || ethLoading) {
@@ -98,6 +119,51 @@ export default function OnChainPage() {
           ) : (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">Données ETH indisponibles</div>
           )}
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <Percent className="w-4 h-4 text-yellow-400" /> BTC Dominance
+          </h3>
+          {btcDominance ? (
+            <div className="grid grid-cols-2 gap-4">
+              <Metric label="BTC Dominance" value={`${(btcDominance.dominance_pct ?? 0).toFixed(2)}%`} sub={btcDominance.timestamp ? new Date(btcDominance.timestamp).toLocaleString() : '—'} icon={Percent} color="text-yellow-400" />
+              <Metric label="Dominance 24h" value={`${(btcDominance.change_24h_pct ?? 0).toFixed(2)}%`} icon={TrendingUp} color={btcDominance.change_24h_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+            </div>
+          ) : (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">BTC dominance unavailable</div>
+          )}
+        </section>
+
+        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-cyan-400" /> Derivatives ({symbol})
+          </h3>
+          <div className="flex items-center gap-2 mb-4">
+            <Search className="w-4 h-4 text-gray-500" />
+            <input
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              className="bg-gray-950 border border-gray-800 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-cyan-500"
+              placeholder="BTC/USDT"
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {funding ? (
+              <div className="bg-gray-950 rounded-lg p-4">
+                <p className="text-xs text-gray-500 mb-1">Funding</p>
+                <p className="text-white font-mono text-lg">{(funding.funding_rate ?? 0).toFixed(4)}%</p>
+                <p className="text-xs text-gray-500">{funding.exchange || '—'} · {funding.interval || '8h'}</p>
+              </div>
+            ) : <div className="bg-gray-950 rounded-lg p-4 text-sm text-gray-500">Funding data unavailable</div>}
+            {basis ? (
+              <div className="bg-gray-950 rounded-lg p-4">
+                <p className="text-xs text-gray-500 mb-1">Spot-Perp Basis</p>
+                <p className="text-white font-mono text-lg">{(basis.basis_pct ?? 0).toFixed(2)}%</p>
+                <p className="text-xs text-gray-500">Spot ${(basis.spot_price ?? 0).toLocaleString()} · Perp ${(basis.perp_price ?? 0).toLocaleString()}</p>
+              </div>
+            ) : <div className="bg-gray-950 rounded-lg p-4 text-sm text-gray-500">Basis data unavailable</div>}
+          </div>
         </section>
 
         <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">

@@ -37,6 +37,14 @@ export class BacktestService {
     return this.engine.post('/backtest/multi', requests, { timeout: 60_000 });
   }
 
+  async advancedMetrics(body: any) {
+    return this.engine.post('/backtest/advanced-metrics', body, { timeout: 30_000 });
+  }
+
+  async patternStats(body: any) {
+    return this.engine.post('/backtest/pattern-stats', body, { timeout: 30_000 });
+  }
+
   private async resolveStrategy(dto: RunBacktestDto, _userId: string) {
     if (dto.strategy) {
       return dto.strategy;

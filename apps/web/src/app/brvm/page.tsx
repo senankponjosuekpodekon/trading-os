@@ -54,6 +54,19 @@ export default function BrvmPage() {
     enabled: tab === 'reports',
   });
 
+  const { data: quotes } = useQuery({
+    queryKey: ['brvm-quotes'],
+    queryFn: async () => (await api.get('/brvm/quotes')).data as BrvmQuote[],
+    refetchInterval: 5 * 60_000,
+  });
+
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const { data: report, isLoading: reportLoading } = useQuery({
+    queryKey: ['brvm-report', selectedSlug],
+    queryFn: async () => (await api.get(`/brvm/reports/${selectedSlug}`)).data,
+    enabled: !!selectedSlug,
+  });
+
   const results: BrvmQuote[] = scan?.results ?? [];
   const buys  = results.filter(r => r.signal === 'BUY');
   const sells = results.filter(r => r.signal === 'SELL');
@@ -222,7 +235,11 @@ export default function BrvmPage() {
                     </td></tr>
                   )}
                   {issuers?.map(i => (
-                    <tr key={i.slug} className="hover:bg-gray-800/30 transition-colors">
+                    <tr
+                      key={i.slug}
+                      onClick={() => setSelectedSlug(i.slug)}
+                      className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                    >
                       <td className="px-4 py-2 text-gray-400 font-mono text-xs">{i.code}</td>
                       <td className="px-4 py-2 text-white text-xs font-medium">{i.name}</td>
                       <td className="px-4 py-2 text-gray-500 text-xs truncate max-w-xs">{i.description}</td>
@@ -232,10 +249,65 @@ export default function BrvmPage() {
               </table>
               </div>
             </div>
+
+            {selectedSlug && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-white">Rapport détaillé</h3>
+                  <button onClick={() => setSelectedSlug(null)} className="text-xs text-gray-400 hover:text-white">Fermer</button>
+                </div>
+                {reportLoading && <div className="text-gray-500 text-xs">Chargement…</div>}
+                {report && (
+                  <div className="space-y-2 text-sm">
+                    <p className="text-white font-medium">{report.name || report.symbol || selectedSlug}</p>
+                    <p className="text-gray-400 text-xs">{report.description || report.sector || '—'}</p>
+                    {report.market_cap !== undefined && <p className="text-gray-400 text-xs">Market cap: {Number(report.market_cap).toLocaleString()} XOF</p>}
+                    {report.pe && <p className="text-gray-400 text-xs">PE: {report.pe}</p>}
+                    {report.eps && <p className="text-gray-400 text-xs">EPS: {report.eps}</p>}
+                    {report.dividend_yield !== undefined && <p className="text-gray-400 text-xs">Dividende: {(Number(report.dividend_yield) * 100).toFixed(2)}%</p>}
+                    <pre className="text-xs text-gray-500 bg-gray-950 p-2 rounded overflow-auto max-h-40">{JSON.stringify(report, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
-        {tab === 'market' && movers && (
+        {tab === 'market' && (
+          <div className="space-y-5">
+            {quotes && quotes.length > 0 && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-800">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
+                    <BarChart3 className="w-3.5 h-3.5" />Cotations BRVM
+                  </h3>
+                </div>
+                <div className="max-h-[400px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="border-b border-gray-800 bg-gray-900">
+                        {['Symbole', 'Nom', 'Prix', 'Variation', 'Volume'].map(h => (
+                          <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {quotes.map((q: BrvmQuote) => (
+                        <tr key={q.symbol} className="hover:bg-gray-800/30 transition-colors">
+                          <td className="px-4 py-2 font-bold text-white">{q.symbol}</td>
+                          <td className="px-4 py-2 text-gray-400 text-xs truncate max-w-32">{q.name}</td>
+                          <td className="px-4 py-2 font-mono text-white">{q.price.toLocaleString()} XOF</td>
+                          <td className="px-4 py-2"><Pct v={q.change_pct} /></td>
+                          <td className="px-4 py-2 text-gray-400 font-mono text-xs">{q.volume.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+        {movers && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
               <h3 className="text-sm font-semibold text-emerald-400 mb-3 flex items-center gap-1.5">
@@ -269,6 +341,8 @@ export default function BrvmPage() {
                 ))}
               </div>
             </div>
+          </div>
+        )}
           </div>
         )}
 

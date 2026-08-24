@@ -2,13 +2,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
-import { Star, RefreshCw, Rocket, AlertTriangle, ExternalLink, Search } from 'lucide-react';
+import { Star, RefreshCw, Rocket, AlertTriangle, ExternalLink, Search, Shield } from 'lucide-react';
 import { useState } from 'react';
 
 export default function PreListingPage() {
   const queryClient = useQueryClient();
   const [minScore, setMinScore] = useState(40);
   const [limit, setLimit] = useState(15);
+  const [selectedPool, setSelectedPool] = useState<any | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['pre-listing', minScore, limit],
@@ -19,6 +20,20 @@ export default function PreListingPage() {
       return res.data;
     },
     staleTime: 1000 * 60 * 10,
+  });
+
+  const { data: newPools } = useQuery({
+    queryKey: ['dex-new-pools'],
+    queryFn: async () => (await api.get('/dex/new-pools')).data,
+    staleTime: 1000 * 60 * 10,
+  });
+
+  const { data: riskCheck, isLoading: riskLoading, refetch: refetchRisk } = useQuery({
+    queryKey: ['dex-risk-check', selectedPool?.chain, selectedPool?.token_address],
+    queryFn: async () =>
+      (await api.get(`/dex/risk-check/${selectedPool.chain}/${selectedPool.token_address}`)).data,
+    enabled: !!selectedPool?.chain && !!selectedPool?.token_address,
+    staleTime: 1000 * 60 * 5,
   });
 
   const handleRefresh = async () => {
@@ -102,6 +117,66 @@ export default function PreListingPage() {
               <p className="text-2xl font-bold text-red-400">{data.critical_risk_count || 0}</p>
               <p className="text-xs text-gray-500">Critical Risks</p>
             </div>
+          </div>
+        )}
+
+        {/* DEX new pools */}
+        {newPools && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+              <Rocket className="w-4 h-4 text-purple-400" /> DEX New Pools
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {(newPools.pools || newPools || []).slice(0, 6).map((pool: any, i: number) => (
+                <button
+                  key={i}
+                  onClick={() => setSelectedPool({ chain: pool.chain || 'bsc', token_address: pool.token_address || pool.address })}
+                  className={`text-left p-3 rounded-lg border transition ${
+                    selectedPool?.token_address === (pool.token_address || pool.address)
+                      ? 'bg-purple-500/10 border-purple-500/30'
+                      : 'bg-gray-800/30 border-gray-700 hover:border-purple-500/30'
+                  }`}
+                >
+                  <p className="text-white text-sm font-medium truncate">{pool.symbol || pool.name || 'Unknown'}</p>
+                  <p className="text-xs text-gray-500">{pool.chain || 'bsc'} · {pool.token_address || pool.address}</p>
+                  {pool.liquidity !== undefined && <p className="text-xs text-gray-400 mt-1">Liquidity ${(pool.liquidity / 1000).toFixed(0)}K</p>}
+                </button>
+              ))}
+              {(newPools.pools || newPools || []).length === 0 && <p className="text-gray-500 text-sm">No new pools found.</p>}
+            </div>
+
+            {selectedPool && (
+              <div className="mt-4 p-3 bg-gray-800/30 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Shield className="w-4 h-4" /> Risk Check
+                  </h4>
+                  <button onClick={() => refetchRisk()} className="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+                </div>
+                {riskLoading && <p className="text-gray-500 text-xs">Checking token…</p>}
+                {riskCheck && (
+                  <div className="space-y-1 text-xs">
+                    <p className={riskCheck.is_honeypot ? 'text-red-400' : 'text-emerald-400'}>
+                      Honeypot: {riskCheck.is_honeypot ? 'YES' : 'No'}
+                    </p>
+                    <p className={riskCheck.mintable ? 'text-red-400' : 'text-emerald-400'}>
+                      Mintable: {riskCheck.mintable ? 'YES' : 'No'}
+                    </p>
+                    {riskCheck.owner_renounced !== undefined && (
+                      <p className={riskCheck.owner_renounced ? 'text-emerald-400' : 'text-yellow-400'}>
+                        Owner renounced: {riskCheck.owner_renounced ? 'Yes' : 'No'}
+                      </p>
+                    )}
+                    {riskCheck.liquidity_locked_pct !== undefined && (
+                      <p className="text-gray-400">Liquidity locked: {Number(riskCheck.liquidity_locked_pct).toFixed(1)}%</p>
+                    )}
+                    {riskCheck.risk_score !== undefined && (
+                      <p className="text-gray-400">Risk score: {riskCheck.risk_score}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

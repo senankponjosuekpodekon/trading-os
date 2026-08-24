@@ -66,6 +66,18 @@ describe('SignalPredictorService', () => {
       expect(mockHttp.post).toHaveBeenCalledWith('http://engine:8000/ml/predict', { features }, { headers: expect.any(Object) });
       expect(result.probability).toBe(0.7);
     });
+
+    it('should bubble up POST errors', async () => {
+      (mockHttp.post as any).mockReturnValue(throwError(() => new Error('boom')));
+
+      await expect(service.predict({ confidence: 80 } as any)).rejects.toThrow('boom');
+    });
+
+    it('should log non-Error POST rejections', async () => {
+      (mockHttp.post as any).mockReturnValue(throwError(() => 'string boom'));
+
+      await expect(service.predict({ confidence: 80 } as any)).rejects.toBe('string boom');
+    });
   });
 
   describe('status/weights', () => {
@@ -79,6 +91,18 @@ describe('SignalPredictorService', () => {
       expect(weights.trained).toBe(true);
       expect(mockHttp.get).toHaveBeenCalledTimes(2);
       expect(mockHttp.get).toHaveBeenCalledWith('http://engine:8000/ml/status', { headers: expect.any(Object) });
+    });
+
+    it('should bubble up GET errors', async () => {
+      (mockHttp.get as any).mockReturnValue(throwError(() => new Error('boom')));
+
+      await expect(service.getStatus()).rejects.toThrow('boom');
+    });
+
+    it('should log non-Error GET rejections', async () => {
+      (mockHttp.get as any).mockReturnValue(throwError(() => 'string boom'));
+
+      await expect(service.getFeatureWeights()).rejects.toBe('string boom');
     });
   });
 });

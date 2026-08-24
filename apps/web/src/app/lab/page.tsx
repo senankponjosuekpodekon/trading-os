@@ -65,6 +65,9 @@ export default function LabPage() {
   const [promoteResult, setPromoteResult] = useState<any>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareResult, setCompareResult] = useState<any>(null);
+  const [regimePrediction, setRegimePrediction] = useState<any>(null);
+  const [advancedMetrics, setAdvancedMetrics] = useState<any>(null);
+  const [patternStats, setPatternStats] = useState<any>(null);
 
   const { data: templates = [] } = useQuery<StrategyTemplate[]>({
     queryKey: ['lab-templates'],
@@ -154,6 +157,27 @@ export default function LabPage() {
     mutationFn: async () =>
       (await api.post('/lab/compare', { ids: compareIds })).data,
     onSuccess: (data) => setCompareResult(data),
+  });
+
+  const { data: mlRegimeStatus } = useQuery({
+    queryKey: ['ml-regime-status'],
+    queryFn: async () => (await api.get('/ml/regime/status')).data,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const regimePredictMutation = useMutation({
+    mutationFn: async (payload: any) => (await api.post('/ml/regime/predict', payload)).data,
+    onSuccess: (data) => setRegimePrediction(data),
+  });
+
+  const advancedBacktestMutation = useMutation({
+    mutationFn: async (payload: any) => (await api.post('/backtest/advanced-metrics', payload)).data,
+    onSuccess: (data) => setAdvancedMetrics(data),
+  });
+
+  const patternStatsMutation = useMutation({
+    mutationFn: async (payload: any) => (await api.post('/backtest/pattern-stats', payload)).data,
+    onSuccess: (data) => setPatternStats(data),
   });
 
   return (
@@ -369,6 +393,96 @@ export default function LabPage() {
                     Archiver
                   </button>
                 </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => advancedBacktestMutation.mutate({
+                      symbol: selected.symbol,
+                      timeframe: selected.timeframe,
+                      strategy: selected.strategy,
+                      lookback_bars: 500,
+                      initial_capital: 10000,
+                    })}
+                    disabled={advancedBacktestMutation.isPending}
+                    className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition-colors"
+                  >
+                    <BarChart2 className="w-4 h-4" />Advanced Metrics
+                  </button>
+                  <button
+                    onClick={() => patternStatsMutation.mutate({
+                      symbol: selected.symbol,
+                      timeframe: selected.timeframe,
+                      strategy: selected.strategy,
+                      lookback_bars: 500,
+                    })}
+                    disabled={patternStatsMutation.isPending}
+                    className="flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition-colors"
+                  >
+                    <Shuffle className="w-4 h-4" />Pattern Stats
+                  </button>
+                  <button
+                    onClick={() => regimePredictMutation.mutate({
+                      symbol: selected.symbol,
+                      timeframe: selected.timeframe,
+                      klines: 100,
+                    })}
+                    disabled={regimePredictMutation.isPending}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition-colors"
+                  >
+                    <TrendingUp className="w-4 h-4" />Regime Predict
+                  </button>
+                </div>
+
+                {mlRegimeStatus && (
+                  <div className="p-3 bg-gray-900 border border-gray-800 rounded-xl text-xs text-gray-400">
+                    <p>ML regime model: <span className="text-white font-medium">{mlRegimeStatus.model_type || '—'}</span></p>
+                    <p>Last trained: <span className="text-white font-medium">{mlRegimeStatus.last_trained ? new Date(mlRegimeStatus.last_trained).toLocaleDateString() : '—'}</span></p>
+                    <p>Accuracy: <span className="text-white font-medium">{mlRegimeStatus.accuracy !== undefined ? `${(mlRegimeStatus.accuracy * 100).toFixed(1)}%` : '—'}</span></p>
+                    <p>Classes: <span className="text-white font-medium">{mlRegimeStatus.classes?.join(', ') || '—'}</span></p>
+                  </div>
+                )}
+
+                {regimePrediction && (
+                  <div className={`rounded-xl p-4 border ${
+                    regimePrediction.regime === 'TRENDING' ? 'bg-emerald-400/10 border-emerald-400/20 text-emerald-400' :
+                    regimePrediction.regime === 'RANGING' ? 'bg-yellow-400/10 border-yellow-400/20 text-yellow-400' :
+                    regimePrediction.regime === 'VOLATILE' ? 'bg-red-400/10 border-red-400/20 text-red-400' :
+                    'bg-gray-400/10 border-gray-400/20 text-gray-400'
+                  }`}>
+                    <p className="font-semibold">Regime: {regimePrediction.regime} · confidence {(regimePrediction.confidence || 0).toFixed(2)}%</p>
+                  </div>
+                )}
+
+                {advancedMetrics && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-white mb-2">Advanced Backtest Metrics</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-gray-400">
+                      <MetricCard label="Sharpe" value={(advancedMetrics.sharpe_ratio ?? 0).toFixed(2)} color={advancedMetrics.sharpe_ratio >= 1 ? 'text-emerald-400' : 'text-gray-400'} />
+                      <MetricCard label="Sortino" value={(advancedMetrics.sortino_ratio ?? 0).toFixed(2)} />
+                      <MetricCard label="Max DD" value={`${(advancedMetrics.max_drawdown_pct ?? 0).toFixed(2)}%`} color="text-red-400" />
+                      <MetricCard label="Profit Factor" value={(advancedMetrics.profit_factor ?? 0).toFixed(2)} />
+                      <MetricCard label="Win Rate" value={`${(advancedMetrics.win_rate ?? 0).toFixed(1)}%`} />
+                      <MetricCard label="Expectancy" value={(advancedMetrics.expectancy ?? 0).toFixed(2)} />
+                      <MetricCard label="Calmar" value={(advancedMetrics.calmar_ratio ?? 0).toFixed(2)} />
+                      <MetricCard label="Skewness" value={(advancedMetrics.return_skewness ?? 0).toFixed(2)} />
+                    </div>
+                  </div>
+                )}
+
+                {patternStats && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-white mb-2">Pattern Stats</h3>
+                    <div className="space-y-2">
+                      {(patternStats.patterns || []).slice(0, 8).map((p: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between text-xs p-2 bg-gray-950 rounded">
+                          <span className="text-white font-medium">{p.pattern}</span>
+                          <span className="text-gray-400">{p.count} occ · {(p.success_rate || 0).toFixed(1)}% win</span>
+                        </div>
+                      ))}
+                      {(patternStats.patterns || []).length === 0 && <p className="text-gray-500 text-xs">No patterns found.</p>}
+                    </div>
+                  </div>
+                )}
 
                 {selected.backtestMetrics && (
                   <>

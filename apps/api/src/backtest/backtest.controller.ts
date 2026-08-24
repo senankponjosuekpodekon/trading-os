@@ -23,4 +23,20 @@ export class BacktestController {
   ) {
     return this.backtestService.runMulti(req.user.id, dtos);
   }
+
+  @Post('advanced-metrics')
+  advancedMetrics(
+    @Request() req: any,
+    @Body() body: any,
+  ) {
+    return this.backtestService.advancedMetrics(body);
+  }
+
+  @Post('pattern-stats')
+  patternStats(
+    @Request() req: any,
+    @Body() body: any,
+  ) {
+    return this.backtestService.patternStats(body);
+  }
 }

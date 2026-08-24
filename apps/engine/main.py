@@ -62,6 +62,8 @@ from routers import (
     scientific_backtest_router,
     phase_d,
     africa_market,
+    massive,
+    poocoin,
 )
 from utils.errors import EngineException, format_error_response
 from config import settings  # noqa: F401 — valide les secrets au démarrage
@@ -220,6 +222,8 @@ app.include_router(onchain_prelisting.router, prefix="/onchain", tags=["On-Chain
 app.include_router(scientific_backtest_router.router, tags=["Scientific Backtest"])
 app.include_router(phase_d.router, tags=["Phase D — Market Memory + Agents"])
 app.include_router(africa_market.router, tags=["Africa Markets"])
+app.include_router(massive.router, prefix="/massive", tags=["Massive"])
+app.include_router(poocoin.router, prefix="/poocoin", tags=["PooCoin"])
 
 
 # ── Candles endpoint (used by API predictMlRegime) ───────────────────

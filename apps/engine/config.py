@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     etherscan_api_key: str = Field(default="", validation_alias="ETHERSCAN_API_KEY")
     whale_alert_api_key: str = Field(default="", validation_alias="WHALE_ALERT_API_KEY")
     lunarcrush_api_key: str = Field(default="", validation_alias="LUNARCRUSH_API_KEY")
+    massive_api_key: str = Field(default="", validation_alias="MASSIVE_API_KEY")
 
     # ── AI / LLM ───────────────────────────────────────────────────
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
@@ -92,6 +93,8 @@ def load_settings() -> Settings:
         print("[WARN] ETHERSCAN_API_KEY absent — données on-chain ETH limitées.", file=sys.stderr)
     if not settings.lunarcrush_api_key:
         print("[WARN] LUNARCRUSH_API_KEY absent — sentiment social sera mocké.", file=sys.stderr)
+    if not settings.massive_api_key:
+        print("[WARN] MASSIVE_API_KEY absent — les données Massive seront désactivées.", file=sys.stderr)
 
     return settings
 

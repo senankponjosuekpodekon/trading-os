@@ -1,6 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
 import { Portfolio, PortfolioSummary } from '@/types';
@@ -24,6 +24,16 @@ export default function RiskPage() {
   });
 
   const portfolio = portfolios?.find(p => p.id === selectedId);
+
+  const { data: engineStatus, refetch: refetchStatus } = useQuery({
+    queryKey: ['risk-status'],
+    queryFn: async () => (await api.get('/risk/status')).data,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const evaluateMutation = useMutation({
+    mutationFn: async (payload: any) => (await api.post('/risk/evaluate', payload)).data,
+  });
 
   const analysis = useMemo(() => {
     if (!summary) return null;
@@ -121,6 +131,13 @@ export default function RiskPage() {
                 icon={<Activity className="w-4 h-4" />}
               />
               <RiskCard
+                label="Engine risk score"
+                value={engineStatus?.risk_score !== undefined ? String(engineStatus.risk_score) : '—'}
+                sub={engineStatus?.status || 'no engine data'}
+                trend={(engineStatus?.risk_score || 0) > 70 ? 'down' : 'up'}
+                icon={<ShieldAlert className="w-4 h-4" />}
+              />
+              <RiskCard
                 label="Max risque / trade"
                 value={`${analysis.maxRiskPerTrade[0]?.riskPct.toFixed(2) ?? '0.00'}%`}
                 sub={analysis.maxRiskPerTrade[0]?.symbol ?? '—'}
@@ -166,11 +183,61 @@ export default function RiskPage() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-                <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />Règles de risque
-                </h3>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-400" />Engine Risk Ledger
+              </h3>
+              {engineStatus ? (
+                <div className="space-y-2 text-sm text-gray-400">
+                  <p>Capital: <span className="text-white font-mono">${(engineStatus.capital ?? 0).toLocaleString()}</span></p>
+                  <p>Open risk: <span className="text-white font-mono">{(engineStatus.open_risk_pct ?? 0).toFixed(2)}%</span></p>
+                  <p>Positions: <span className="text-white font-mono">{engineStatus.open_positions ?? 0}</span></p>
+                  <p>Daily P&L: <span className={engineStatus.daily_pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{(engineStatus.daily_pnl_pct ?? 0).toFixed(2)}%</span></p>
+                  <button
+                    onClick={() => refetchStatus()}
+                    className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    Refresh engine status
+                  </button>
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">No engine risk data</p>
+              )}
+            </div>
+
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <TrendingDown className="w-4 h-4 text-emerald-400" />Evaluate Portfolio Risk
+              </h3>
+              <button
+                onClick={() => evaluateMutation.mutate({
+                  capital: parseFloat(portfolio?.currentCapital ?? '10000'),
+                  positions: (summary?.positions ?? []).filter(p => p.status === 'OPEN' || p.status === 'PARTIAL').map((p: any) => ({
+                    symbol: p.asset?.symbol,
+                    direction: p.direction,
+                    entry: parseFloat(p.entryPrice ?? '0'),
+                    stop_loss: p.stopLoss ? parseFloat(p.stopLoss) : undefined,
+                    quantity: parseFloat(p.quantity ?? '0'),
+                  })),
+                })}
+                disabled={evaluateMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition-colors"
+              >
+                {evaluateMutation.isPending ? 'Evaluating…' : 'Evaluate'}
+              </button>
+              {evaluateMutation.data && (
+                <div className="mt-3 p-3 bg-gray-950 rounded-lg text-xs text-gray-400">
+                  <p>VaR: <span className="text-white font-mono">${(evaluateMutation.data.var ?? 0).toLocaleString()}</span></p>
+                  <p>Max drawdown: <span className="text-white font-mono">{(evaluateMutation.data.max_drawdown_pct ?? 0).toFixed(2)}%</span></p>
+                  <p>Concentration: <span className="text-white font-mono">{(evaluateMutation.data.concentration_pct ?? 0).toFixed(2)}%</span></p>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />Règles de risque
+              </h3>
                 <ul className="space-y-2 text-sm text-gray-400">
                   <Rule ok={analysis.openCount <= 5} text="Max 5 positions ouvertes simultanées" />
                   <Rule ok={analysis.exposurePct <= 30} text="Exposition totale ≤ 30% du capital" />
@@ -190,7 +257,6 @@ export default function RiskPage() {
                     : 'Profil de risque globalement sain.'}
                 </p>
               </div>
-            </div>
           </>
         )}
       </div>
