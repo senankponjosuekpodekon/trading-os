@@ -459,30 +459,75 @@ async def _fetch_defillama_tvl(name: str, symbol: str) -> dict | None:
         return None
 
 
-async def _fetch_token_unlocks(symbol: str) -> dict | None:
-    """TokenUnlocks — fetch vesting info. Requires TOKENUNLOCKS_API_KEY."""
-    token = os.getenv("TOKENUNLOCKS_API_KEY")
-    if not token:
-        return None
+async def _fetch_coingecko_supply(symbol: str) -> dict | None:
+    """
+    Free CoinGecko tokenomics fallback for TokenUnlocks.
+    Uses /coins/markets to get circulating/total/max supply.
+    Returns vesting health estimate: healthy if > 50% already in circulation.
+    """
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
-                "https://api.tokenunlocks.com/api/v1/unlock",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"symbol": symbol.upper()},
+                f"{COINGECKO_BASE}/coins/markets",
+                params={
+                    "vs_currency": "usd",
+                    "symbols": symbol.lower(),
+                    "per_page": 1,
+                    "page": 1,
+                    "sparkline": "false",
+                },
             )
             if r.status_code != 200:
                 return None
             data = r.json()
-            # Simplified: look for next unlock within 30 days and team %
+            if not isinstance(data, list) or not data:
+                return None
+            item = data[0]
+            circ = item.get("circulating_supply") or 0
+            total = item.get("total_supply") or item.get("max_supply") or 0
+            max_sup = item.get("max_supply") or total
+            if not (circ and max_sup):
+                return None
+            unlocked_pct = circ / max_sup
+            # Healthy if most supply already in circulation -> less dilution overhang
             return {
-                "next_unlock_pct": float(data.get("next_unlock_pct", 0) or 0),
-                "team_vesting_months": float(data.get("team_vesting_months", 0) or 0),
-                "healthy": data.get("team_vesting_months", 0) >= 12,
+                "next_unlock_pct": 0.0,
+                "team_vesting_months": 0.0,
+                "healthy": unlocked_pct >= 0.5,
+                "circulating_supply": circ,
+                "total_supply": total,
+                "max_supply": max_sup,
+                "source": "coingecko",
             }
     except Exception as exc:
-        logger.debug("token_unlocks_failed", symbol=symbol, error=str(exc))
+        logger.debug("coingecko_supply_failed", symbol=symbol, error=str(exc))
         return None
+
+
+async def _fetch_token_unlocks(symbol: str) -> dict | None:
+    """TokenUnlocks — fetch vesting info. Falls back to free CoinGecko supply."""
+    token = os.getenv("TOKENUNLOCKS_API_KEY")
+    if token:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    "https://api.tokenunlocks.com/api/v1/unlock",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"symbol": symbol.upper()},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    return {
+                        "next_unlock_pct": float(data.get("next_unlock_pct", 0) or 0),
+                        "team_vesting_months": float(data.get("team_vesting_months", 0) or 0),
+                        "healthy": data.get("team_vesting_months", 0) >= 12,
+                        "source": "tokenunlocks",
+                    }
+        except Exception as exc:
+            logger.debug("token_unlocks_failed", symbol=symbol, error=str(exc))
+
+    # Free fallback via CoinGecko tokenomics
+    return await _fetch_coingecko_supply(symbol)
 
 
 async def _fetch_reddit_mentions(query: str) -> dict | None:
