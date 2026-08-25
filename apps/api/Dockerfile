@@ -15,6 +15,7 @@ RUN npm config set fetch-retries 5 \
 
 WORKDIR /app/apps/api
 
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npx prisma generate && npm run build
 
 # Stage 2 — production
