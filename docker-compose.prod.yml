@@ -1,16 +1,13 @@
-# Production compose for this VPS: builds images locally (no ghcr.io/CI
-# dependency — the registry-based pipeline in .github/workflows/deploy.yml
-# is not wired to this server). Postgres and Redis are NOT managed here:
-# this VPS already runs them as standalone containers (see `docker ps`,
-# networks postgres_default / redis_default) with real production data.
-# Backups are handled by scripts/backup-db.sh (cron), and TLS/reverse-proxy
-# by nginx-proxy-manager — hence no "backup" or "nginx" service here.
+# Production compose: images are pulled from GHCR by the deploy workflow
+# (see .github/workflows/deploy.yml) and tagged as trading-os-*:latest.
+# Postgres and Redis are NOT managed here: this VPS already runs them as
+# standalone containers (see `docker ps`, networks postgres_default /
+# redis_default) with real production data. Backups are handled by
+# scripts/backup-db.sh (cron), and TLS/reverse-proxy by nginx-proxy-manager.
 services:
 
   engine:
-    build:
-      context: ./apps/engine
-      dockerfile: Dockerfile
+    image: trading-os-engine:latest
     container_name: trading-os-engine-prod
     restart: unless-stopped
     env_file:
@@ -35,9 +32,7 @@ services:
       retries: 5
 
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile.vps
+    image: trading-os-api:latest
     container_name: trading-os-api-prod
     restart: unless-stopped
     env_file:
@@ -70,15 +65,7 @@ services:
       start_period: 60s
 
   web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-        NEXT_PUBLIC_ENGINE_URL: ${NEXT_PUBLIC_ENGINE_URL}
-        NEXT_PUBLIC_ENGINE_WS_URL: ${NEXT_PUBLIC_ENGINE_WS_URL}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
-        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN}
+    image: trading-os-web:latest
     container_name: trading-os-web-prod
     restart: unless-stopped
     env_file:
