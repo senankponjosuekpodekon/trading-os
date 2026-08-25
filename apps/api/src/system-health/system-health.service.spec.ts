@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpService, HttpModule } from '@nestjs/axios';
+import { HttpModule, HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { of, throwError } from 'rxjs';
 import { SystemHealthService } from './system-health.service';
 import { PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 
 describe('SystemHealthService', () => {
   let service: SystemHealthService;
@@ -35,6 +36,7 @@ describe('SystemHealthService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('http://localhost:8000') },
         },
+        { provide: EngineHttpService, useValue: { getCircuitState: jest.fn().mockReturnValue('CLOSED'), resetCircuit: jest.fn() } },
       ],
     }).compile();
 

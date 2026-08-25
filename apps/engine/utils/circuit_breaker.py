@@ -129,6 +129,8 @@ BREAKERS: dict[str, CircuitBreaker] = {
     "whale-alert": CircuitBreaker("whale-alert", failure_threshold=5, recovery_timeout=300.0),
     "brvm": CircuitBreaker("brvm", failure_threshold=5, recovery_timeout=300.0),
     "deriv": CircuitBreaker("deriv", failure_threshold=3, recovery_timeout=60.0),
+    "massive": CircuitBreaker("massive", failure_threshold=5, recovery_timeout=60.0),
+    "poocoin": CircuitBreaker("poocoin", failure_threshold=5, recovery_timeout=60.0),
 }
 BREAKERS["binance"] = BREAKERS["binance_batch"]  # alias
 

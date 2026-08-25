@@ -11,6 +11,8 @@ from typing import List
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
+from utils.http import retry_async
+
 router = APIRouter()
 
 COINALYZE_BASE = "https://api.coinalyze.net/v1"
@@ -24,7 +26,8 @@ async def _coinalyze_get(endpoint: str, params: dict) -> List[dict]:
     token = _api_key()
     if not token:
         raise HTTPException(status_code=400, detail="COINALYZE_API_KEY not configured")
-    try:
+    
+    async def _do_request() -> List[dict]:
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.get(
                 f"{COINALYZE_BASE}/{endpoint}",
@@ -38,6 +41,9 @@ async def _coinalyze_get(endpoint: str, params: dict) -> List[dict]:
             if r.status_code != 200:
                 return []
             return r.json()
+    
+    try:
+        return await retry_async(_do_request, max_retries=2, base_delay=0.5, source="coinalyze")
     except HTTPException:
         raise
     except Exception as exc:

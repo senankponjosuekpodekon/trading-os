@@ -11,6 +11,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Path, Query
 
 import config
+from utils.http import retry_async
 
 router = APIRouter()
 
@@ -27,7 +28,8 @@ async def _massive_get(path: str) -> Any:
         raise HTTPException(status_code=400, detail="MASSIVE_API_KEY not configured")
 
     url = f"{MASSIVE_BASE}/{path}"
-    try:
+    
+    async def _do_request() -> Any:
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.get(
                 url,
@@ -43,6 +45,9 @@ async def _massive_get(path: str) -> Any:
             if r.status_code != 200:
                 return {"error": f"Massive returned {r.status_code}", "detail": r.text}
             return r.json()
+    
+    try:
+        return await retry_async(_do_request, max_retries=2, base_delay=0.5, source="massive")
     except HTTPException:
         raise
     except Exception as exc:

@@ -13,6 +13,8 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
+from utils.http import retry_async
+
 router = APIRouter()
 
 POOCOIN_BASE = "https://api2.poocoin.app"
@@ -27,7 +29,8 @@ async def _poocoin_get(path: str, params: dict) -> Any:
         ),
         "Accept": "application/json",
     }
-    try:
+    
+    async def _do_request() -> Any:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(url, headers=headers, params=params)
             if r.status_code == 403:
@@ -40,6 +43,9 @@ async def _poocoin_get(path: str, params: dict) -> Any:
             if r.status_code != 200:
                 return {"error": f"PooCoin returned {r.status_code}", "detail": r.text}
             return r.json()
+    
+    try:
+        return await retry_async(_do_request, max_retries=2, base_delay=0.5, source="poocoin")
     except HTTPException:
         raise
     except Exception as exc:

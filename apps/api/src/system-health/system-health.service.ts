@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 
 export interface HealthCheckResult {
   name: string;
@@ -25,6 +26,7 @@ export class SystemHealthService {
     private http: HttpService,
     private config: ConfigService,
     private notifications: NotificationsService,
+    private engineHttp: EngineHttpService,
   ) {}
 
   @Cron('*/15 * * * *')
@@ -56,20 +58,31 @@ export class SystemHealthService {
 
   private async checkEngine(): Promise<HealthCheckResult> {
     const engineUrl = this.config.get<string>('ENGINE_URL') ?? 'http://localhost:8000';
+    const circuitState = this.engineHttp.getCircuitState();
+    
+    if (circuitState === 'OPEN') {
+      return {
+        name: 'engine',
+        status: 'critical',
+        message: 'Engine circuit breaker OPEN — too many failures',
+        details: { url: engineUrl, circuitState },
+      };
+    }
+    
     try {
       const res = await firstValueFrom(
         this.http.get(`${engineUrl}/health`, { timeout: 5000 }),
       );
       if (res.data?.status === 'ok') {
-        return { name: 'engine', status: 'ok', message: 'Engine healthy' };
+        return { name: 'engine', status: 'ok', message: 'Engine healthy', details: { circuitState } };
       }
-      return { name: 'engine', status: 'warning', message: `Engine responded: ${JSON.stringify(res.data)}` };
+      return { name: 'engine', status: 'warning', message: `Engine responded: ${JSON.stringify(res.data)}`, details: { circuitState } };
     } catch (err: any) {
       return {
         name: 'engine',
         status: 'critical',
         message: `Engine unreachable: ${err.message}`,
-        details: { url: engineUrl },
+        details: { url: engineUrl, circuitState },
       };
     }
   }
