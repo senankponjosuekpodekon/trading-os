@@ -85,8 +85,8 @@ jobs:
       - name: Build and push Engine
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: apps/engine/Dockerfile
+          context: apps/engine
+          file: Dockerfile
           push: true
           tags: ${{ steps.meta-engine.outputs.tags }}
           labels: ${{ steps.meta-engine.outputs.labels }}
