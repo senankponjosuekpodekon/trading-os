@@ -1,0 +1,28 @@
+# VPS/CI fallback Dockerfile for the API.
+# Expects apps/api/dist to be pre-built on the host (e.g. via deploy.sh).
+# Keeps the image small by installing only production dependencies.
+FROM node:24-alpine
+
+WORKDIR /app
+
+# Install production deps from the workspace root (hoists @nestjs, prisma, etc.)
+COPY package*.json ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/api/prisma ./apps/api/prisma
+COPY apps/api/entrypoint.sh ./apps/api/entrypoint.sh
+RUN npm install --force --omit=dev \
+    && npm install --no-save --force prisma@6.19.3
+
+# Generate the Prisma client into the root node_modules so the pre-built dist can import it
+RUN npx prisma generate --schema=./apps/api/prisma/schema.prisma
+
+COPY apps/api/dist ./apps/api/dist
+
+RUN chmod +x ./apps/api/entrypoint.sh && apk add --no-cache wget
+
+WORKDIR /app/apps/api
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=30s \
+  CMD wget -qO- http://localhost:3001/api/health || exit 1
+
+ENTRYPOINT ["./entrypoint.sh"]

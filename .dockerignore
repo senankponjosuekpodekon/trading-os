@@ -3,6 +3,10 @@ node_modules
 .git
 **/.next
 **/dist
+!apps/api/dist
+!apps/api/dist/**
+!apps/web/.next
+!apps/web/.next/**
 **/__pycache__
 **/*.pyc
 .env

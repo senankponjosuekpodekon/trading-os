@@ -12,6 +12,11 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+echo "==> Building API dist on host"
+npm install --workspace=apps/api
+npx prisma generate --schema=apps/api/prisma/schema.prisma
+npm run build --workspace=apps/api
+
 echo "==> Building images"
 docker compose -f docker-compose.prod.yml build
 

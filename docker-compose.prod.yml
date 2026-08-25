@@ -37,7 +37,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
+      dockerfile: apps/api/Dockerfile.vps
     container_name: trading-os-api-prod
     restart: unless-stopped
     env_file:
