@@ -65,6 +65,9 @@ describe('RiskPage', () => {
             { id: '1', status: 'OPEN', direction: 'BUY', entryPrice: '100', quantity: '2', asset: { symbol: 'AAPL/USD' }, stopLoss: '95' },
           ],
         },
+      })
+      .mockResolvedValueOnce({
+        data: { capital: 100000, open_risk_pct: 1.2, open_positions: 1, daily_pnl_pct: 0.5 },
       });
 
     render(
@@ -75,7 +78,7 @@ describe('RiskPage', () => {
 
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/portfolios'));
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/positions/summary?portfolioId=ALL'));
-    await waitFor(() => expect(screen.getByText(/Risk Dashboard/i)).toBeInTheDocument());
-    expect(screen.getAllByText(/Positions ouvertes/i).length).toBeGreaterThanOrEqual(1);
+    await waitFor(() => expect(screen.getByText(/Engine Risk Ledger/i)).toBeInTheDocument());
+    expect(screen.getAllByText(/Règles de risque|Engine Risk|Recommandation/i).length).toBeGreaterThanOrEqual(1);
   });
 });

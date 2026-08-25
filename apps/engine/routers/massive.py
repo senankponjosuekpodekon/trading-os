@@ -46,7 +46,7 @@ async def _massive_get(path: str) -> Any:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Massive error: {exc}")
+        raise HTTPException(status_code=502, detail=f"Massive error: {exc}") from exc
 
 
 @router.get("/ticker/{ticker}")

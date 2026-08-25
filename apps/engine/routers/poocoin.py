@@ -43,7 +43,7 @@ async def _poocoin_get(path: str, params: dict) -> Any:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"PooCoin error: {exc}")
+        raise HTTPException(status_code=502, detail=f"PooCoin error: {exc}") from exc
 
 
 @router.get("/candles-bsc")
