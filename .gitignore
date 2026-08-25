@@ -25,6 +25,7 @@ venv/
 .env
 .env.local
 .env.*.local
+.env.example.env
 
 # Turbo
 .turbo/
