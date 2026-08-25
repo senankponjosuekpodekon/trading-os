@@ -41,7 +41,7 @@ async def _coinalyze_get(endpoint: str, params: dict) -> List[dict]:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Coinalyze error: {exc}")
+        raise HTTPException(status_code=502, detail=f"Coinalyze error: {exc}") from exc
 
 
 @router.get("/futures/funding-rate")
