@@ -108,7 +108,6 @@ jobs:
     steps:
       - name: Deploy to VPS
         env:
-          SHA: ${{ github.sha }}
           GHCR_USER: ${{ secrets.GHCR_USERNAME || github.actor }}
           GHCR_PASS: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
           IMAGE_PREFIX: ${{ github.repository }}
@@ -120,11 +119,11 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
             "cd /root/projects/trading-os && \
              docker login ghcr.io -u '${GHCR_USER}' -p '${GHCR_PASS}' && \
-             docker pull ghcr.io/${IMAGE_PREFIX}-api:${SHA} && \
-             docker pull ghcr.io/${IMAGE_PREFIX}-web:${SHA} && \
-             docker pull ghcr.io/${IMAGE_PREFIX}-engine:${SHA} && \
-             docker tag ghcr.io/${IMAGE_PREFIX}-api:${SHA} trading-os-api:latest && \
-             docker tag ghcr.io/${IMAGE_PREFIX}-web:${SHA} trading-os-web:latest && \
-             docker tag ghcr.io/${IMAGE_PREFIX}-engine:${SHA} trading-os-engine:latest && \
+             docker pull ghcr.io/${IMAGE_PREFIX}-api:latest && \
+             docker pull ghcr.io/${IMAGE_PREFIX}-web:latest && \
+             docker pull ghcr.io/${IMAGE_PREFIX}-engine:latest && \
+             docker tag ghcr.io/${IMAGE_PREFIX}-api:latest trading-os-api:latest && \
+             docker tag ghcr.io/${IMAGE_PREFIX}-web:latest trading-os-web:latest && \
+             docker tag ghcr.io/${IMAGE_PREFIX}-engine:latest trading-os-engine:latest && \
              docker compose -f docker-compose.prod.yml up -d && \
              echo 'Deployment complete'"
