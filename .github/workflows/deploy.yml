@@ -1,11 +1,7 @@
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: ["Build and Push to GHCR"]
-    types:
-      - completed
-    branches: [vps]
+  workflow_dispatch:
 
 permissions:
   contents: read
