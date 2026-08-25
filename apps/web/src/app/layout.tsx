@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import { Providers } from '@/components/Providers';
 import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
 import './globals.css';
@@ -30,15 +31,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased bg-gray-950 text-gray-100" style={{ fontFamily: 'var(--font-sans)' }}>
         <Providers>{children}</Providers>
         <ServiceWorkerRegistration />
-        <script
-          async
+        <Script
+          id="chat-widget"
+          strategy="afterInteractive"
           src="https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app/api/widget/embed.js"
           data-agent="f37e3ebd-eba2-4dc9-9ca6-c3444e12811c"
           data-color="#4f46e5"
           data-title="Chat IA"
           data-position="bottom-right"
-          data-api="https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app/api">
-        </script>
+          data-api="https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app/api"
+        />
       </body>
     </html>
   );
