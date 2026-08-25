@@ -9,6 +9,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Free up disk space
+        run: |
+          docker system prune -a -f --volumes
+          docker builder prune -a -f
+          df -h /
       - name: Deploy to VPS
         run: |
           mkdir -p ~/.ssh
