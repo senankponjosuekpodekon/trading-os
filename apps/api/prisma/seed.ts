@@ -114,16 +114,19 @@ async function main() {
     });
   }
 
-  const adminPassword = await bcrypt.hash('admin123', 12);
+  const adminPassword = await bcrypt.hash('ChangeMe123!', 12);
+  const userPassword = await bcrypt.hash('ChangeMe123!', 12);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
-    update: { role: 'SUPER_ADMIN' },
+    update: { password: adminPassword, name: 'Super Admin', role: 'SUPER_ADMIN', isActive: true, failedLoginAttempts: 0, lockedUntil: null },
     create: {
       email: 'admin@example.com',
       password: adminPassword,
       name: 'Super Admin',
       role: 'SUPER_ADMIN' as any,
       isActive: true,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
     },
   });
 
@@ -134,6 +137,30 @@ async function main() {
       name: 'Mon Portfolio',
       type: 'PAPER',
       userId: admin.id,
+    },
+  });
+
+  const regularUser = await prisma.user.upsert({
+    where: { email: 'user@example.com' },
+    update: { password: userPassword, name: 'Regular User', role: 'TRADER', isActive: true, failedLoginAttempts: 0, lockedUntil: null },
+    create: {
+      email: 'user@example.com',
+      password: userPassword,
+      name: 'Regular User',
+      role: 'TRADER' as any,
+      isActive: true,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    },
+  });
+
+  await prisma.portfolio.upsert({
+    where: { id: 'default-user-portfolio' },
+    update: {},
+    create: {
+      name: 'Mon Portfolio',
+      type: 'PAPER',
+      userId: regularUser.id,
     },
   });
 
