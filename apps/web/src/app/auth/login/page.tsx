@@ -31,7 +31,7 @@ export default function LoginPage() {
       } else if (msg.toLowerCase().includes('account disabled')) {
         setError('Votre compte a été désactivé. Contactez un administrateur.');
       } else if (msg.toLowerCase().includes('invalid 2fa')) {
-        setError('Code 2FA incorrect. Vérifiez votre application d'authentification.');
+        setError('Code 2FA incorrect. Vérifiez votre application d\'authentification.');
       } else if (msg.toLowerCase().includes('invalid credentials') || msg.toLowerCase().includes('unauthorized')) {
         setError('Email ou mot de passe incorrect.');
       } else {
