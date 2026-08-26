@@ -50,7 +50,9 @@ describe('LoginPage', () => {
   });
 
   it('displays error message on login failure', async () => {
-    mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
+    mockLogin.mockRejectedValueOnce({
+      response: { data: { message: 'Invalid credentials' } },
+    });
     render(<LoginPage />);
 
     fireEvent.change(screen.getByPlaceholderText(/vous@exemple\.com/i), {

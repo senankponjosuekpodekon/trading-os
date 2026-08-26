@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { TwoFactorService } from './two-factor.service';
+import { MailService } from '../mail/mail.service';
+import { FileLogger } from '../logger/file-logger.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -40,6 +42,18 @@ describe('AuthService', () => {
     verifyToken: jest.fn().mockReturnValue(true),
   };
 
+  const mockMail = {
+    sendVerificationEmail: jest.fn().mockResolvedValue({ sent: true }),
+    sendPasswordChangedEmail: jest.fn().mockResolvedValue({ sent: true }),
+    sendPasswordResetEmail: jest.fn().mockResolvedValue({ sent: true }),
+  };
+
+  const mockFileLogger = {
+    log: jest.fn().mockReturnValue(undefined),
+    warn: jest.fn().mockReturnValue(undefined),
+    error: jest.fn().mockReturnValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -48,6 +62,8 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: mockJwt },
         { provide: AuditService, useValue: mockAudit },
         { provide: TwoFactorService, useValue: mockTwoFactor },
+        { provide: MailService, useValue: mockMail },
+        { provide: FileLogger, useValue: mockFileLogger },
       ],
     }).compile();
 
