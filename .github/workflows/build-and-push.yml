@@ -118,6 +118,7 @@ jobs:
           ssh-keyscan -H "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
             "cd /root/projects/trading-os && \
+             docker system prune -af && \
              docker login ghcr.io -u '${GHCR_USER}' -p '${GHCR_PASS}' && \
              docker pull ghcr.io/${IMAGE_PREFIX}-api:latest && \
              docker pull ghcr.io/${IMAGE_PREFIX}-web:latest && \
