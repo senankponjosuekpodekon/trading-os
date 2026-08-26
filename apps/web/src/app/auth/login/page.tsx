@@ -26,8 +26,16 @@ export default function LoginPage() {
       if (msg.toLowerCase().includes('2fa token required')) {
         setNeedsTotp(true);
         setError('Code 2FA requis. Entrez le code de votre application d’authentification.');
+      } else if (msg.toLowerCase().includes('temporarily locked')) {
+        setError('Compte temporairement verrouillé après plusieurs tentatives échouées. Réessayez dans 15 minutes.');
+      } else if (msg.toLowerCase().includes('account disabled')) {
+        setError('Votre compte a été désactivé. Contactez un administrateur.');
+      } else if (msg.toLowerCase().includes('invalid 2fa')) {
+        setError('Code 2FA incorrect. Vérifiez votre application d'authentification.');
+      } else if (msg.toLowerCase().includes('invalid credentials') || msg.toLowerCase().includes('unauthorized')) {
+        setError('Email ou mot de passe incorrect.');
       } else {
-        setError('Email, mot de passe ou code 2FA incorrect.');
+        setError(msg || 'Une erreur est survenue. Veuillez réessayer.');
       }
     }
   };
