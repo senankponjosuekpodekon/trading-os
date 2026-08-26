@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle, Clock, BarChart3 } from 'lucide-react';
+import { Plus, Settings, Shield, Zap, ToggleLeft, ToggleRight, Trash2, RefreshCw, AlertCircle, ChevronDown, ChevronUp, UserCircle, Clock, BarChart3, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 import Link from 'next/link';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -65,6 +65,38 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const user = useAuthStore(s => s.user);
   const [timezone, setTimezone] = useState<string>(user?.timezone ?? getBrowserTimezone());
+
+  const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [pwError, setPwError] = useState('');
+
+  const changePassword = useMutation({
+    mutationFn: (data: { currentPassword: string; newPassword: string }) =>
+      api.post('/auth/change-password', data),
+    onSuccess: () => {
+      setPwForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setPwError('');
+      toast('Mot de passe modifié. Veuillez vous reconnecter.', { type: 'success', title: 'Sécurité' });
+      setTimeout(() => { window.location.href = '/auth/login'; }, 1500);
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message ?? 'Erreur lors du changement de mot de passe.';
+      setPwError(msg);
+    },
+  });
+
+  const handlePasswordChange = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError('');
+    if (pwForm.newPassword.length < 8) {
+      setPwError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+      return;
+    }
+    if (pwForm.newPassword !== pwForm.confirmPassword) {
+      setPwError('Les mots de passe ne correspondent pas.');
+      return;
+    }
+    changePassword.mutate({ currentPassword: pwForm.currentPassword, newPassword: pwForm.newPassword });
+  };
 
   const saveTimezone = useMutation({
     mutationFn: (tz: string) => api.patch('/users/me', { timezone: tz }),
@@ -199,6 +231,69 @@ export default function SettingsPage() {
             {saveTimezone.isPending && <RefreshCw className="w-3.5 h-3.5 text-gray-500 animate-spin" />}
             {saveTimezone.isSuccess && <span className="text-xs text-emerald-400">Sauvegardé</span>}
           </div>
+        </div>
+
+        {/* Changement de mot de passe */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Lock className="w-4 h-4 text-gray-500" />
+            <h3 className="text-white font-semibold">Changer le mot de passe</h3>
+          </div>
+          <form onSubmit={handlePasswordChange} className="space-y-4">
+            {pwError && (
+              <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {pwError}
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Mot de passe actuel</label>
+              <input
+                type="password"
+                value={pwForm.currentPassword}
+                onChange={e => setPwForm(v => ({ ...v, currentPassword: e.target.value }))}
+                required
+                className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                placeholder="••••••••"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Nouveau mot de passe</label>
+                <input
+                  type="password"
+                  value={pwForm.newPassword}
+                  onChange={e => setPwForm(v => ({ ...v, newPassword: e.target.value }))}
+                  required
+                  minLength={8}
+                  className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                  placeholder="••••••••"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmer</label>
+                <input
+                  type="password"
+                  value={pwForm.confirmPassword}
+                  onChange={e => setPwForm(v => ({ ...v, confirmPassword: e.target.value }))}
+                  required
+                  minLength={8}
+                  className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={changePassword.isPending}
+                className="flex items-center gap-2 px-6 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg text-sm transition-colors"
+              >
+                {changePassword.isPending && <RefreshCw className="w-4 h-4 animate-spin" />}
+                {changePassword.isPending ? 'Modification...' : 'Changer le mot de passe'}
+              </button>
+            </div>
+          </form>
         </div>
 
         {/* Profil trader */}

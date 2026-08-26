@@ -1,10 +1,11 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException, Res } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException, Res, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
-import { IsString, IsOptional, IsEmail } from 'class-validator';
+import { IsString, IsOptional, IsEmail, MinLength } from 'class-validator';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { JwtAuthGuard } from './jwt-auth.guard';
 import { ConfigService } from '@nestjs/config';
 
 class RefreshDto {
@@ -27,6 +28,15 @@ class VerifyEmailDto {
 class ResendVerificationDto {
   @IsEmail()
   email!: string;
+}
+
+class ChangePasswordDto {
+  @IsString()
+  currentPassword!: string;
+
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
 }
 
 @Controller('auth')
@@ -135,5 +145,16 @@ export class AuthController {
   async resendVerification(@Body() dto: ResendVerificationDto) {
     // TODO: wire SMTP sender (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
     return { queued: true, email: dto.email };
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  async changePassword(@Body() dto: ChangePasswordDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const userId = (req.user as any)?.id;
+    if (!userId) throw new UnauthorizedException('Not authenticated');
+    const result = await this.authService.changePassword(userId, dto.currentPassword, dto.newPassword);
+    this.clearAuthCookies(res);
+    return result;
   }
 }

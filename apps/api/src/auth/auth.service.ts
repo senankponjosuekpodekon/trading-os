@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
@@ -94,6 +94,30 @@ export class AuthService {
       this.audit.log({ userId: user.id, action: 'LOGIN', resource: 'auth', details: { email: dto.email } }),
     );
     return { user: userWithoutPassword, ...tokens };
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('User not found');
+
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) throw new UnauthorizedException('Current password is incorrect');
+
+    if (newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters');
+
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashed },
+    });
+
+    await this.revokeAllUserTokens(userId);
+
+    await rlsContext.run(userId, () =>
+      this.audit.log({ userId, action: 'PASSWORD_CHANGE', resource: 'auth' }),
+    );
+
+    return { success: true };
   }
 
   async refresh(refreshToken: string) {
