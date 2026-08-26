@@ -43,6 +43,8 @@ import { SignalChannelsModule } from './signal-channels/signal-channels.module';
 import { SignalDistributionModule } from './signal-distribution/signal-distribution.module';
 import { AdminModule } from './admin/admin.module';
 import { ReportsModule } from './reports/reports.module';
+import { LoggerModule } from './logger/logger.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -87,6 +89,8 @@ import { ReportsModule } from './reports/reports.module';
     SecurityModule,
     AdminModule,
     ReportsModule,
+    LoggerModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [

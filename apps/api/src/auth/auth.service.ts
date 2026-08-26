@@ -8,6 +8,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { rlsContext } from '../prisma/rls-context';
 import { AuditService } from '../audit/audit.service';
 import { TwoFactorService } from './two-factor.service';
+import { MailService } from '../mail/mail.service';
+import { FileLogger } from '../logger/file-logger.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -22,6 +24,8 @@ export class AuthService {
     private jwt: JwtService,
     private audit: AuditService,
     private twoFactor: TwoFactorService,
+    private mail: MailService,
+    private fileLogger: FileLogger,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -55,24 +59,37 @@ export class AuthService {
 
     const tokens = await this.generateTokenPair(user.id, user.email, user.role, undefined, user.refreshTokenVersion);
     const { password: _password, ...userWithoutPassword } = user;
+
+    const verificationUrl = `https://trading.stiamond.net/auth/verify-email?token=${emailVerificationToken}`;
+    const mailResult = await this.mail.sendVerificationEmail(user.email, verificationUrl);
+    this.fileLogger.log('User registered', { userId: user.id, email: user.email, verificationSent: mailResult.sent });
+
     return { user: userWithoutPassword, emailVerificationToken, ...tokens };
   }
 
   async login(dto: LoginDto) {
     const user: User | null = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) {
+      this.fileLogger.warn('Login failed', { email: dto.email, reason: 'unknown user' });
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
+      this.fileLogger.warn('Login failed', { email: dto.email, userId: user.id, reason: 'account locked' });
       throw new UnauthorizedException('Account temporarily locked');
     }
 
     const valid = await bcrypt.compare(dto.password, user.password);
     if (!valid) {
       await this.recordFailedLogin(user.id);
+      this.fileLogger.warn('Login failed', { email: dto.email, userId: user.id, reason: 'invalid password' });
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (!user.isActive) throw new UnauthorizedException('Account disabled');
+    if (!user.isActive) {
+      this.fileLogger.warn('Login failed', { email: dto.email, userId: user.id, reason: 'account disabled' });
+      throw new UnauthorizedException('Account disabled');
+    }
 
     if (user.totpEnabled) {
       if (!dto.totpToken) throw new UnauthorizedException('2FA token required');
@@ -93,6 +110,7 @@ export class AuthService {
     await rlsContext.run(user.id, () =>
       this.audit.log({ userId: user.id, action: 'LOGIN', resource: 'auth', details: { email: dto.email } }),
     );
+    this.fileLogger.log('User logged in', { userId: user.id, email: user.email });
     return { user: userWithoutPassword, ...tokens };
   }
 
@@ -116,6 +134,7 @@ export class AuthService {
     await rlsContext.run(userId, () =>
       this.audit.log({ userId, action: 'PASSWORD_CHANGE', resource: 'auth' }),
     );
+    this.fileLogger.log('Password changed', { userId, email: user.email });
 
     return { success: true };
   }
@@ -135,12 +154,15 @@ export class AuthService {
       },
     });
 
-    // TODO: send email with reset link via SMTP
-    // For now the token is returned for manual delivery/testing
+    const resetUrl = `https://trading.stiamond.net/auth/reset-password?token=${token}`;
+    const mailResult = await this.mail.sendPasswordReset(email, resetUrl);
+
+    this.fileLogger.log('Password reset requested', { userId: user.id, email, sent: mailResult.sent });
+
     return {
       queued: true,
-      resetToken: token,
-      resetUrl: `https://trading.stiamond.net/auth/reset-password?token=${token}`,
+      sent: mailResult.sent,
+      resetUrl,
     };
   }
 
@@ -172,6 +194,7 @@ export class AuthService {
     await rlsContext.run(user.id, () =>
       this.audit.log({ userId: user.id, action: 'PASSWORD_RESET', resource: 'auth' }),
     );
+    this.fileLogger.log('Password reset completed', { userId: user.id, email: user.email });
 
     return { success: true };
   }

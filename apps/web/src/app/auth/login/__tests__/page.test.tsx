@@ -62,7 +62,7 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /se connecter/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/email, mot de passe ou code 2fa incorrect/i)).toBeInTheDocument();
+      expect(screen.getByText(/email ou mot de passe incorrect/i)).toBeInTheDocument();
     });
   });
 });

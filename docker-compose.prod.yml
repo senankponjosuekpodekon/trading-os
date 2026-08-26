@@ -54,6 +54,8 @@ services:
       - ollama_net
     ports:
       - "${API_PORT_HOST:-3002}:3001"
+    volumes:
+      - ./logs:/app/apps/api/logs
     depends_on:
       engine:
         condition: service_healthy
