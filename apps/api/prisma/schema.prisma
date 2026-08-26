@@ -71,6 +71,8 @@ model User {
   lockedUntil              DateTime?      @map("locked_until")
   emailVerified            Boolean        @default(false) @map("email_verified")
   emailVerificationToken   String?        @map("email_verification_token")
+  passwordResetToken       String?        @map("password_reset_token")
+  passwordResetTokenExpires DateTime?     @map("password_reset_token_expires")
   refreshTokenVersion      Int            @default(0) @map("refresh_token_version")
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt

@@ -120,6 +120,12 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-sm text-gray-500 mt-6">
+            <Link href="/auth/forgot-password" className="text-emerald-400 hover:text-emerald-300 font-medium">
+              Mot de passe oublié ?
+            </Link>
+          </p>
+
+          <p className="text-center text-sm text-gray-500 mt-6">
             Pas encore de compte ?{' '}
             <Link href="/auth/register" className="text-emerald-400 hover:text-emerald-300 font-medium">
               Créer un compte

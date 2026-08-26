@@ -120,6 +120,62 @@ export class AuthService {
     return { success: true };
   }
 
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) return { queued: true };
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: token,
+        passwordResetTokenExpires: expiresAt,
+      },
+    });
+
+    // TODO: send email with reset link via SMTP
+    // For now the token is returned for manual delivery/testing
+    return {
+      queued: true,
+      resetToken: token,
+      resetUrl: `https://trading.stiamond.net/auth/reset-password?token=${token}`,
+    };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        passwordResetToken: token,
+        passwordResetTokenExpires: { gt: new Date() },
+      },
+    });
+    if (!user) throw new UnauthorizedException('Invalid or expired reset token');
+
+    if (newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters');
+
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashed,
+        passwordResetToken: null,
+        passwordResetTokenExpires: null,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    await this.revokeAllUserTokens(user.id);
+
+    await rlsContext.run(user.id, () =>
+      this.audit.log({ userId: user.id, action: 'PASSWORD_RESET', resource: 'auth' }),
+    );
+
+    return { success: true };
+  }
+
   async refresh(refreshToken: string) {
     const hash = this.hashToken(refreshToken);
     const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash: hash } });

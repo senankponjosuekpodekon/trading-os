@@ -30,6 +30,20 @@ class ResendVerificationDto {
   email!: string;
 }
 
+class ForgotPasswordDto {
+  @IsEmail()
+  email!: string;
+}
+
+class ResetPasswordDto {
+  @IsString()
+  token!: string;
+
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}
+
 class ChangePasswordDto {
   @IsString()
   currentPassword!: string;
@@ -154,6 +168,20 @@ export class AuthController {
     const userId = (req.user as any)?.id;
     if (!userId) throw new UnauthorizedException('Not authenticated');
     const result = await this.authService.changePassword(userId, dto.currentPassword, dto.newPassword);
+    this.clearAuthCookies(res);
+    return result;
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(@Body() dto: ResetPasswordDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.resetPassword(dto.token, dto.newPassword);
     this.clearAuthCookies(res);
     return result;
   }
