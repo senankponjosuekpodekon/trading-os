@@ -9,6 +9,8 @@ import { EngineKeyGuard } from './engine-key.guard';
 import { TwoFactorController } from './two-factor.controller';
 import { TwoFactorService } from './two-factor.service';
 import { AuditModule } from '../audit/audit.module';
+import { MailModule } from '../mail/mail.module';
+import { LoggerModule } from '../logger/logger.module';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { AuditModule } from '../audit/audit.module';
       }),
     }),
     AuditModule,
+    MailModule,
+    LoggerModule,
   ],
   controllers: [AuthController, TwoFactorController],
   providers: [AuthService, TwoFactorService, JwtStrategy, EngineKeyGuard],
