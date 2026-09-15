@@ -15,7 +15,7 @@ export class EngineHttpService {
   private readonly circuitBreaker = new CircuitBreaker({
     failureThreshold: 5,
     successThreshold: 2,
-    timeout: 30_000,
+    timeout: 120_000,
   });
 
   constructor(
