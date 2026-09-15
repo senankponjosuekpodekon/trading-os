@@ -20,7 +20,7 @@ export class BacktestService {
     }
     delete payload.strategyId;
 
-    return this.engine.post('/backtest/run', payload, { timeout: 30_000 });
+    return this.engine.post('/backtest/run', payload, { timeout: 120_000 });
   }
 
   async runMulti(userId: string, dtos: RunBacktestDto[]) {
@@ -34,7 +34,7 @@ export class BacktestService {
       }),
     );
 
-    return this.engine.post('/backtest/multi', requests, { timeout: 60_000 });
+    return this.engine.post('/backtest/multi', requests, { timeout: 120_000 });
   }
 
   async advancedMetrics(body: any) {
@@ -42,7 +42,7 @@ export class BacktestService {
   }
 
   async patternStats(body: any) {
-    return this.engine.post('/backtest/pattern-stats', body, { timeout: 30_000 });
+    return this.engine.post('/backtest/pattern-stats', body, { timeout: 120_000 });
   }
 
   private async resolveStrategy(dto: RunBacktestDto, _userId: string) {
