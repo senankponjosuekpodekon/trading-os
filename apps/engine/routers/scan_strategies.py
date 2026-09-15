@@ -45,6 +45,35 @@ DEFAULT_STRATEGY = {
     },
 }
 
+# Lightweight default for backtests: disable heavy SMC/pattern logic
+# to keep CPU and memory under control when replaying hundreds of bars.
+BACKTEST_DEFAULT_STRATEGY = {
+    "id": None,
+    "name": "Backtest Default",
+    "rules": {
+        "ema_fast": 20,
+        "ema_slow": 50,
+        "ema_trend": 200,
+        "rsi_period": 14,
+        "rsi_oversold": 30,
+        "rsi_overbought": 70,
+        "rsi_bullish_zone": 45,
+        "rsi_bearish_zone": 55,
+        "min_confidence": 55,
+        "min_dps": 0,
+        "volume_spike_min": 1.3,
+        "use_price_action": True,
+        "use_sr_zones": True,
+        "use_smc": False,
+        "use_patterns": False,
+        "atr_min_pct": 0.0,
+        "trigger": "BREAKOUT",
+        "markets": [],
+        "profiles": [],
+        "timeframes": ["1h", "4h"],
+    },
+}
+
 
 async def _load_active_strategies() -> list[dict]:
     """Charge les stratégies actives depuis la DB (cache 60s)."""

@@ -18,6 +18,7 @@ from routers.scan import (
 )
 from routers.scan_fetchers import fetch_binance_klines_unlimited
 from routers.symbol_mappings import SYMBOL_TO_BINANCE
+from routers.scan_strategies import BACKTEST_DEFAULT_STRATEGY
 from routers.regime import detect_regime
 
 router = APIRouter()
@@ -271,9 +272,10 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         except Exception:
             pass  # regime detection failure should not crash backtest
 
+        _strategy = req.strategy or BACKTEST_DEFAULT_STRATEGY
         result = analyze_candles(
             req.symbol, req.timeframe, window,
-            strategy=req.strategy,
+            strategy=_strategy,
             htf_regime=htf_regime,
             mtf_regime=mtf_regime,
         )
