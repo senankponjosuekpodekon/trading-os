@@ -28,7 +28,7 @@ export class RunBacktestDto {
   @IsNumber()
   @Min(0)
   @Max(100)
-  min_confidence?: number = 55.0;
+  min_confidence?: number = 40.0;
 
   @IsOptional()
   @IsString()

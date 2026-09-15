@@ -32,7 +32,7 @@ class BacktestRequest(BaseModel):
     lookback_bars:   int   = 500       # Nombre de bougies historiques
     initial_capital: float = 10000.0
     risk_pct:        float = 1.0       # % capital risqué par trade
-    min_confidence:  float = 55.0      # Seuil minimum confiance
+    min_confidence:  float = 40.0      # Seuil minimum confiance
     strategy:        Optional[dict] = None  # Stratégie DSL dynamique (Testeur Lab)
 
 class TradeResult(BaseModel):
