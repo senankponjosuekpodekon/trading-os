@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { RlsContextInterceptor } from './prisma/rls-context.interceptor';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -49,6 +51,14 @@ import { MailModule } from './mail/mail.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    BullModule.forRootAsync({
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          url: config.get<string>('REDIS_URL', 'redis://redis:6379'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     ThrottlerModule.forRoot([
       { name: 'short',  ttl: 1_000,  limit: 10  },
       { name: 'medium', ttl: 10_000, limit: 50  },
