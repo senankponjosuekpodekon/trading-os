@@ -16,6 +16,8 @@ from routers.scan import (
     TF_MAP,
     _TF_HIERARCHY,
 )
+from routers.scan_fetchers import fetch_binance_klines_unlimited
+from routers.symbol_mappings import SYMBOL_TO_BINANCE
 from routers.regime import detect_regime
 
 router = APIRouter()
@@ -146,7 +148,10 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
     # Récupérer plus de données (max Binance = 1000 bougies)
     limit = min(req.lookback_bars + 50, 1000)
-    df = await fetch_klines_fallback(req.symbol, tf, limit=limit, timeout=25.0)
+    if req.symbol in SYMBOL_TO_BINANCE:
+        df = await fetch_binance_klines_unlimited(req.symbol, tf, limit)
+    else:
+        df = await fetch_klines_fallback(req.symbol, tf, limit=limit, timeout=25.0)
 
     if df is None or len(df) < 60:
         raise ValueError("Pas assez de données historiques")
