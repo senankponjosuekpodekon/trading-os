@@ -123,6 +123,12 @@ export class EngineProxyController {
     return this.engine.post('/metrics/reset', {});
   }
 
+  // ── Macro
+  @Get('macro/rotation')
+  macroRotation() {
+    return this.engine.get('/macro/rotation', { timeout: 30_000 });
+  }
+
   // ── Africa ────────────────────────────────────────────────────────
   @Get('africa/health')
   africaHealth() {
