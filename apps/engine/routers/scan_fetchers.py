@@ -252,8 +252,8 @@ async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) ->
         return None
 
 
-@rate_limit(max_concurrent=10, min_delay=0.05)
-async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
+# (rate limit moved to wrapper)
+async def _do_binance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV from Binance REST API."""
     import time as _time
     binance_sym = SYMBOL_TO_BINANCE.get(symbol)
@@ -305,6 +305,17 @@ async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> 
             error_type=type(exc).__name__, error=repr(exc),
         )
         return None
+
+
+@rate_limit(max_concurrent=10, min_delay=0.05)
+async def fetch_binance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
+    """Rate-limited Binance klines (for scan loops)."""
+    return await _do_binance_klines(symbol, interval, limit)
+
+
+async def fetch_binance_klines_unlimited(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
+    """Unthrottled Binance klines (for chart)."""
+    return await _do_binance_klines(symbol, interval, limit)
 
 
 # ── Parallel klines fallback ─────────────────────────────────────────

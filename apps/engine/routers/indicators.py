@@ -18,8 +18,13 @@ async def get_klines(
         fetch_klines_fallback,
         TF_MAP,
     )
+    from routers.scan_fetchers import fetch_binance_klines_unlimited
+    from routers.symbol_mappings import SYMBOL_TO_BINANCE
     tf = TF_MAP.get(interval, interval)
-    df = await fetch_klines_fallback(symbol, tf)
+    if symbol in SYMBOL_TO_BINANCE:
+        df = await fetch_binance_klines_unlimited(symbol, tf, limit)
+    else:
+        df = await fetch_klines_fallback(symbol, tf)
     if df is None or len(df) < 2:
         raise HTTPException(status_code=404, detail=f"Aucune donnée pour {symbol} / {interval}")
     # Trier par time croissant et supprimer les doublons
