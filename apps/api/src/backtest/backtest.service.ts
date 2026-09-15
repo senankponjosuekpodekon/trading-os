@@ -38,7 +38,7 @@ export class BacktestService {
   }
 
   async advancedMetrics(body: any) {
-    return this.engine.post('/backtest/advanced-metrics', body, { timeout: 30_000 });
+    return this.engine.get('/backtest/advanced-metrics', { timeout: 30_000 });
   }
 
   async patternStats(body: any) {

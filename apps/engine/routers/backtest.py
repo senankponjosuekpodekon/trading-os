@@ -30,8 +30,6 @@ class BacktestRequest(BaseModel):
     initial_capital: float = 10000.0
     risk_pct:        float = 1.0       # % capital risqué par trade
     min_confidence:  float = 55.0      # Seuil minimum confiance
-    use_smc:         bool  = True
-    use_pa:          bool  = True
     strategy:        Optional[dict] = None  # Stratégie DSL dynamique (Testeur Lab)
 
 class TradeResult(BaseModel):
@@ -45,6 +43,7 @@ class TradeResult(BaseModel):
     rr_achieved: float
     confidence:  float
     signal_reasons: list[str]
+    intrabar_ambiguous: bool = False
     win:         bool
     regime:      Optional[str] = None
     duration_bars: Optional[int] = None
@@ -147,7 +146,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
     # Récupérer plus de données (max Binance = 1000 bougies)
     limit = min(req.lookback_bars + 50, 1000)
-    df = await fetch_klines_fallback(req.symbol, tf, limit=limit, timeout=12.0)
+    df = await fetch_klines_fallback(req.symbol, tf, limit=limit, timeout=25.0)
 
     if df is None or len(df) < 60:
         raise ValueError("Pas assez de données historiques")
@@ -227,6 +226,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
                     "confidence":   trade_conf,
                     "signal_reasons": trade_reasons[:3],
                     "win":          pnl > 0,
+                    "intrabar_ambiguous": hit_sl and hit_tp,
                     "exit_reason":  "TP" if hit_tp else ("SL" if hit_sl else "TIMEOUT"),
                     "regime":       (result.get("regime") or {}).get("regime", "UNKNOWN"),
                     "pattern_name": trade_pattern_name,
