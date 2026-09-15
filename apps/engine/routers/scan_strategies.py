@@ -49,11 +49,11 @@ DEFAULT_STRATEGY = {
 # to keep CPU and memory under control when replaying hundreds of bars.
 BACKTEST_DEFAULT_STRATEGY = {
     "id": None,
-    "name": "Backtest Default",
+    "name": "Backtest Fast",
     "rules": {
-        "ema_fast": 20,
-        "ema_slow": 50,
-        "ema_trend": 200,
+        "ema_fast": 9,
+        "ema_slow": 21,
+        "ema_trend": 50,
         "rsi_period": 14,
         "rsi_oversold": 30,
         "rsi_overbought": 70,
@@ -65,7 +65,7 @@ BACKTEST_DEFAULT_STRATEGY = {
         "use_price_action": True,
         "use_sr_zones": True,
         "use_smc": False,
-        "use_patterns": True,
+        "use_patterns": False,
         "atr_min_pct": 0.0,
         "trigger": "BREAKOUT",
         "markets": [],
