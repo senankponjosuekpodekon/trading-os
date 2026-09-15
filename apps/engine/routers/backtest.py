@@ -244,7 +244,8 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
             continue
 
         # ── Scanner la bougie courante ──
-        window = df.iloc[max(0, i - 200):i + 1].copy()
+        # Limite la fenêtre à 80 bougies pour garder le backtest fluide
+        window = df.iloc[max(0, i - 80):i + 1].copy()
 
         # ── Calculer le régime MTF/HTF depuis les données historiques ──
         mtf_tf, htf_tf = _TF_HIERARCHY.get(req.timeframe, ("4h", "1d"))
