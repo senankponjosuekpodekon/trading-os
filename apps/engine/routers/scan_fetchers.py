@@ -178,7 +178,6 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
 @rate_limit(max_concurrent=8, min_delay=0.1)
 async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
     """Fetch OHLCV via yfinance — free fallback for Forex, commodities, stocks."""
-    import datetime as _dt
     yf_sym = SYMBOL_TO_YFINANCE.get(symbol)
     if not yf_sym:
         # Accept bare tickers like AAPL, AAPL.US, TSLA, BRK.A
