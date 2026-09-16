@@ -41,6 +41,8 @@ class TradeResult(BaseModel):
     direction:   str
     entry_price: float
     exit_price:  float
+    stop_loss:   float
+    take_profit: float
     pnl:         float
     pnl_pct:     float
     rr_achieved: float
@@ -226,6 +228,8 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
                     "direction":    direction,
                     "entry_price":  round(entry_price, 4),
                     "exit_price":   round(exit_price, 4),
+                    "stop_loss":    round(stop_loss, 4),
+                    "take_profit":  round(take_profit, 4),
                     "pnl":          round(pnl, 2),
                     "pnl_pct":      round(pnl_pct, 3),
                     "rr_achieved":  round(rr_achieved, 2),
