@@ -103,7 +103,14 @@ interface BacktestResult {
   outperformance_pct: number;
 }
 
-const SYMBOLS   = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT'];
+const SYMBOLS = [
+  'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT',
+  'AVAX/USDT', 'DOT/USDT', 'LINK/USDT', 'LTC/USDT', 'TRX/USDT', 'TON/USDT',
+  'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD', 'NZD/USD',
+  'AAPL', 'TSLA', 'MSFT', 'NVDA', 'AMZN', 'META', 'GOOGL', 'NFLX', 'AMD', 'INTC',
+  'XAU/USD', 'XAG/USD', 'WTI/USD', 'BRENT/USD',
+  'V75', 'V100', 'BOOM500', 'CRASH500',
+];
 const TIMEFRAMES = ['15m', '1h', '4h', '1d'];
 
 function MetricCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
@@ -197,10 +204,16 @@ export default function BacktestPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div>
               <label className="text-xs text-gray-400 mb-1 block">Symbole</label>
-              <select value={symbol} onChange={e => setSymbol(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
-                {SYMBOLS.map(s => <option key={s}>{s}</option>)}
-              </select>
+              <input
+                list="backtest-symbols"
+                type="text"
+                value={symbol}
+                onChange={e => setSymbol(e.target.value.toUpperCase())}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+              />
+              <datalist id="backtest-symbols">
+                {SYMBOLS.map(s => <option key={s} value={s} />)}
+              </datalist>
             </div>
             <div>
               <label className="text-xs text-gray-400 mb-1 block">Timeframe</label>
