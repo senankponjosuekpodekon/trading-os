@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { of } from 'rxjs';
 import request from 'supertest';
+import { BullModule } from '@nestjs/bullmq';
 import { BacktestModule } from './backtest.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
@@ -24,7 +25,17 @@ describe('BacktestController (integration)', () => {
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BacktestModule],
+      imports: [
+        ConfigModule.forRoot({ isGlobal: true }),
+        BullModule.forRoot({
+          connection: {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: +(process.env.REDIS_PORT || 6380),
+          },
+        }),
+        PrismaModule,
+        BacktestModule,
+      ],
     })
       .overrideProvider(HttpService)
       .useValue(httpService)
