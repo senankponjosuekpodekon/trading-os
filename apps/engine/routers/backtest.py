@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 import asyncio
 import os
+from datetime import datetime, timezone
 
 from routers.scan import (
     fetch_klines_fallback,
@@ -162,9 +163,18 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         raise ValueError("Pas assez de données historiques")
 
     def _to_iso(ts):
+        if isinstance(ts, pd.Timestamp):
+            return ts.to_pydatetime().isoformat()
+        if isinstance(ts, (int, float, np.integer, np.floating)) and not isinstance(ts, bool):
+            return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
         if hasattr(ts, 'isoformat'):
             return ts.isoformat()
         return str(ts)
+
+    def _bar_time(i: int):
+        if 'time' in df.columns:
+            return _to_iso(df['time'].iloc[i])
+        return _to_iso(df.index[i])
 
     capital   = req.initial_capital
     equity    = [capital]
@@ -232,7 +242,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
                 signals.append({
                     "type": "exit",
                     "bar_index": i - warm_up,
-                    "time": _to_iso(df.index[i]),
+                    "time": _bar_time(i),
                     "direction": direction,
                     "price": round(exit_price, 4),
                     "exit_reason":  "TP" if hit_tp else ("SL" if hit_sl else "TIMEOUT"),
@@ -336,7 +346,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         signals.append({
             "type": "entry",
             "bar_index": i - warm_up,
-            "time": _to_iso(df.index[i]),
+            "time": _bar_time(i),
             "direction": sig,
             "price": round(bar_close, 4),
             "sl": round(stop_loss, 4),
@@ -398,7 +408,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
     pattern_stats = compute_pattern_stats(trades)
 
-    bar_times = [_to_iso(df.index[j]) for j in range(warm_up, len(df))]
+    bar_times = [_bar_time(j) for j in range(warm_up, len(df))]
 
     return BacktestResult(
         symbol          = req.symbol,
