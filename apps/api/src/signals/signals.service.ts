@@ -831,13 +831,13 @@ export class SignalsService {
   }
 
   /**
-   * Ingest a single high-confidence signal from the engine warmup loops.
-   * Called by the engine when a warmup scan produces BUY/SELL with confidence >= 70.
+   * Ingest a signal from the engine warmup loops.
+   * Called by the engine when a warmup scan produces BUY/SELL with confidence >= 50.
    * This bridges the gap between warmup (scan_history only) and SignalCards (signals table).
    */
   async ingestSignal(result: any) {
     if (!result || !result.signal || result.signal === 'NEUTRAL') return null;
-    if ((result.confidence ?? 0) < 70) return null;
+    if ((result.confidence ?? 0) < 50) return null;
     try {
       const saved = await this.saveSignals([result], '*');
       if (saved.length > 0) {

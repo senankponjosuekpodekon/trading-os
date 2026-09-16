@@ -138,13 +138,13 @@ _ingest_client: httpx.AsyncClient | None = None
 
 
 async def _try_ingest_signal(result: dict, timeframe: str) -> None:
-    """If signal is BUY/SELL with confidence >= 70, POST to API /signals/ingest.
-    This creates a Signal record → appears as a SignalCard in the frontend.
+    """If signal is BUY/SELL with confidence >= 50, POST to API /signals/ingest.
+    This creates a Signal record → appears as a SignalCard in the frontend, ready to execute.
     Fire-and-forget, 5s timeout, deduplicated per symbol+timeframe (5 min cooldown).
     """
     sig = result.get("signal", "NEUTRAL")
     conf = result.get("confidence", 0)
-    if sig not in ("BUY", "SELL") or conf < 70:
+    if sig not in ("BUY", "SELL") or conf < 50:
         return
     sym = result.get("symbol", "")
     key = f"{sym}:{timeframe}"

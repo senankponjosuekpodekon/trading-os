@@ -257,6 +257,9 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
             >
               {copied ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
+            {(isBuy || isSell) && (
+              <OneClickExecute signal={signal} />
+            )}
             <SignalBadge signal={signal.signal} />
           </div>
           <div className="flex items-center gap-2">
