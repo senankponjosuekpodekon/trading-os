@@ -136,5 +136,7 @@ jobs:
             docker tag ghcr.io/${IMAGE_PREFIX}-api:latest trading-os-api:latest
             docker tag ghcr.io/${IMAGE_PREFIX}-web:latest trading-os-web:latest
             docker tag ghcr.io/${IMAGE_PREFIX}-engine:latest trading-os-engine:latest
+            docker network create postgres_default 2>/dev/null || true
+            docker network create ollama_default 2>/dev/null || true
             docker compose -f docker-compose.prod.yml up -d
             echo 'Deployment complete'
