@@ -34,6 +34,7 @@ interface BacktestChartProps {
 export function BacktestChart({ klines, signals, height = 420 }: BacktestChartProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
+  const [overlay, setOverlay] = useState<'all' | 'entry-exit' | 'patterns' | 'smc'>('all');
 
   useEffect(() => {
     if (!wrapperRef.current) return;
@@ -120,8 +121,16 @@ export function BacktestChart({ klines, signals, height = 420 }: BacktestChartPr
       };
     }).filter(Boolean);
 
-    return { candles, marks, yMin, yMax, pad };
-  }, [klines, signals, width, height]);
+    const visibleMarks = marks.filter((m: any) => {
+      if (overlay === 'all') return true;
+      if (overlay === 'entry-exit') return m.type === 'entry' || m.type === 'exit';
+      if (overlay === 'patterns') return !!m.pattern;
+      if (overlay === 'smc') return !m.pattern && (m.reasons?.length);
+      return true;
+    });
+
+    return { candles, marks: visibleMarks, yMin, yMax, pad };
+  }, [klines, signals, width, height, overlay]);
 
   if (!klines.length) return null;
 
@@ -140,6 +149,16 @@ export function BacktestChart({ klines, signals, height = 420 }: BacktestChartPr
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500" />TP</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-red-500" />SL</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-gray-400" />Timeout</span>
+          <select
+            value={overlay}
+            onChange={e => setOverlay(e.target.value as any)}
+            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-emerald-500"
+          >
+            <option value="all">Tous les marqueurs</option>
+            <option value="entry-exit">Entrées / Sorties</option>
+            <option value="patterns">Patterns</option>
+            <option value="smc">Détection SMC</option>
+          </select>
         </div>
       </div>
       <svg width={width} height={height} className="bg-gray-900 border border-gray-800 rounded-xl">
@@ -195,7 +214,7 @@ export function BacktestChart({ klines, signals, height = 420 }: BacktestChartPr
             )}
             <title>
               {m.type === 'entry' ? `Entrée ${m.direction}\n` : `Sortie ${m.exit_reason}\n`}
-              Prix: {formatPrice(m.price)}\n{formatTime(m.time)}\n{m.confidence !== undefined ? `Confiance: ${m.confidence}%\n` : ''}{m.pattern ? `Pattern: ${m.pattern}\n` : ''}{m.intrabar_ambiguous ? '⚠️ Intrabar ambigu' : ''}
+              Prix: {formatPrice(m.price)}\n{formatTime(m.time)}\n{m.confidence !== undefined ? `Confiance: ${m.confidence}%\n` : ''}{m.pattern ? `Pattern: ${m.pattern}\n` : ''}{m.reasons?.length ? `Détection: ${m.reasons.join(', ')}\n` : ''}{m.intrabar_ambiguous ? '⚠️ Intrabar ambigu' : ''}
             </title>
           </g>
         ))}

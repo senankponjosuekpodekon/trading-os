@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
-import { Play, TrendingUp, TrendingDown, BarChart2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, TrendingUp, TrendingDown, BarChart2, AlertCircle, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
 
 const MiniEquityChart = dynamic(
   () => import('@/components/backtest/MiniEquityChart').then(mod => mod.MiniEquityChart),
@@ -120,6 +120,18 @@ const SYMBOLS = [
 ];
 const TIMEFRAMES = ['15m', '1h', '4h', '1d'];
 
+function InfoLabel({ label, tip }: { label: string; tip: string }) {
+  return (
+    <span className="group relative inline-flex items-center gap-1 text-xs text-gray-400 mb-1 block">
+      {label}
+      <HelpCircle className="w-3 h-3 text-gray-600 group-hover:text-emerald-400" />
+      <span className="absolute bottom-full left-0 mb-1 hidden w-56 group-hover:block z-20 rounded-lg bg-gray-800 border border-gray-700 p-2 text-[10px] text-white shadow-lg">
+        {tip}
+      </span>
+    </span>
+  );
+}
+
 function MetricCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -226,7 +238,7 @@ export default function BacktestPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Stratégie</label>
+              <InfoLabel label="Stratégie" tip="Stratégie enregistrée. Si vide, les toggles SMC / Patterns manuels sont utilisés." />
               <select value={strategyId} onChange={e => setStrategyId(e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
                 <option value="">Manuelle (SMC/Patterns)</option>
@@ -236,7 +248,7 @@ export default function BacktestPage() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Symbole</label>
+              <InfoLabel label="Symbole" tip="Paire ou actif à tester. Supporte crypto, forex, stocks, commodities et synthetic." />
               <input
                 list="backtest-symbols"
                 type="text"
@@ -249,32 +261,32 @@ export default function BacktestPage() {
               </datalist>
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Timeframe</label>
+              <InfoLabel label="Timeframe" tip="Intervalle temporel des bougies historiques utilisées pour générer les signaux." />
               <select value={timeframe} onChange={e => setTimeframe(e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
                 {TIMEFRAMES.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Bougies</label>
+              <InfoLabel label="Bougies" tip="Nombre de bougies historiques à charger. Minimum 100, maximum 1000." />
               <input type="number" value={lookback} min={100} max={1000} step={50}
                 onChange={e => setLookback(+e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" />
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Capital ($)</label>
+              <InfoLabel label="Capital ($)" tip="Capital initial simulé. Il sert de base à la courbe d'équité et au sizing." />
               <input type="number" value={capital} min={1000} step={1000}
                 onChange={e => setCapital(+e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" />
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Risque %</label>
+              <InfoLabel label="Risque %" tip="Pourcentage du capital mis en danger sur chaque trade. Détermine la taille de position." />
               <input type="number" value={riskPct} min={0.1} max={5} step={0.1}
                 onChange={e => setRiskPct(+e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" />
             </div>
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Conf. min %</label>
+              <InfoLabel label="Conf. min %" tip="Seuil de confiance minimum requis pour qu'un signal génère une entrée." />
               <input type="number" value={minConf} min={40} max={90} step={5}
                 onChange={e => setMinConf(+e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" />
@@ -283,14 +295,14 @@ export default function BacktestPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
             <div className="flex items-center gap-3 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2">
               <input id="use-smc" type="checkbox" checked={useSmc} onChange={e => setUseSmc(e.target.checked)} className="w-4 h-4 accent-emerald-500" />
-              <label htmlFor="use-smc" className="text-sm text-gray-300">SMC</label>
+              <label htmlFor="use-smc" className="cursor-pointer"><InfoLabel label="SMC" tip="Active la détection SMC (Order Blocks, FVG, liquidité) dans la stratégie manuelle." /></label>
             </div>
             <div className="flex items-center gap-3 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2">
               <input id="use-patterns" type="checkbox" checked={usePatterns} onChange={e => setUsePatterns(e.target.checked)} className="w-4 h-4 accent-emerald-500" />
-              <label htmlFor="use-patterns" className="text-sm text-gray-300">Patterns</label>
+              <label htmlFor="use-patterns" className="cursor-pointer"><InfoLabel label="Patterns" tip="Active la détection des patterns de prix (triangle, double top, etc.)." /></label>
             </div>
             <div className="flex items-center gap-2 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2">
-              <label className="text-xs text-gray-400">Marché</label>
+              <InfoLabel label="Marché" tip="Marché utilisé pour le backtest batch sur plusieurs symboles." />
               <select value={market} onChange={e => setMarket(e.target.value)}
                 className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-emerald-500">
                 <option value="crypto">Crypto</option>
