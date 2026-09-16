@@ -168,7 +168,11 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         if isinstance(ts, pd.Timestamp):
             return ts.to_pydatetime().isoformat()
         if isinstance(ts, (int, float, np.integer, np.floating)) and not isinstance(ts, bool):
-            return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+            ts_float = float(ts)
+            # Binance returns millisecond timestamps, others return seconds
+            if ts_float > 1e12:
+                ts_float = ts_float / 1000.0
+            return datetime.fromtimestamp(ts_float, tz=timezone.utc).isoformat()
         if hasattr(ts, 'isoformat'):
             return ts.isoformat()
         return str(ts)
