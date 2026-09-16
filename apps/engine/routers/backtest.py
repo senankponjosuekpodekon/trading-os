@@ -77,6 +77,8 @@ class BacktestResult(BaseModel):
     final_capital:   float
     equity_curve:    list[float]
     trade_list:      list[dict]
+    signals:         list[dict] = []
+    bar_times:       list[str] = []
     benchmark_pnl_pct: float
     outperformance_pct: float
     regime_breakdown: dict
@@ -159,9 +161,15 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
     if df is None or len(df) < 60:
         raise ValueError("Pas assez de données historiques")
 
+    def _to_iso(ts):
+        if hasattr(ts, 'isoformat'):
+            return ts.isoformat()
+        return str(ts)
+
     capital   = req.initial_capital
     equity    = [capital]
     trades: list[dict] = []
+    signals: list[dict] = []
 
     warm_up    = 50   # bougies de chauffe pour indicateurs
     in_trade   = False
@@ -220,6 +228,16 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
                 capital += pnl
                 equity.append(capital)
+
+                signals.append({
+                    "type": "exit",
+                    "bar_index": i - warm_up,
+                    "time": _to_iso(df.index[i]),
+                    "direction": direction,
+                    "price": round(exit_price, 4),
+                    "exit_reason":  "TP" if hit_tp else ("SL" if hit_sl else "TIMEOUT"),
+                    "intrabar_ambiguous": hit_sl and hit_tp,
+                })
 
                 trades.append({
                     "entry_bar":    entry_bar,
@@ -315,6 +333,20 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         trade_conf  = conf
         trade_reasons = result.get("reasons", [])
 
+        signals.append({
+            "type": "entry",
+            "bar_index": i - warm_up,
+            "time": _to_iso(df.index[i]),
+            "direction": sig,
+            "price": round(bar_close, 4),
+            "sl": round(stop_loss, 4),
+            "tp1": round(take_profit, 4),
+            "confidence": round(conf, 1),
+            "pattern": trade_pattern_name,
+            "regime": (result.get("regime") or {}).get("regime", "UNKNOWN"),
+            "reasons": trade_reasons[:3],
+        })
+
         # Capture top detected pattern for pattern-level journaling
         detected = result.get("detectedPatterns") or []
         top_pattern = detected[0] if detected else {}
@@ -366,6 +398,8 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
     pattern_stats = compute_pattern_stats(trades)
 
+    bar_times = [_to_iso(df.index[j]) for j in range(warm_up, len(df))]
+
     return BacktestResult(
         symbol          = req.symbol,
         timeframe       = req.timeframe,
@@ -386,6 +420,8 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         final_capital   = round(capital, 2),
         equity_curve    = [round(v, 2) for v in equity],
         trade_list      = trades,
+        signals         = signals,
+        bar_times       = bar_times,
         benchmark_pnl_pct = round(benchmark_pnl_pct, 2),
         outperformance_pct = round(outperformance_pct, 2),
         regime_breakdown = regime_stats,
