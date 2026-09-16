@@ -1,6 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { api } from '@/lib/api';
@@ -103,6 +103,13 @@ interface BacktestResult {
   outperformance_pct: number;
 }
 
+interface Strategy {
+  id: string;
+  name: string;
+  rules?: Record<string, any>;
+  isActive?: boolean;
+}
+
 const SYMBOLS = [
   'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT',
   'AVAX/USDT', 'DOT/USDT', 'LINK/USDT', 'LTC/USDT', 'TRX/USDT', 'TON/USDT',
@@ -132,44 +139,60 @@ export default function BacktestPage() {
   const [minConf,     setMinConf]     = useState(55);
   const [useSmc,      setUseSmc]      = useState(false);
   const [usePatterns, setUsePatterns] = useState(false);
+  const [strategyId,  setStrategyId]   = useState<string>('');
   const [market,      setMarket]      = useState('crypto');
   const [showTrades,  setShowTrades]  = useState(false);
 
+  const { data: strategies } = useQuery<Strategy[]>({
+    queryKey: ['strategies'],
+    queryFn: async () => (await api.get('/strategies')).data,
+  });
+
   const { mutate, data: result, isPending, error } = useMutation<BacktestResult>({
     mutationFn: async () => {
-      const res = await api.post('/backtest/run', {
+      const payload: any = {
         symbol,
         timeframe,
         lookback_bars:   lookback,
         initial_capital: capital,
         risk_pct:        riskPct,
         min_confidence:  minConf,
-        strategy: {
+      };
+      if (strategyId) {
+        payload.strategyId = strategyId;
+      } else {
+        payload.strategy = {
           rules: {
             use_smc: useSmc,
             use_patterns: usePatterns,
           },
-        },
-      });
+        };
+      }
+      const res = await api.post('/backtest/run', payload);
       return res.data;
     },
   });
 
   const { mutate: mutateMarket, data: marketResult, isPending: marketPending, error: marketError } = useMutation<BacktestResult[]>({
     mutationFn: async () => {
-      const res = await api.post(`/backtest/market/${market}`, {
+      const payload: any = {
         timeframe,
         lookback_bars:   lookback,
         initial_capital: capital,
         risk_pct:        riskPct,
         min_confidence:  minConf,
-        strategy: {
+      };
+      if (strategyId) {
+        payload.strategyId = strategyId;
+      } else {
+        payload.strategy = {
           rules: {
             use_smc: useSmc,
             use_patterns: usePatterns,
           },
-        },
-      });
+        };
+      }
+      const res = await api.post(`/backtest/market/${market}`, payload);
       return res.data;
     },
   });
@@ -202,6 +225,16 @@ export default function BacktestPage() {
         {/* Formulaire */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">Stratégie</label>
+              <select value={strategyId} onChange={e => setStrategyId(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
+                <option value="">Manuelle (SMC/Patterns)</option>
+                {strategies?.filter(s => s.isActive).map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="text-xs text-gray-400 mb-1 block">Symbole</label>
               <input
