@@ -17,7 +17,7 @@ from utils.http import retry_async
 from utils.logger import get_logger
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, SYMBOL_TO_TWELVEDATA, SYMBOL_TO_YFINANCE, SYMBOL_TO_DERIV,
-    TF_TO_TD, TF_TO_DERIV_GRANULARITY, TF_TO_YF, TF_TO_MS,
+    TF_TO_TD, TF_TO_DERIV_GRANULARITY, TF_TO_YF, TF_TO_YF_PERIOD, TF_TO_MS,
     TWELVE_DATA_API_KEY,
 )
 
