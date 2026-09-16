@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EngineHttpService } from '../engine/engine-http.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { RunBacktestDto } from './dto/run-backtest.dto';
 import { MarketBacktestDto } from './dto/market-backtest.dto';
 
@@ -11,6 +12,7 @@ export class BacktestService {
   constructor(
     private prisma: PrismaService,
     private engine: EngineHttpService,
+    private notifications: NotificationsService,
   ) {}
 
   async run(userId: string, dto: RunBacktestDto) {
@@ -21,7 +23,15 @@ export class BacktestService {
     }
     delete payload.strategyId;
 
-    return this.engine.post('/backtest/run', payload, { timeout: 120_000 });
+    const result: any = await this.engine.post('/backtest/run', payload, { timeout: 120_000 });
+    this.notifications.push({
+      userId,
+      type: 'SYSTEM',
+      title: `Backtest terminé — ${dto.symbol}`,
+      message: `${result.trades ?? 0} trades · Win ${result.win_rate ?? 0}% · PnL ${(result.total_pnl_pct ?? 0).toFixed(2)}%`,
+      data: { symbol: dto.symbol, timeframe: dto.timeframe, ...result },
+    });
+    return result;
   }
 
   async runMulti(userId: string, dtos: RunBacktestDto[]) {
@@ -71,7 +81,17 @@ export class BacktestService {
     delete base.strategyId;
 
     const requests = symbols.map((symbol) => ({ ...base, symbol }));
-    return this.engine.post('/backtest/multi', requests, { timeout: 300_000 });
+    const results: any[] = await this.engine.post('/backtest/multi', requests, { timeout: 300_000 });
+    const profitable = results.filter((r: any) => (r.total_pnl_pct ?? 0) > 0).length;
+    const best = results.reduce((best: any, r: any) => ((r.total_pnl_pct ?? -Infinity) > (best.total_pnl_pct ?? -Infinity) ? r : best), results[0] ?? {});
+    this.notifications.push({
+      userId,
+      type: 'SYSTEM',
+      title: `Batch ${name} terminé`,
+      message: `${results.length} symboles · ${profitable} profitables · meilleur: ${best.symbol ?? '-'} ${(best.total_pnl_pct ?? 0).toFixed(2)}%`,
+      data: { market: name, results },
+    });
+    return results;
   }
 
   private async resolveStrategy(dto: MarketBacktestDto, _userId: string) {
