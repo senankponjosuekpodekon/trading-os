@@ -43,6 +43,8 @@ SYMBOL_TO_TWELVEDATA = {
     "XAG/USD": "XAG/USD",
     "WTI/USD": "WTI/USD",
     "BRENT/USD": "BRENT/USD",
+    # US stocks (primary if TwelveData key available)
+    "AAPL": "AAPL",
 }
 
 # ── yfinance (fallback gratuit, sans clé API) ──
