@@ -181,9 +181,15 @@ async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) ->
     import datetime as _dt
     yf_sym = SYMBOL_TO_YFINANCE.get(symbol)
     if not yf_sym:
-        return None
+        # Accept bare tickers like AAPL, AAPL.US, TSLA, BRK.A
+        norm = symbol.upper().replace('.US', '').strip()
+        if all(c.isalpha() or c == '.' for c in norm) and '/' not in norm and 1 <= len(norm) <= 8:
+            yf_sym = norm
+        else:
+            return None
 
     yf_interval = TF_TO_YF.get(interval, "1h")
+    yf_period   = TF_TO_YF_PERIOD.get(interval, "1y")
     cache_key   = f"yf:{yf_sym}:{yf_interval}:{limit}"
     now = time.monotonic()
     if cache_key in _klines_cache:
@@ -191,26 +197,13 @@ async def fetch_yfinance_klines(symbol: str, interval: str, limit: int = 300) ->
         if now - ts < _CACHE_TTL_YF:
             return df
 
-    _interval_seconds = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "1d": 86400}
-    seconds_per_bar = _interval_seconds.get(yf_interval, 3600)
-    needed_seconds = int(seconds_per_bar * limit * 1.5)
-    _max_seconds = {
-        "1m": 7 * 86400, "5m": 60 * 86400, "15m": 60 * 86400,
-        "1h": 730 * 86400, "1d": 5 * 365 * 86400,
-    }
-    max_sec = _max_seconds.get(yf_interval, 730 * 86400)
-    window  = min(needed_seconds, max_sec)
-    end_dt   = _dt.datetime.now(_dt.timezone.utc)
-    start_dt = end_dt - _dt.timedelta(seconds=window)
-
     try:
         import yfinance as yf
         loop = asyncio.get_event_loop()
         def _download():
             ticker = yf.Ticker(yf_sym)
             df_raw = ticker.history(
-                start=start_dt.strftime("%Y-%m-%d"),
-                end=(end_dt + _dt.timedelta(days=1)).strftime("%Y-%m-%d"),
+                period=yf_period,
                 interval=yf_interval,
                 auto_adjust=True,
                 actions=False,

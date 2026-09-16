@@ -110,8 +110,8 @@ TF_TO_YF: dict = {
 }
 
 TF_TO_YF_PERIOD: dict = {
-    "1m": "7d", "5m": "60d", "15m": "60d",
-    "1h": "730d", "4h": "730d", "1d": "5y",
+    "1m": "7d", "5m": "3mo", "15m": "3mo",
+    "1h": "2y", "4h": "2y", "1d": "5y",
 }
 
 TF_TO_TD: dict = {
