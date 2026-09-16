@@ -124,6 +124,8 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
           port: 22
+          timeout: 2m
+          command_timeout: 30m
           script_stop: true
           envs: GHCR_USER,GHCR_PASS,IMAGE_PREFIX
           script: |
