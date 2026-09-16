@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -120,6 +120,22 @@ const SYMBOLS = [
 ];
 const TIMEFRAMES = ['15m', '1h', '4h', '1d'];
 
+function detectMarket(sym: string): string {
+  const s = sym.toUpperCase();
+  if (/^(V\d+|BOOM\d+|CRASH\d+)/i.test(s)) return 'synthetic';
+  if (['XAU', 'XAG', 'WTI', 'BRENT'].some(x => s.includes(x))) return 'commodities';
+  if (s.includes('/')) {
+    const [base, quote] = s.split('/');
+    const q = quote?.toUpperCase() ?? '';
+    const cryptoQuotes = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'BTC', 'ETH', 'BNB', 'SOL'];
+    const fiat = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD'];
+    if (cryptoQuotes.includes(q)) return 'crypto';
+    if (fiat.includes(base.toUpperCase()) || fiat.includes(q)) return 'forex';
+  }
+  if (/^[A-Z]{1,5}$/.test(s)) return 'stocks';
+  return 'crypto';
+}
+
 function InfoLabel({ label, tip }: { label: string; tip: string }) {
   return (
     <span className="group relative inline-flex items-center gap-1 text-xs text-gray-400 mb-1 block">
@@ -154,6 +170,10 @@ export default function BacktestPage() {
   const [strategyId,  setStrategyId]   = useState<string>('');
   const [market,      setMarket]      = useState('crypto');
   const [showTrades,  setShowTrades]  = useState(false);
+
+  useEffect(() => {
+    setMarket(detectMarket(symbol));
+  }, [symbol]);
 
   const { data: strategies } = useQuery<Strategy[]>({
     queryKey: ['strategies'],
