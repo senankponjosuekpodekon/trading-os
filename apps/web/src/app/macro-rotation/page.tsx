@@ -62,7 +62,7 @@ export default function MacroRotationPage() {
   const { data, isLoading } = useQuery<RotationData>({
     queryKey: ['macro-rotation'],
     queryFn: async () => {
-      const { data } = await api.get('/engine/macro/rotation');
+      const { data } = await api.get('/macro/rotation');
       return data;
     },
     refetchInterval: 60000,
