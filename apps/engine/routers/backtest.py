@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 import numpy as np
+import pandas as pd
 import asyncio
 import os
 from datetime import datetime, timezone
