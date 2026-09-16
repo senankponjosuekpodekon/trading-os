@@ -45,6 +45,14 @@ export class BacktestController {
     return this.backtestService.patternStats(body);
   }
 
+  @Post('markers')
+  markers(
+    @Request() req: any,
+    @Body() dto: RunBacktestDto,
+  ) {
+    return this.backtestService.markers(req.user.id, dto);
+  }
+
   @Post('run-async')
   async runAsync(
     @Request() req: any,
