@@ -177,6 +177,7 @@ def analyze_candles(
     _ema_slow = int(_rules_raw.get("ema_slow", 50))
     _ema_trend = int(_rules_raw.get("ema_trend", 200))
     _rsi_period = int(_rules_raw.get("rsi_period", 14))
+    _use_patterns = _rules_raw.get("use_patterns", True)
 
     e20  = ema(close, _ema_fast)
     e50  = ema(close, _ema_slow)
@@ -386,29 +387,32 @@ def analyze_candles(
         reasons += r
 
     # ── Phase 2 : Candlestick Patterns ──
-    pats = scan_last_patterns(open_col, high, low, close)
-    chart_patterns = detect_chart_patterns(df) if len(df) >= 15 else []
-    if chart_patterns:
-        reasons.append(f"Pattern chartiste détecté: {chart_patterns[0]['name']} ({chart_patterns[0]['direction']})")
-        from routers.ws import broadcast_pattern
-        for p in chart_patterns:
-            broadcast_pattern({
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "name": p.get("name"),
-                "category": p.get("category"),
-                "direction": p.get("direction"),
-                "confidence": p.get("confidence"),
-                "entry": p.get("entry"),
-                "stop_loss": p.get("stop_loss"),
-                "targets": p.get("targets"),
-                "prz": p.get("prz"),
-            })
-    if temp_signal != "NEUTRAL":
-        b, r = patterns_bonus(pats, temp_signal)
-        score += b
-        _sub_patterns += b
-        reasons += r
+    pats = []
+    chart_patterns = []
+    if _use_patterns:
+        pats = scan_last_patterns(open_col, high, low, close)
+        chart_patterns = detect_chart_patterns(df) if len(df) >= 15 else []
+        if chart_patterns:
+            reasons.append(f"Pattern chartiste détecté: {chart_patterns[0]['name']} ({chart_patterns[0]['direction']})")
+            from routers.ws import broadcast_pattern
+            for p in chart_patterns:
+                broadcast_pattern({
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "name": p.get("name"),
+                    "category": p.get("category"),
+                    "direction": p.get("direction"),
+                    "confidence": p.get("confidence"),
+                    "entry": p.get("entry"),
+                    "stop_loss": p.get("stop_loss"),
+                    "targets": p.get("targets"),
+                    "prz": p.get("prz"),
+                })
+        if temp_signal != "NEUTRAL":
+            b, r = patterns_bonus(pats, temp_signal)
+            score += b
+            _sub_patterns += b
+            reasons += r
 
     # ── Jour 10 : Régime de marché ──
     regime = detect_regime(high, low, close)
