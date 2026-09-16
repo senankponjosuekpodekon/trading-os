@@ -123,6 +123,9 @@ export default function BacktestPage() {
   const [capital,     setCapital]     = useState(10000);
   const [riskPct,     setRiskPct]     = useState(1.0);
   const [minConf,     setMinConf]     = useState(55);
+  const [useSmc,      setUseSmc]      = useState(false);
+  const [usePatterns, setUsePatterns] = useState(false);
+  const [market,      setMarket]      = useState('crypto');
   const [showTrades,  setShowTrades]  = useState(false);
 
   const { mutate, data: result, isPending, error } = useMutation<BacktestResult>({
@@ -134,6 +137,31 @@ export default function BacktestPage() {
         initial_capital: capital,
         risk_pct:        riskPct,
         min_confidence:  minConf,
+        strategy: {
+          rules: {
+            use_smc: useSmc,
+            use_patterns: usePatterns,
+          },
+        },
+      });
+      return res.data;
+    },
+  });
+
+  const { mutate: mutateMarket, data: marketResult, isPending: marketPending, error: marketError } = useMutation<BacktestResult[]>({
+    mutationFn: async () => {
+      const res = await api.post(`/backtest/market/${market}`, {
+        timeframe,
+        lookback_bars:   lookback,
+        initial_capital: capital,
+        risk_pct:        riskPct,
+        min_confidence:  minConf,
+        strategy: {
+          rules: {
+            use_smc: useSmc,
+            use_patterns: usePatterns,
+          },
+        },
       });
       return res.data;
     },
@@ -206,6 +234,37 @@ export default function BacktestPage() {
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" />
             </div>
           </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <div className="flex items-center gap-3 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2">
+              <input id="use-smc" type="checkbox" checked={useSmc} onChange={e => setUseSmc(e.target.checked)} className="w-4 h-4 accent-emerald-500" />
+              <label htmlFor="use-smc" className="text-sm text-gray-300">SMC</label>
+            </div>
+            <div className="flex items-center gap-3 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2">
+              <input id="use-patterns" type="checkbox" checked={usePatterns} onChange={e => setUsePatterns(e.target.checked)} className="w-4 h-4 accent-emerald-500" />
+              <label htmlFor="use-patterns" className="text-sm text-gray-300">Patterns</label>
+            </div>
+            <div className="flex items-center gap-2 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2">
+              <label className="text-xs text-gray-400">Marché</label>
+              <select value={market} onChange={e => setMarket(e.target.value)}
+                className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-emerald-500">
+                <option value="crypto">Crypto</option>
+                <option value="forex">Forex</option>
+                <option value="stocks">Stocks</option>
+                <option value="commodities">Commodities</option>
+                <option value="synthetic">Synthetic</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-end">
+              <button onClick={() => mutateMarket()} disabled={marketPending || isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg text-sm transition-colors">
+                {marketPending
+                  ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Batch…</>
+                  : <><BarChart2 className="w-4 h-4" />Batch marché</>
+                }
+              </button>
+            </div>
+          </div>
+
           <div className="mt-4 flex justify-end">
             <button onClick={() => mutate()} disabled={isPending}
               className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg text-sm transition-colors">
@@ -218,7 +277,7 @@ export default function BacktestPage() {
         </div>
 
         {/* Erreur */}
-        {error && (
+        {(error || marketError) && (
           <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
             <AlertCircle className="w-5 h-5 shrink-0" />
             Erreur backtest — vérifier que l&apos;engine est actif
@@ -393,6 +452,36 @@ export default function BacktestPage() {
             )}
           </div>
         )}
+
+        {/* Batch market results */}
+        {marketResult && (
+          <div className="space-y-4">
+            <h3 className="font-semibold text-white flex items-center gap-2">
+              <BarChart2 className="w-4 h-4 text-emerald-400" /> Résultats batch {market}
+            </h3>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-800/50">
+                  <tr>
+                    {['Symbole','Trades','Win %','PnL %','PF'].map(h => <th key={h} className="px-4 py-2 text-left text-gray-400 font-medium">{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {marketResult.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-800/30">
+                      <td className="px-4 py-2 text-white">{r.symbol}</td>
+                      <td className="px-4 py-2 text-gray-300">{r.trades}</td>
+                      <td className="px-4 py-2 text-gray-300">{r.win_rate}%</td>
+                      <td className={`px-4 py-2 font-mono ${(r.total_pnl_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{(r.total_pnl_pct ?? 0) >= 0 ? '+' : ''}{r.total_pnl_pct}%</td>
+                      <td className="px-4 py-2 font-mono text-gray-300">{r.profit_factor}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </div>
     </AppLayout>
   );

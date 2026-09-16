@@ -48,7 +48,7 @@ const phaseColor = (phase: string) => {
 export function MacroRotationWidget() {
   const { data, isLoading } = useQuery<RotationData>({
     queryKey: ['macro-rotation'],
-    queryFn: async () => (await api.get('/engine/macro/rotation')).data,
+    queryFn: async () => (await api.get('/macro/rotation')).data,
     refetchInterval: 60_000,
   });
 
