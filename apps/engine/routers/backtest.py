@@ -81,6 +81,7 @@ class BacktestResult(BaseModel):
     trade_list:      list[dict]
     signals:         list[dict] = []
     bar_times:       list[str] = []
+    klines:          list[dict] = []
     benchmark_pnl_pct: float
     outperformance_pct: float
     regime_breakdown: dict
@@ -411,6 +412,18 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
 
     bar_times = [_bar_time(j) for j in range(warm_up, len(df))]
 
+    klines = [
+        {
+            "time": _bar_time(j),
+            "open": round(float(df["open"].iloc[j]), 4),
+            "high": round(float(df["high"].iloc[j]), 4),
+            "low": round(float(df["low"].iloc[j]), 4),
+            "close": round(float(df["close"].iloc[j]), 4),
+            "volume": round(float(df["volume"].iloc[j]), 4),
+        }
+        for j in range(warm_up, len(df))
+    ]
+
     return BacktestResult(
         symbol          = req.symbol,
         timeframe       = req.timeframe,
@@ -433,6 +446,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         trade_list      = trades,
         signals         = signals,
         bar_times       = bar_times,
+        klines          = klines,
         benchmark_pnl_pct = round(benchmark_pnl_pct, 2),
         outperformance_pct = round(outperformance_pct, 2),
         regime_breakdown = regime_stats,

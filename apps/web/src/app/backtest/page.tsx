@@ -38,6 +38,10 @@ const PatternBreakdown = dynamic(
   () => import('@/components/backtest/PatternBreakdown').then(mod => mod.PatternBreakdown),
   { ssr: false, loading: () => <div className="h-24 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
 );
+const BacktestChart = dynamic(
+  () => import('@/components/backtest/BacktestChart').then(mod => mod.BacktestChart),
+  { ssr: false, loading: () => <div className="h-96 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" /> },
+);
 
 interface TradeItem {
   entry_bar:      number;
@@ -89,6 +93,9 @@ interface BacktestResult {
   final_capital:    number;
   equity_curve:     number[];
   trade_list:       TradeItem[];
+  klines:           { time: string; open: number; high: number; low: number; close: number; volume: number }[];
+  signals:          { type: 'entry' | 'exit'; bar_index: number; time: string; direction: string; price: number; sl?: number; tp1?: number; confidence?: number; pattern?: string; exit_reason?: string; intrabar_ambiguous?: boolean }[];
+  bar_times:        string[];
   regime_breakdown: RegimeBreakdown;
   pattern_breakdown: PatternBreakdown;
   model_version:    string;
@@ -251,6 +258,9 @@ export default function BacktestPage() {
               <MetricCard label="Profit Factor" value={String(result.profit_factor)}
                 color={result.profit_factor >= 1.5 ? 'text-emerald-400' : result.profit_factor < 1 ? 'text-red-400' : 'text-gray-400'} />
             </div>
+
+            {/* Chart setups */}
+            <BacktestChart klines={result.klines || []} signals={result.signals || []} />
 
             {/* Equity curve */}
             <MiniEquityChart curve={result.equity_curve} />

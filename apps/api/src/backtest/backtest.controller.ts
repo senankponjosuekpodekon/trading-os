@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BacktestService } from './backtest.service';
 import { RunBacktestDto } from './dto/run-backtest.dto';
+import { MarketBacktestDto } from './dto/market-backtest.dto';
 
 @Controller('backtest')
 @UseGuards(JwtAuthGuard)
@@ -51,6 +52,15 @@ export class BacktestController {
     @Body() dto: RunBacktestDto,
   ) {
     return this.backtestService.markers(req.user.id, dto);
+  }
+
+  @Post('market/:name')
+  market(
+    @Request() req: any,
+    @Param('name') name: string,
+    @Body() dto: MarketBacktestDto,
+  ) {
+    return this.backtestService.market(req.user.id, name, dto);
   }
 
   @Post('run-async')
