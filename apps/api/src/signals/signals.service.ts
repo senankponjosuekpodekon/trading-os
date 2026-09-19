@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AlertService } from '../notifications/alert.service';
 import { SignalOutcomeService } from './signal-outcome.service';
+import { SignalTrackerService } from './signal-tracker.service';
 import { FeatureStoreService } from './feature-store.service';
 import { RegimeClassifierService } from './regime-classifier.service';
 import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
@@ -23,6 +25,7 @@ export class SignalsService {
     private notifications: NotificationsService,
     private alertService: AlertService,
     private outcomeService: SignalOutcomeService,
+    private tracker: SignalTrackerService,
     private predictor: SignalPredictorService,
     private featureStore: FeatureStoreService,
     private regimeClassifier: RegimeClassifierService,
@@ -32,7 +35,12 @@ export class SignalsService {
     private health: SystemHealthService,
     private patternPredictor: PatternPredictorService,
     private expectedMove: ExpectedMoveService,
+    private config: ConfigService,
   ) {}
+
+  private _isEnabled(key: string): boolean {
+    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  }
 
   private _ttlForTimeframe(tf: string | undefined | null): number {
     const TTL_MAP: Record<string, number> = {
@@ -132,6 +140,7 @@ export class SignalsService {
 
   @Cron('0 6 * * *', { timeZone: 'UTC' })
   async scheduledMorningScan() {
+    if (!this._isEnabled('SIGNALS_MORNING_SCAN_ENABLED')) return;
     this.logger.log('CRON: lancement du scan matinal (06:00 UTC)');
     try {
       await this._scanActiveAssetsByTimeframe();
@@ -143,6 +152,7 @@ export class SignalsService {
 
   @Cron('0 */4 * * *', { timeZone: 'UTC' })
   async scheduledDayScan() {
+    if (!this._isEnabled('SIGNALS_DAY_SCAN_ENABLED')) return;
     this.logger.log('CRON: lancement du scan toutes les 4h');
     try {
       await this._scanActiveAssetsByTimeframe();
@@ -154,6 +164,7 @@ export class SignalsService {
 
   @Cron('15 */6 * * *', { timeZone: 'UTC' })
   async scheduledPredictorTraining() {
+    if (!this._isEnabled('SIGNALS_PREDICTOR_TRAINING_ENABLED')) return;
     try {
       await this.trainPredictor({ market: 'CRYPTO', timeframe: '1h' });
       this.health.recordCronRun('predictor-training', 'ok');
@@ -165,6 +176,7 @@ export class SignalsService {
 
   @Cron('45 */6 * * *', { timeZone: 'UTC' })
   async scheduledPatternPredictorTraining() {
+    if (!this._isEnabled('SIGNALS_PATTERN_PREDICTOR_ENABLED')) return;
     try {
       const result = await this.patternPredictor.train();
       this.health.recordCronRun('pattern-predictor-training', result.trained ? 'ok' : 'error');
@@ -848,5 +860,43 @@ export class SignalsService {
       this.logger.warn(`ingestSignal failed: ${e?.message}`);
       return null;
     }
+  }
+
+  async backfillTracking() {
+    return this.tracker.processActiveSignals();
+  }
+
+  async notifyCandleClosed(symbol: string, timeframe: string) {
+    return this.tracker.processActiveSignals();
+  }
+
+  async getTrackingSignals(opts: { page: number; limit: number; status?: string }) {
+    const where: any = {};
+    if (opts.status) where.executionStatus = opts.status;
+
+    const [data, total] = await Promise.all([
+      this.prisma.signal.findMany({
+        where,
+        skip: (opts.page - 1) * opts.limit,
+        take: opts.limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          asset: { select: { symbol: true, name: true } },
+          strategy: { select: { name: true } },
+          executionEvents: { orderBy: { candleTime: 'desc' }, take: 5 },
+        },
+      }),
+      this.prisma.signal.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        page: opts.page,
+        limit: opts.limit,
+        total,
+        totalPages: Math.ceil(total / opts.limit),
+      },
+    };
   }
 }

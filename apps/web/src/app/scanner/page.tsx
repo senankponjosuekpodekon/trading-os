@@ -1,11 +1,14 @@
 'use client';
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { SignalCard } from '@/components/signals/SignalCard';
 import { api } from '@/lib/api';
 import { Signal } from '@/types';
 import { useToast } from '@/hooks/useToast';
+import { useNotifications } from '@/hooks/useNotifications';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useTradingStore } from '@/store/trading.store';
 import {
   Search, RefreshCw, Zap, TrendingUp, TrendingDown, Minus, Activity,
@@ -51,15 +54,26 @@ function computeOpportunityScore(s: Signal): number {
 
 export default function ScannerPage() {
   const { toast } = useToast();
+  const { notifications } = useNotifications();
+  const { supported: pushSupported, subscribed: pushSubscribed, requestPermission: requestPush, unsubscribe: unsubscribePush } = usePushNotifications();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const lastNotifIdRef = useRef<string | null>(null);
   const prices = useTradingStore(s => s.prices);
   const fetchSignals = useTradingStore(s => s.fetchSignals);
   const storeSignals = useTradingStore(s => s.signals);
 
-  const [query, setQuery] = useState('');
-  const [timeframe, setTimeframe] = useState('all');
-  const [direction, setDirection] = useState('all');
-  const [market, setMarket] = useState('all');
-  const [minConf, setMinConf] = useState(50);
+  const getParam = (key: string, fallback: string) => searchParams.get(key) ?? fallback;
+  const [query, setQuery] = useState(getParam('q', ''));
+  const [timeframe, setTimeframe] = useState(getParam('tf', 'all'));
+  const [direction, setDirection] = useState(getParam('dir', 'all'));
+  const [market, setMarket] = useState(getParam('mkt', 'all'));
+  const [minConf, setMinConf] = useState(parseInt(getParam('conf', '50'), 10));
+  const [page, setPage] = useState(parseInt(getParam('page', '1'), 10));
+  const [sortBy, setSortBy] = useState(getParam('sort', 'createdAt:desc'));
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>(getParam('view', 'grid') as 'grid' | 'table');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [newCount, setNewCount] = useState(0);
@@ -75,6 +89,76 @@ export default function ScannerPage() {
 
   useEffect(() => { localStorage.setItem(LS_SYMBOLS, JSON.stringify(selectedSymbols)); }, [selectedSymbols]);
   useEffect(() => { localStorage.setItem(LS_TF, timeframe); }, [timeframe]);
+
+  // ── Sync filters with URL ──────────────────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (timeframe !== 'all') params.set('tf', timeframe);
+    if (direction !== 'all') params.set('dir', direction);
+    if (market !== 'all') params.set('mkt', market);
+    if (minConf !== 50) params.set('conf', String(minConf));
+    if (page !== 1) params.set('page', String(page));
+    if (sortBy !== 'createdAt:desc') params.set('sort', sortBy);
+    if (viewMode !== 'grid') params.set('view', viewMode);
+    const q = params.toString();
+    router.replace(`${pathname}${q ? `?${q}` : ''}`, { scroll: false });
+  }, [query, timeframe, direction, market, minConf, page, sortBy, viewMode, router, pathname]);
+
+  // ── Beep via Web Audio API ─────────────────────────────────
+  const initAudio = () => {
+    if (typeof window === 'undefined') return;
+    if (!audioCtxRef.current) {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return;
+      audioCtxRef.current = new Ctx();
+    }
+    if (audioCtxRef.current?.state === 'suspended') {
+      audioCtxRef.current.resume().catch(() => {});
+    }
+  };
+
+  const playBeep = () => {
+    initAudio();
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.05, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.18);
+  };
+
+  useEffect(() => {
+    const resumeOnInteraction = () => {
+      initAudio();
+      window.removeEventListener('click', resumeOnInteraction);
+      window.removeEventListener('touchstart', resumeOnInteraction);
+    };
+    window.addEventListener('click', resumeOnInteraction);
+    window.addEventListener('touchstart', resumeOnInteraction);
+    return () => {
+      window.removeEventListener('click', resumeOnInteraction);
+      window.removeEventListener('touchstart', resumeOnInteraction);
+    };
+  }, []);
+
+  useEffect(() => {
+    const latest = notifications[0];
+    if (!latest || latest.id === lastNotifIdRef.current) return;
+    lastNotifIdRef.current = latest.id;
+    if (latest.type !== 'SIGNAL' || (latest.data?.confidence ?? 0) < 70) return;
+    playBeep();
+    toast(`${latest.data?.signal === 'BUY' ? '🟢' : '🔴'} ${latest.data?.symbol} ${latest.data?.signal} ${latest.data?.confidence}%`, {
+      title: 'Nouveau signal SSE',
+      type: latest.data?.signal === 'BUY' ? 'success' : 'error',
+    });
+  }, [notifications, toast]);
 
   const toggleSymbol = (s: string) =>
     setSelectedSymbols(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
@@ -104,10 +188,22 @@ export default function ScannerPage() {
     staleTime: 3_000,
   });
 
+  const PAGE_LIMIT = 12;
+
   // ── Persisted signals (from DB) ─────────────────────────────
-  const { data: dbSignals, isLoading, refetch } = useQuery<Signal[]>({
-    queryKey: ['signals', 'scanner'],
-    queryFn: async () => (await api.get('/signals?limit=100')).data.data,
+  const { data: signalsData, isLoading, refetch } = useQuery<{
+    data: Signal[];
+    meta: { page: number; limit: number; total: number; totalPages: number };
+  }>({
+    queryKey: ['signals', 'scanner', page, sortBy, market],
+    queryFn: async () => (await api.get('/signals', {
+      params: {
+        page,
+        limit: PAGE_LIMIT,
+        sort: sortBy,
+        market: market === 'all' ? undefined : market,
+      },
+    })).data,
     refetchInterval: autoRefresh ? 15_000 : false,
   });
 
@@ -158,8 +254,8 @@ export default function ScannerPage() {
     const seen = new Set<string>();
 
     // DB signals first (rich data)
-    if (dbSignals) {
-      for (const s of dbSignals) {
+    if (signalsData?.data) {
+      for (const s of signalsData.data) {
         if (!seen.has(s.id)) {
           merged.push(s);
           seen.add(s.id);
@@ -178,7 +274,7 @@ export default function ScannerPage() {
     }
 
     return merged;
-  }, [dbSignals, storeSignals]);
+  }, [signalsData, storeSignals]);
 
   const filtered = useMemo(() => {
     return allSignals
@@ -209,6 +305,36 @@ export default function ScannerPage() {
       .sort((a: any, b: any) => new Date(b.scanned_at || 0).getTime() - new Date(a.scanned_at || 0).getTime())
       .slice(0, 20);
   }, [scanHistoryData, minConf]);
+
+  const liveHighQualitySignals = useMemo<Signal[]>(() => {
+    const latestByKey = new Map<string, any>();
+    for (const e of liveEntries) {
+      if ((e.confidence ?? 0) >= 70) {
+        const key = `${e.symbol}-${e.timeframe}-${e.signal}`;
+        const existing = latestByKey.get(key);
+        if (!existing || new Date(e.scanned_at || 0).getTime() > new Date(existing.scanned_at || 0).getTime()) {
+          latestByKey.set(key, e);
+        }
+      }
+    }
+    return Array.from(latestByKey.values()).map((e: any) => ({
+      id: `live-${e.symbol}-${e.timeframe}-${e.scanned_at}`,
+      assetId: '',
+      strategyId: '',
+      signal: e.signal,
+      confidence: e.confidence,
+      timeframe: e.timeframe,
+      createdAt: e.scanned_at,
+      asset: { symbol: e.symbol, name: e.symbol },
+      entryPrice: e.entry_price ? String(e.entry_price) : undefined,
+      stopLoss: e.stop_loss ? String(e.stop_loss) : undefined,
+      takeProfit1: e.take_profit_1 ? String(e.take_profit_1) : undefined,
+      takeProfit2: e.take_profit_2 ? String(e.take_profit_2) : undefined,
+      riskReward: e.risk_reward,
+      status: 'ACTIVE',
+      explanation: e.explanation,
+    }));
+  }, [liveEntries]);
 
   const scan = useMutation({
     mutationFn: async () => (await api.post('/signals/scan', {
@@ -260,6 +386,25 @@ export default function ScannerPage() {
             >
               {notifyEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
               Notif: {notifyEnabled ? 'ON' : 'OFF'}
+            </button>
+            {/* Push notifications */}
+            {pushSupported && (
+              <button
+                onClick={() => (pushSubscribed ? unsubscribePush() : requestPush())}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
+                  pushSubscribed ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {pushSubscribed ? '🔔 Push ON' : '🔕 Push OFF'}
+              </button>
+            )}
+            {/* View mode */}
+            <button
+              onClick={() => setViewMode(v => v === 'grid' ? 'table' : 'grid')}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300 transition-colors"
+              title="Basculer vue grille / tableau"
+            >
+              {viewMode === 'grid' ? '⊞ Grille' : '☰ Tableau'}
             </button>
             {/* New signals badge */}
             {newCount > 0 && (
@@ -362,7 +507,18 @@ export default function ScannerPage() {
             </div>
             <Select label="Timeframe" value={timeframe} onChange={setTimeframe} options={TIMEFRAMES} />
             <Select label="Direction" value={direction} onChange={setDirection} options={DIRECTIONS} />
-            <Select label="Marché" value={market} onChange={setMarket} options={['all', 'CRYPTO', 'FOREX', 'SYNTHETIC', 'BRVM', 'STOCK']} />
+            <Select label="Marché" value={market} onChange={(v) => { setMarket(v); setPage(1); }} options={['all', 'CRYPTO', 'FOREX', 'SYNTHETIC', 'BRVM', 'STOCK']} />
+            <Select
+              label="Trier par"
+              value={sortBy}
+              onChange={(v) => { setSortBy(v); setPage(1); }}
+              options={[
+                { value: 'createdAt:desc', label: 'Date ↓' },
+                { value: 'createdAt:asc', label: 'Date ↑' },
+                { value: 'confidence:desc', label: 'Confiance ↓' },
+                { value: 'confidence:asc', label: 'Confiance ↑' },
+              ]}
+            />
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Confiance min : {minConf}%</label>
               <input
@@ -439,6 +595,20 @@ export default function ScannerPage() {
           </div>
         </div>
 
+        {/* Nouveaux signaux live ≥ 70% */}
+        {liveHighQualitySignals.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-sm font-medium text-white">Nouveaux signaux live ≥ 70%</h3>
+              <span className="text-xs text-gray-500">{liveHighQualitySignals.length}</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {liveHighQualitySignals.map(s => <SignalCard key={s.id} signal={s} prices={prices} />)}
+            </div>
+          </div>
+        )}
+
         {/* Résultats */}
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -454,9 +624,34 @@ export default function ScannerPage() {
               Lancer un scan maintenant
             </button>
           </div>
-        ) : (
+        ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filtered.map(s => <SignalCard key={s.id} signal={s} prices={prices} />)}
+          </div>
+        ) : (
+          <SignalsTable signals={filtered} prices={prices} />
+        )}
+
+        {/* Pagination */}
+        {signalsData?.meta && signalsData.meta.totalPages > 1 && (
+          <div className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl p-3">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1.5 text-sm rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Précédent
+            </button>
+            <span className="text-sm text-gray-400">
+              Page {page} / {signalsData.meta.totalPages} · {signalsData.meta.total} signaux
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(signalsData.meta.totalPages, p + 1))}
+              disabled={page === signalsData.meta.totalPages}
+              className="px-3 py-1.5 text-sm rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Suivant
+            </button>
           </div>
         )}
       </div>
@@ -464,7 +659,70 @@ export default function ScannerPage() {
   );
 }
 
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: string[] }) {
+function SignalsTable({ signals, prices }: { signals: Signal[]; prices: Record<string, number> }) {
+  const fmtPrice = (v?: string | number | null) => {
+    if (v == null) return '—';
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isNaN(n) ? '—' : n.toFixed(n < 1 ? 4 : 2);
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-gray-800">
+      <table className="w-full text-sm text-left text-gray-400">
+        <thead className="bg-gray-900 text-gray-300 text-xs uppercase">
+          <tr>
+            <th className="px-4 py-3">Actif</th>
+            <th className="px-4 py-3">Signal</th>
+            <th className="px-4 py-3">Confiance</th>
+            <th className="px-4 py-3">TF</th>
+            <th className="px-4 py-3">Entrée</th>
+            <th className="px-4 py-3">SL</th>
+            <th className="px-4 py-3">TP1</th>
+            <th className="px-4 py-3">R/R</th>
+            <th className="px-4 py-3">Prix live</th>
+            <th className="px-4 py-3">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {signals.map(s => {
+            const live = s.asset?.symbol ? prices[s.asset.symbol] : undefined;
+            return (
+              <tr key={s.id} className="border-t border-gray-800 hover:bg-gray-900/50 transition-colors">
+                <td className="px-4 py-3 font-medium text-white">{s.asset?.symbol ?? '—'}</td>
+                <td className="px-4 py-3">
+                  <span className={`font-bold ${s.signal === 'BUY' ? 'text-emerald-400' : s.signal === 'SELL' ? 'text-red-400' : 'text-gray-400'}`}>
+                    {s.signal}
+                  </span>
+                </td>
+                <td className="px-4 py-3">{s.confidence}%</td>
+                <td className="px-4 py-3">{s.timeframe}</td>
+                <td className="px-4 py-3">{fmtPrice(s.entryPrice)}</td>
+                <td className="px-4 py-3 text-red-400">{fmtPrice(s.stopLoss)}</td>
+                <td className="px-4 py-3 text-emerald-400">{fmtPrice(s.takeProfit1)}</td>
+                <td className="px-4 py-3">{s.riskReward ? `${s.riskReward}x` : '—'}</td>
+                <td className="px-4 py-3">{live != null ? fmtPrice(live) : '—'}</td>
+                <td className="px-4 py-3">{s.createdAt ? new Date(s.createdAt).toLocaleString('fr-FR') : '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Select({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: (string | { value: string; label: string })[];
+}) {
+  const normalized = options.map(o => (typeof o === 'string' ? { value: o, label: o === 'all' ? 'Tous' : o } : o));
   return (
     <div>
       <label className="text-xs text-gray-500 mb-1 block">{label}</label>
@@ -474,7 +732,7 @@ function Select({ label, value, onChange, options }: { label: string; value: str
         onChange={e => onChange(e.target.value)}
         className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
       >
-        {options.map(o => <option key={o} value={o}>{o === 'all' ? 'Tous' : o}</option>)}
+        {normalized.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
   );

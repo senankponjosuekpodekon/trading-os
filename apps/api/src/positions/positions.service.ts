@@ -655,6 +655,9 @@ export class PositionsService {
 
   @Cron('*/30 * * * * *')
   async syncTrailingStops() {
+    if (!this.config.get<string>('TRAILING_STOPS_ENABLED', 'true').toLowerCase().match(/^(1|true|yes|on)$/)) {
+      return;
+    }
     try {
       this.logger.log('TRAILING: synchronisation des trailing stops');
       const open = await this.systemPrisma.position.findMany({

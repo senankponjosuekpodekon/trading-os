@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { useNotifications } from '@/hooks/useNotifications';
 import { api } from '@/lib/api';
@@ -12,6 +12,7 @@ import { createTestQueryClient } from '@/lib/test-utils';
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
   usePathname: jest.fn(),
+  useSearchParams: jest.fn(),
 }));
 
 jest.mock('@/store/auth.store', () => ({
@@ -20,6 +21,16 @@ jest.mock('@/store/auth.store', () => ({
 
 jest.mock('@/hooks/useNotifications', () => ({
   useNotifications: jest.fn(),
+}));
+
+jest.mock('@/hooks/usePushNotifications', () => ({
+  usePushNotifications: jest.fn(() => ({
+    supported: false,
+    subscribed: false,
+    requestPermission: jest.fn(),
+    unsubscribe: jest.fn(),
+    publicKey: null,
+  })),
 }));
 
 jest.mock('@/hooks/useToast', () => ({
@@ -71,6 +82,7 @@ describe('ScannerPage', () => {
     jest.clearAllMocks();
     (useRouter as unknown as jest.Mock).mockReturnValue({ replace: jest.fn() });
     (usePathname as unknown as jest.Mock).mockReturnValue('/scanner');
+    (useSearchParams as unknown as jest.Mock).mockReturnValue(new URLSearchParams());
     (useAuthStore as unknown as jest.Mock).mockReturnValue({
       user: { id: '1', name: 'Test User' },
       token: 'token',
@@ -197,6 +209,29 @@ describe('ScannerPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/1 résultat/i)).toBeInTheDocument();
+    });
+  });
+
+  it('toggles table view', async () => {
+    mockApiGet({
+      signals: [
+        { id: '1', signal: 'BUY', confidence: 75, timeframe: '1h', asset: { symbol: 'BTC/USDT' }, entryPrice: '60000', stopLoss: '59000', takeProfit1: '63000', metadata: {} },
+      ],
+    });
+
+    render(
+      <Wrapper>
+        <ScannerPage />
+      </Wrapper>,
+    );
+
+    await waitFor(() => expect(screen.getByText('BTC/USDT')).toBeInTheDocument());
+
+    const viewButton = screen.getByRole('button', { name: /Grille|Tableau/i });
+    await userEvent.click(viewButton);
+
+    await waitFor(() => {
+      expect(document.querySelector('table')).toBeInTheDocument();
     });
   });
 });

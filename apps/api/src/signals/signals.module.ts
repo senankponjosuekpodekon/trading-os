@@ -3,6 +3,10 @@ import { HttpModule } from '@nestjs/axios';
 import { SignalsController } from './signals.controller';
 import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
+import { SignalExecutionService } from './signal-execution.service';
+import { SignalTrackerService } from './signal-tracker.service';
+import { SignalTrackerScheduler } from './signal-tracker.scheduler';
+import { EngineCandleRepository } from './engine-candle.repository';
 import { SignalPredictorService } from './signal-predictor.service';
 import { PatternPredictorService } from './pattern-predictor.service';
 import { FeatureStoreService } from './feature-store.service';
@@ -18,7 +22,18 @@ import { AuthModule } from '../auth/auth.module';
 @Module({
   imports: [HttpModule, AuthModule, EngineHttpModule, NotificationsModule, MarketDataModule, BillingModule, SystemHealthModule, ExpectedMoveModule],
   controllers: [SignalsController],
-  providers: [SignalsService, SignalOutcomeService, SignalPredictorService, PatternPredictorService, FeatureStoreService, RegimeClassifierService],
-  exports: [SignalsService, SignalOutcomeService, SignalPredictorService, PatternPredictorService, FeatureStoreService, RegimeClassifierService],
+  providers: [
+    SignalsService,
+    SignalOutcomeService,
+    SignalExecutionService,
+    SignalTrackerService,
+    SignalTrackerScheduler,
+    { provide: 'CandleRepository', useClass: EngineCandleRepository },
+    SignalPredictorService,
+    PatternPredictorService,
+    FeatureStoreService,
+    RegimeClassifierService,
+  ],
+  exports: [SignalsService, SignalOutcomeService, SignalExecutionService, SignalPredictorService, PatternPredictorService, FeatureStoreService, RegimeClassifierService],
 })
 export class SignalsModule {}

@@ -28,6 +28,35 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('push', (event) => {
+  try {
+    const data = event.data ? event.data.json() : {};
+    const title = data.title || 'Trading-OS';
+    const options = {
+      body: data.body || 'Nouvelle alerte',
+      icon: data.icon || '/icon-192.svg',
+      badge: data.badge || '/icon-192.svg',
+      data: data.data || {},
+      requireInteraction: true,
+    };
+    event.waitUntil(self.registration.showNotification(title, options));
+  } catch {
+    // ignore malformed push
+  }
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || '/scanner';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((c) => c.url === url && 'focus' in c);
+      if (existing) return existing.focus();
+      if (self.clients.openWindow) return self.clients.openWindow(url);
+    }),
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);

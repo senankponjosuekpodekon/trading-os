@@ -1,5 +1,16 @@
 import { IsOptional, IsString, IsBoolean, IsInt, Min, Max, MaxLength } from 'class-validator';
 
+export interface PushSubscriptionKeys {
+  p256dh: string;
+  auth: string;
+}
+
+export interface PushSubscription {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: PushSubscriptionKeys;
+}
+
 export class UpdateNotificationPreferenceDto {
   @IsOptional()
   @IsString()
@@ -28,4 +39,11 @@ export class UpdateNotificationPreferenceDto {
   @Min(0)
   @Max(100)
   minConfidence?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  pushEnabled?: boolean;
+
+  @IsOptional()
+  pushSubscription?: PushSubscription;
 }

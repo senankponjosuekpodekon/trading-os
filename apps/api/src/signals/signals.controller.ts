@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Body, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, UseGuards, Request } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
+import { SignalExecutionService } from './signal-execution.service';
 import { SignalFeatures } from './signal-predictor.service';
 import { PatternPredictorService, PatternFeaturesInput } from './pattern-predictor.service';
 import { EngineHttpService } from '../engine/engine-http.service';
@@ -13,6 +14,7 @@ export class SignalsController {
   constructor(
     private signalsService: SignalsService,
     private outcomeService: SignalOutcomeService,
+    private executionService: SignalExecutionService,
     private patternPredictorService: PatternPredictorService,
     private engine: EngineHttpService,
   ) {}
@@ -205,6 +207,38 @@ export class SignalsController {
     if (strategy) params.strategy = strategy;
     if (signal) params.signal = signal;
     return this.engine.get('/scan/history', { params });
+  }
+
+  @Get(':id/execution')
+  @UseGuards(JwtAuthGuard)
+  async getExecutionEvents(@Param('id') id: string) {
+    return this.executionService.getTimeline(id);
+  }
+
+  @Post('track/backfill')
+  @UseGuards(EngineKeyGuard)
+  async backfillTracking() {
+    return this.signalsService.backfillTracking();
+  }
+
+  @Post('track/candle-closed')
+  @UseGuards(EngineKeyGuard)
+  async notifyCandleClosed(@Body() body: { symbol: string; timeframe: string }) {
+    return this.signalsService.notifyCandleClosed(body.symbol, body.timeframe);
+  }
+
+  @Get('tracking')
+  @UseGuards(JwtAuthGuard)
+  async getTrackingSignals(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.signalsService.getTrackingSignals({
+      page: page ? Math.max(1, parseInt(page, 10)) : 1,
+      limit: limit ? Math.min(100, Math.max(1, parseInt(limit, 10))) : 20,
+      status,
+    });
   }
 
   @Get('scan-history/db')

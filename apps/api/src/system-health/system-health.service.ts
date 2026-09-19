@@ -29,8 +29,13 @@ export class SystemHealthService {
     private engineHttp: EngineHttpService,
   ) {}
 
+  private _isEnabled(key: string): boolean {
+    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  }
+
   @Cron('*/15 * * * *')
   async runHealthChecks() {
+    if (!this._isEnabled('SYSTEM_HEALTH_ENABLED')) return;
     try {
       const results: HealthCheckResult[] = [];
       results.push(await this.checkEngine());

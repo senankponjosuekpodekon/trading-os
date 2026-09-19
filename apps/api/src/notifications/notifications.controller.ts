@@ -64,6 +64,14 @@ export class NotificationsController {
     return this.prefService.getOrCreate(req.user.id);
   }
 
+  @Get('push-public-key')
+  @UseGuards(JwtAuthGuard)
+  getPushPublicKey() {
+    const key = this.config.get<string>('VAPID_PUBLIC_KEY');
+    if (!key) return { enabled: false, publicKey: null };
+    return { enabled: true, publicKey: key };
+  }
+
   @UseGuards(JwtAuthGuard)
   @Patch('preferences')
   updatePreferences(@Request() req: any, @Body() dto: UpdateNotificationPreferenceDto) {
@@ -80,6 +88,22 @@ export class NotificationsController {
   @Post('preferences/test-discord')
   testDiscord(@Request() req: any) {
     return this.prefService.sendTestDiscord(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('push-subscribe')
+  async pushSubscribe(@Request() req: any, @Body() body: { subscription: any; enabled?: boolean }) {
+    if (!body?.subscription) throw new BadRequestException('subscription required');
+    return this.prefService.update(req.user.id, {
+      pushEnabled: body.enabled ?? true,
+      pushSubscription: body.subscription,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('push-unsubscribe')
+  async pushUnsubscribe(@Request() req: any) {
+    return this.prefService.update(req.user.id, { pushEnabled: false, pushSubscription: undefined });
   }
 
   @Post('internal/pattern')

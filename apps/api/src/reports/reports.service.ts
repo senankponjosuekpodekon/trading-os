@@ -16,8 +16,13 @@ export class ReportsService {
     private config: ConfigService,
   ) {}
 
+  private _isEnabled(key: string): boolean {
+    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  }
+
   @Cron('0 6 * * *', { timeZone: 'UTC' })
   async generateDailyReport() {
+    if (!this._isEnabled('REPORTS_ENABLED')) return;
     this.logger.log('Starting daily report generation...');
     try {
       const report = await this.collectReportData();

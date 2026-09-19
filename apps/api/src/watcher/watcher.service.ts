@@ -38,6 +38,10 @@ export class WatcherService {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
 
+  private _isEnabled(key: string): boolean {
+    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  }
+
   /** Fetch prices for non-Binance symbols from the engine (multi-provider fallback). */
   private async _fetchEnginePrices(symbols: string[]): Promise<Record<string, number>> {
     const result: Record<string, number> = {};
@@ -109,6 +113,7 @@ export class WatcherService {
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async watchPositions() {
+    if (!this._isEnabled('WATCHER_POSITIONS_ENABLED')) return;
     try {
       const openPositions = await this.systemPrisma.position.findMany({
         where: { status: 'OPEN' },
@@ -211,6 +216,7 @@ export class WatcherService {
   // Sprint 3 — Cycle de vie PENDING → ACTIVE / INVALIDATED pour les setups RETEST/LIMIT.
   @Cron(CronExpression.EVERY_5_MINUTES)
   async watchPendingSignals() {
+    if (!this._isEnabled('WATCHER_PENDING_SIGNALS_ENABLED')) return;
     try {
       const now = new Date();
 
@@ -262,6 +268,7 @@ export class WatcherService {
   /** Auto-transition PENDING positions → OPEN (exchange fill confirmed) or expire after 24h. */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async watchPendingPositions() {
+    if (!this._isEnabled('WATCHER_PENDING_POSITIONS_ENABLED')) return;
     try {
       const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h ago
 

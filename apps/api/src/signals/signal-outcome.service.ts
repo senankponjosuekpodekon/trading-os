@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { FeatureStoreService } from './feature-store.service';
+import { SignalExecutionService } from './signal-execution.service';
 import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
 
@@ -27,8 +28,13 @@ export class SignalOutcomeService {
     private config: ConfigService,
     private featureStore: FeatureStoreService,
     private health: SystemHealthService,
+    private executionService: SignalExecutionService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
+  }
+
+  private _isEnabled(key: string): boolean {
+    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
   }
 
   async logSignal(r: any, market: string) {
@@ -101,6 +107,7 @@ export class SignalOutcomeService {
 
   @Cron('0 * * * *')
   async resolveOutcomes() {
+    if (!this._isEnabled('SIGNAL_OUTCOME_ENABLED')) return;
     try {
       this.logger.log('OUTCOME: vérification des signaux PENDING');
 
@@ -254,10 +261,33 @@ export class SignalOutcomeService {
       if (log.signalId) {
         const pnlPct = realizedPnlPct ?? null;
         await this.featureStore.attachOutcome(log.signalId, outcome, pnlPct);
+        await this._logExecutionEvent(log, outcome, outcomePrice, outcomeAt);
       }
       return outcome === 'EXPIRED' ? 'EXPIRED' : 'RESOLVED';
     }
     return 'SKIP';
+  }
+
+  private async _logExecutionEvent(log: any, outcome: string, outcomePrice: number | null, outcomeAt: Date | null) {
+    if (!log.signalId || !outcomePrice || !outcomeAt) return;
+    const typeMap: Record<string, any> = {
+      WIN_TP1: 'TP1_HIT',
+      WIN_TP2: 'TP2_HIT',
+      LOSS_SL: 'SL_HIT',
+      EXPIRED: 'EXPIRED',
+    };
+    const type = typeMap[outcome];
+    if (!type) return;
+
+    const sizePct = outcome === 'LOSS_SL' ? 100 : 33.3;
+    await this.executionService.logEvent({
+      signalId: log.signalId,
+      type,
+      price: outcomePrice,
+      sizePct,
+      candleTime: outcomeAt,
+      candleTimeframe: log.timeframe,
+    });
   }
 
   /**

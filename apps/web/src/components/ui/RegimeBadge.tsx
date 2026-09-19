@@ -25,6 +25,16 @@ const REGIME_STYLES: Record<string, string> = {
   DISTRIBUTION: 'bg-orange-400/10 text-orange-400 border-orange-400/20',
 };
 
+const REGIME_TITLES: Record<string, string> = {
+  TRENDING_BULL: 'Régime haussier — tendance en hausse',
+  TRENDING_BEAR: 'Régime baissier — tendance en baisse',
+  RANGE: 'Régime de range — marché latéral',
+  VOLATILE: 'Régime volatile — mouvements rapides',
+  LOW_VOLATILITY: 'Régime de faible volatilité — compression',
+  ACCUMULATION: 'Régime d\'accumulation — achats institutionnels',
+  DISTRIBUTION: 'Régime de distribution — ventes institutionnelles',
+};
+
 export function RegimeBadge({ regime, className }: RegimeBadgeProps) {
   if (!regime || regime === '—') return null;
   const style = REGIME_STYLES[regime] ?? REGIME_STYLES.LOW_VOLATILITY;
@@ -36,6 +46,7 @@ export function RegimeBadge({ regime, className }: RegimeBadgeProps) {
         style,
         className,
       )}
+      title={REGIME_TITLES[regime] ?? `Régime ${regime}`}
     >
       {regime.replace(/_/g, ' ')}
     </span>

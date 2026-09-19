@@ -53,6 +53,8 @@ export class NotificationPreferenceService {
         discordWebhookUrl: dto.discordWebhookUrl,
         discordEnabled: dto.discordEnabled ?? false,
         emailEnabled: dto.emailEnabled ?? true,
+        pushEnabled: dto.pushEnabled ?? false,
+        pushSubscription: (dto.pushSubscription as any) ?? undefined,
         minConfidence: dto.minConfidence ?? 60,
       },
       update: {
@@ -61,6 +63,8 @@ export class NotificationPreferenceService {
         ...(dto.discordWebhookUrl !== undefined && { discordWebhookUrl: dto.discordWebhookUrl }),
         ...(dto.discordEnabled !== undefined && { discordEnabled: dto.discordEnabled }),
         ...(dto.emailEnabled !== undefined && { emailEnabled: dto.emailEnabled }),
+        ...(dto.pushEnabled !== undefined && { pushEnabled: dto.pushEnabled }),
+        ...(dto.pushSubscription !== undefined && { pushSubscription: dto.pushSubscription as any }),
         ...(dto.minConfidence !== undefined && { minConfidence: dto.minConfidence }),
       },
     });

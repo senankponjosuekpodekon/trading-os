@@ -321,6 +321,28 @@ _PROVIDER_FUNCS = {
 DEFAULT_PROVIDER_ORDER = ["binance", "deriv", "twelvedata", "yfinance"]
 
 
+async def _notify_api_candle_closed(symbol: str, timeframe: str, retries: int = 2):
+    """Notifie l'API qu'une nouvelle bougie a été fetchée pour le tracking. Retry en cas d'échec."""
+    import os
+    import httpx
+    api_url = os.environ.get("API_URL", "http://api:3001")
+    engine_key = os.environ.get("ENGINE_API_KEY", "")
+    for attempt in range(retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=2) as client:
+                await client.post(
+                    f"{api_url}/api/signals/track/candle-closed",
+                    json={"symbol": symbol, "timeframe": timeframe},
+                    headers={"X-Engine-Key": engine_key},
+                )
+            return
+        except Exception:
+            if attempt < retries:
+                await asyncio.sleep(0.5 * (attempt + 1))
+            else:
+                logger.warning(f"Failed to notify candle.closed for {symbol} {timeframe} after {retries + 1} attempts")
+
+
 async def fetch_klines_fallback(
     symbol: str,
     interval: str,
@@ -368,6 +390,7 @@ async def fetch_klines_fallback(
                 if df is not None and not df.empty:
                     for t in pending:
                         t.cancel()
+                    asyncio.create_task(_notify_api_candle_closed(symbol, interval))
                     return df
     finally:
         for t in pending:

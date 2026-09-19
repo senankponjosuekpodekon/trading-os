@@ -284,17 +284,25 @@ model Signal {
   profileSuitability String[] @default([])
   qualityScore     Float?        @map("quality_score")
   status       SignalStatus @default(ACTIVE)
+  executionStatus SignalExecutionStatus @default(PENDING) @map("execution_status")
   indicators   Json?
   metadata     Json?
   explanation  String?
   isActive     Boolean    @default(true)
   expiresAt    DateTime?
+  currentStopLoss Decimal? @map("current_stop_loss") @db.Decimal(18, 8)
+  worstExcursionPrice Decimal? @map("worst_excursion_price") @db.Decimal(18, 8)
+  lastProcessedCandle DateTime? @map("last_processed_candle")
+  finalPnlPct Decimal? @map("final_pnl_pct") @db.Decimal(8, 4)
+  maxAdverseExcursionPct Decimal? @map("max_adverse_excursion_pct") @db.Decimal(8, 4)
+  riskRewardRatio Decimal? @map("risk_reward_ratio") @db.Decimal(8, 4)
   createdAt    DateTime   @default(now())
 
   asset        Asset      @relation(fields: [assetId], references: [id])
   strategy     Strategy   @relation(fields: [strategyId], references: [id])
   positions    Position[]
   feedbacks    SignalFeedback[]
+  executionEvents SignalExecutionEvent[]
   featureSnapshot SignalFeature?
 
   @@index([assetId, createdAt(sort: Desc)])
@@ -392,6 +400,50 @@ enum SignalOutcome {
   WIN_TP2
   LOSS_SL
   EXPIRED
+}
+
+enum SignalExecutionEventType {
+  ENTRY_HIT
+  SL_MOVED
+  SL_HIT
+  TP1_HIT
+  TP2_HIT
+  TP3_HIT
+  MANUAL_CLOSE
+  EXPIRED
+}
+
+enum SignalExecutionStatus {
+  PENDING
+  ACTIVE
+  CLOSED_WIN
+  CLOSED_LOSS
+  CLOSED_BREAKEVEN
+  EXPIRED
+}
+
+enum IntrabarResolutionMethod {
+  CANDLE_CLOSE
+  LOWER_TIMEFRAME
+  CONSERVATIVE_SL_FIRST
+}
+
+model SignalExecutionEvent {
+  id              String                     @id @default(cuid())
+  signalId        String                     @map("signal_id")
+  signal          Signal                     @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  type            SignalExecutionEventType
+  price           Decimal                    @db.Decimal(18, 8)
+  sizePct         Decimal                    @default(100) @map("size_pct") @db.Decimal(5, 2)
+  candleTime      DateTime                   @map("candle_time")
+  candleTimeframe String                     @map("candle_timeframe")
+  resolvedBy      IntrabarResolutionMethod   @default(CANDLE_CLOSE) @map("resolved_by")
+  metadata        Json?
+  createdAt       DateTime                   @default(now()) @map("created_at")
+
+  @@index([signalId, candleTime])
+  @@index([signalId, type])
+  @@map("signal_execution_events")
 }
 
 model SignalLog {
@@ -687,6 +739,8 @@ model NotificationPreference {
   discordEnabled  Boolean  @default(false) @map("discord_enabled")
   emailEnabled    Boolean  @default(true) @map("email_enabled")
   minConfidence   Int      @default(60) @map("min_confidence")
+  pushEnabled     Boolean  @default(false) @map("push_enabled")
+  pushSubscription Json?   @map("push_subscription")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

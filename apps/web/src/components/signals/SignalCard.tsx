@@ -20,6 +20,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { useToast } from '@/hooks/useToast';
 import { Clock, Zap, Crosshair } from 'lucide-react';
 import { OneClickExecute } from './OneClickExecute';
+import { SignalTrackingSheet } from './SignalTrackingSheet';
 
 const SYMBOL_TO_PRICE_KEY: Record<string, string> = {
   'BTC/USDT': 'BTCUSDT', 'ETH/USDT': 'ETHUSDT', 'SOL/USDT': 'SOLUSDT',
@@ -62,6 +63,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
   const [showWhyNot, setShowWhyNot] = useState(false);
   const [showPatterns, setShowPatterns] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showTracking, setShowTracking] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const userTz = user?.timezone;
@@ -185,9 +187,7 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
               />
             )}
             {signal.metadata?.market_cap_tier && (
-              <span className="text-xs px-2 py-0.5 rounded border border-gray-600/30 bg-gray-700/30 text-gray-400 font-medium">
-                {signal.metadata.market_cap_tier}
-              </span>
+              <SignalMarketCapBadge tier={signal.metadata.market_cap_tier} />
             )}
             {signal.metadata?.red_flags && signal.metadata.red_flags.red_flag_count > 0 && (
               <span
@@ -202,18 +202,18 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
               </span>
             )}
             {signal.profileSuitability?.map(p => (
-              <span key={p} className="text-xs px-2 py-0.5 rounded border border-indigo-400/30 bg-indigo-400/10 text-indigo-300 font-medium">{p}</span>
+              <span key={p} title={`Profil adapté : ${p}`} className="text-xs px-2 py-0.5 rounded border border-indigo-400/30 bg-indigo-400/10 text-indigo-300 font-medium">{p}</span>
             ))}
             {status && (
-              <span className={`text-xs px-2 py-0.5 rounded border font-medium ${statusStyle}`}>
+              <span className={`text-xs px-2 py-0.5 rounded border font-medium ${statusStyle}`} title={isInvalidated ? 'Signal invalidé — ne plus suivre' : status === 'ACTIVE' ? 'Signal actif et suivi' : 'Signal en attente de confirmation'}>
                 {status}
               </span>
             )}
             {(signal as any).signal_pending && (
-              <span className="text-xs px-2 py-0.5 rounded border border-yellow-500/30 bg-yellow-500/10 text-yellow-400">⏳ Confirmation</span>
+              <span className="text-xs px-2 py-0.5 rounded border border-yellow-500/30 bg-yellow-500/10 text-yellow-400" title="Signal en cours de confirmation multi-timeframe">⏳ Confirmation</span>
             )}
             {(signal as any).signal_sticky && (
-              <span className="text-xs px-2 py-0.5 rounded border border-gray-500/30 bg-gray-700/50 text-gray-400">📌 Maintenu</span>
+              <span className="text-xs px-2 py-0.5 rounded border border-gray-500/30 bg-gray-700/50 text-gray-400" title="Signal maintenu manuellement">📌 Maintenu</span>
             )}
           </div>
           <div className="flex items-center gap-2 text-gray-500 text-xs">
@@ -248,6 +248,13 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowTracking(true)}
+              title="Suivi du signal"
+              className="p-1.5 rounded-lg border bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+            >
+              <History className="w-3.5 h-3.5" />
+            </button>
             <button
               onClick={copySignalInfo}
               title="Copier les infos du signal"
@@ -411,11 +418,14 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
       {/* Confluence + regime */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {mtf.confluence && mtf.confluence !== 'UNKNOWN' && (
-          <span className={`text-xs px-2 py-0.5 rounded border font-medium ${
-            mtf.confluence === 'FULL' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
-            mtf.confluence === 'PARTIAL' ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' :
-            'text-red-400 bg-red-400/10 border-red-400/20'
-          }`}>
+          <span
+            className={`text-xs px-2 py-0.5 rounded border font-medium ${
+              mtf.confluence === 'FULL' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
+              mtf.confluence === 'PARTIAL' ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' :
+              'text-red-400 bg-red-400/10 border-red-400/20'
+            }`}
+            title={mtf.confluence === 'FULL' ? 'Confluence multi-timeframe complète' : mtf.confluence === 'PARTIAL' ? 'Confluence multi-timeframe partielle' : 'Pas de confluence multi-timeframe'}
+          >
             {mtf.confluence === 'FULL' ? '⬡ FULL' : mtf.confluence === 'PARTIAL' ? '◑ PARTIAL' : '○ NONE'}
           </span>
         )}
@@ -463,26 +473,29 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
       {/* PA / SMC / Patterns badges */}
       <div className="flex flex-wrap gap-1.5 mb-3">
         {pa.trend && pa.trend !== 'NEUTRAL' && (
-          <span className={`text-xs px-2 py-0.5 rounded border font-medium ${pa.trend === 'BULLISH' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' : 'text-red-400 bg-red-400/10 border-red-400/20'}`}>
+          <span
+            className={`text-xs px-2 py-0.5 rounded border font-medium ${pa.trend === 'BULLISH' ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' : 'text-red-400 bg-red-400/10 border-red-400/20'}`}
+            title={`Tendance ${pa.trend.toLowerCase()} — ${pa.structure ?? 'structure non précisée'}`}
+          >
             {pa.trend === 'BULLISH' ? '↑' : '↓'} {pa.structure?.split(' ')[0]}
           </span>
         )}
-        {pa.bos && <span className="text-xs px-2 py-0.5 rounded border text-blue-400 bg-blue-400/10 border-blue-400/20 font-medium">BOS {pa.bos_dir}</span>}
-        {pa.choch && <span className="text-xs px-2 py-0.5 rounded border text-purple-400 bg-purple-400/10 border-purple-400/20 font-medium">CHoCH</span>}
-        {pats.pin_bar && <span className="text-xs px-2 py-0.5 rounded border text-yellow-400 bg-yellow-400/10 border-yellow-400/20">Pin Bar {pats.pin_bar}</span>}
-        {pats.engulfing && <span className="text-xs px-2 py-0.5 rounded border text-orange-400 bg-orange-400/10 border-orange-400/20">Engulfing {pats.engulfing}</span>}
-        {pats.inside_bar && <span className="text-xs px-2 py-0.5 rounded border text-gray-400 bg-gray-400/10 border-gray-600">Inside Bar</span>}
-        {pats.doji && <span className="text-xs px-2 py-0.5 rounded border text-gray-400 bg-gray-700 border-gray-600">Doji</span>}
-        {sr.near_support && <span className="text-xs px-2 py-0.5 rounded border text-emerald-400 bg-emerald-400/10 border-emerald-400/20">Support ${sr.near_support.price?.toFixed(0)}</span>}
-        {sr.near_resistance && <span className="text-xs px-2 py-0.5 rounded border text-red-400 bg-red-400/10 border-red-400/20">Résist. ${sr.near_resistance.price?.toFixed(0)}</span>}
+        {pa.bos && <span title="Break of Structure — rupture de structure du mouvement" className="text-xs px-2 py-0.5 rounded border text-blue-400 bg-blue-400/10 border-blue-400/20 font-medium">BOS {pa.bos_dir}</span>}
+        {pa.choch && <span title="Change of Character — changement de caractère de tendance" className="text-xs px-2 py-0.5 rounded border text-purple-400 bg-purple-400/10 border-purple-400/20 font-medium">CHoCH</span>}
+        {pats.pin_bar && <span title="Pin Bar — bougie avec mèche de rejet forte" className="text-xs px-2 py-0.5 rounded border text-yellow-400 bg-yellow-400/10 border-yellow-400/20">Pin Bar {pats.pin_bar}</span>}
+        {pats.engulfing && <span title="Engulfing — bougie d’engloutissement" className="text-xs px-2 py-0.5 rounded border text-orange-400 bg-orange-400/10 border-orange-400/20">Engulfing {pats.engulfing}</span>}
+        {pats.inside_bar && <span title="Inside Bar — consolidation avant potentielle rupture" className="text-xs px-2 py-0.5 rounded border text-gray-400 bg-gray-400/10 border-gray-600">Inside Bar</span>}
+        {pats.doji && <span title="Doji — indécision du marché (ouverture = clôture)" className="text-xs px-2 py-0.5 rounded border text-gray-400 bg-gray-700 border-gray-600">Doji</span>}
+        {sr.near_support && <span title="Niveau de support proche du prix actuel" className="text-xs px-2 py-0.5 rounded border text-emerald-400 bg-emerald-400/10 border-emerald-400/20">Support ${sr.near_support.price?.toFixed(0)}</span>}
+        {sr.near_resistance && <span title="Niveau de résistance proche du prix actuel" className="text-xs px-2 py-0.5 rounded border text-red-400 bg-red-400/10 border-red-400/20">Résist. ${sr.near_resistance.price?.toFixed(0)}</span>}
         {fvg.near_bullish_fvg && <span className="text-xs px-2 py-0.5 rounded border text-cyan-400 bg-cyan-400/10 border-cyan-400/20 font-medium" title={`FVG ${fvg.near_bullish_fvg.bottom?.toFixed(2)}–${fvg.near_bullish_fvg.top?.toFixed(2)}`}>FVG Bull</span>}
         {fvg.near_bearish_fvg && <span className="text-xs px-2 py-0.5 rounded border text-rose-400 bg-rose-400/10 border-rose-400/20 font-medium" title={`FVG ${fvg.near_bearish_fvg.bottom?.toFixed(2)}–${fvg.near_bearish_fvg.top?.toFixed(2)}`}>FVG Bear</span>}
         {ob.near_bullish_ob && <span className="text-xs px-2 py-0.5 rounded border text-teal-400 bg-teal-400/10 border-teal-400/20 font-medium" title={`OB ${ob.near_bullish_ob.bottom?.toFixed(2)}–${ob.near_bullish_ob.top?.toFixed(2)}`}>OB Bull</span>}
         {ob.near_bearish_ob && <span className="text-xs px-2 py-0.5 rounded border text-pink-400 bg-pink-400/10 border-pink-400/20 font-medium" title={`OB ${ob.near_bearish_ob.bottom?.toFixed(2)}–${ob.near_bearish_ob.top?.toFixed(2)}`}>OB Bear</span>}
-        {liq.near_eqh && <span className="text-xs px-2 py-0.5 rounded border text-violet-400 bg-violet-400/10 border-violet-400/20" title={`${liq.near_eqh.touches} touches`}>EQH Liq</span>}
-        {liq.near_eql && <span className="text-xs px-2 py-0.5 rounded border text-violet-400 bg-violet-400/10 border-violet-400/20" title={`${liq.near_eql.touches} touches`}>EQL Liq</span>}
+        {liq.near_eqh && <span className="text-xs px-2 py-0.5 rounded border text-violet-400 bg-violet-400/10 border-violet-400/20" title={`Equal Highs — liquidité au-dessus avec ${liq.near_eqh.touches} touches`}>EQH Liq</span>}
+        {liq.near_eql && <span className="text-xs px-2 py-0.5 rounded border text-violet-400 bg-violet-400/10 border-violet-400/20" title={`Equal Lows — liquidité en-dessous avec ${liq.near_eql.touches} touches`}>EQL Liq</span>}
         {detectedPatterns.length > 0 && (
-          <span className="text-xs px-2 py-0.5 rounded border text-indigo-400 bg-indigo-400/10 border-indigo-400/20 font-medium">
+          <span className="text-xs px-2 py-0.5 rounded border text-indigo-400 bg-indigo-400/10 border-indigo-400/20 font-medium" title={`Pattern détecté : ${detectedPatterns[0].name}`}>
             {detectedPatterns[0].name} ({Math.round((detectedPatterns[0].confluenceScore ?? detectedPatterns[0].confidence ?? 0) * 100)}%)
           </span>
         )}
@@ -531,21 +544,24 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
           <span className="text-xs text-gray-500 flex items-center gap-1">
             <Activity className="w-3 h-3" /> On-chain
           </span>
-          <span className={`text-xs px-2 py-0.5 rounded border font-medium ${
-            (signal.metadata as any).onchain_signals.signal_score >= 70 ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
-            (signal.metadata as any).onchain_signals.signal_score >= 40 ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' :
-            'text-red-400 bg-red-400/10 border-red-400/20'
-          }`}>
+          <span
+            className={`text-xs px-2 py-0.5 rounded border font-medium ${
+              (signal.metadata as any).onchain_signals.signal_score >= 70 ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
+              (signal.metadata as any).onchain_signals.signal_score >= 40 ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' :
+              'text-red-400 bg-red-400/10 border-red-400/20'
+            }`}
+            title="Score on-chain basé sur whales, liquidité et activité développeur"
+          >
             {(signal.metadata as any).onchain_signals.verdict ?? '—'} · {(signal.metadata as any).onchain_signals.signal_score}
           </span>
           {(signal.metadata as any).onchain_signals.whale_accumulation && (
-            <span className="text-xs text-cyan-400">🐳 Whale accum</span>
+            <span className="text-xs text-cyan-400" title="Whale accumulation — grosses adresses achètent">🐳 Whale accum</span>
           )}
           {(signal.metadata as any).onchain_signals.liquidity_building && (
-            <span className="text-xs text-blue-400">💧 Liq building</span>
+            <span className="text-xs text-blue-400" title="Liquidité en construction — possible zone d’intervention">💧 Liq building</span>
           )}
           {(signal.metadata as any).onchain_signals.dev_activity && (
-            <span className="text-xs text-violet-400">💻 Dev active</span>
+            <span className="text-xs text-violet-400" title="Activité développeurs accrue sur le repository">💻 Dev active</span>
           )}
         </div>
       )}
@@ -586,14 +602,17 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
           <div className="flex items-center gap-2">
             <Activity className="w-3 h-3 text-amber-400" />
             <span className="text-xs text-amber-400 font-medium">Rotation</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
-              macro.phase === 'BTC' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' :
-              macro.phase === 'ETH' ? 'text-blue-400 border-blue-400/30 bg-blue-400/10' :
-              macro.phase === 'ALTCOINS' ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' :
-              macro.phase === 'MEMECOINS' ? 'text-purple-400 border-purple-400/30 bg-purple-400/10' :
-              macro.phase === 'RISK_OFF' ? 'text-red-400 border-red-400/30 bg-red-400/10' :
-              'text-gray-400 border-gray-600 bg-gray-700'
-            }`}>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                macro.phase === 'BTC' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' :
+                macro.phase === 'ETH' ? 'text-blue-400 border-blue-400/30 bg-blue-400/10' :
+                macro.phase === 'ALTCOINS' ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' :
+                macro.phase === 'MEMECOINS' ? 'text-purple-400 border-purple-400/30 bg-purple-400/10' :
+                macro.phase === 'RISK_OFF' ? 'text-red-400 border-red-400/30 bg-red-400/10' :
+                'text-gray-400 border-gray-600 bg-gray-700'
+              }`}
+              title="Phase de rotation macro du marché crypto"
+            >
               {macro.phase_label}
             </span>
             {macro.bonus != null && (
@@ -782,6 +801,13 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
           )}
         </div>
       )}
+      <SignalTrackingSheet
+        signalId={signal.id}
+        symbol={signal.asset?.symbol ?? '—'}
+        signal={signal.signal}
+        open={showTracking}
+        onClose={() => setShowTracking(false)}
+      />
     </div>
   );
 }
@@ -815,6 +841,23 @@ function Expandable({ title, icon, open, onToggle, children }: {
       </button>
       {open && <div className="px-3 pb-3 pt-1">{children}</div>}
     </div>
+  );
+}
+
+function SignalMarketCapBadge({ tier }: { tier: string }) {
+  const tiers: Record<string, string> = {
+    LOW:  'Marché mineur — liquidité plus faible',
+    MID:  'Marché moyen — liquidité modérée',
+    HIGH: 'Marché majeur — liquidité élevée',
+    MEGA: 'Marché dominant — très haute liquidité',
+  };
+  return (
+    <span
+      className="text-xs px-2 py-0.5 rounded border border-gray-600/30 bg-gray-700/30 text-gray-400 font-medium"
+      title={tiers[tier] ?? `Capitalisation ${tier}`}
+    >
+      {tier}
+    </span>
   );
 }
 
@@ -1145,11 +1188,16 @@ function SignalTimeline({ signal, livePrice }: { signal: Signal; livePrice: numb
     let label = `Prix live: $${livePrice.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
     let color = pnlPct > 0 ? 'text-emerald-400' : pnlPct < 0 ? 'text-red-400' : 'text-gray-400';
 
+    const entryReached = isBuy ? livePrice <= entry : livePrice >= entry;
+
     if (sl !== null && (isBuy ? livePrice <= sl : livePrice >= sl)) {
-      label = `SL touch\u00e9 \u2014 prix $${livePrice.toFixed(2)}`;
+      label = `Prix au-delà du SL — prix $${livePrice.toFixed(2)} (SL prévu $${sl.toFixed(2)})`;
       color = 'text-red-400';
+    } else if (!entryReached) {
+      label = `Entrée non atteinte — prix $${livePrice.toFixed(2)} (entrée $${entry.toFixed(2)})`;
+      color = 'text-gray-400';
     } else if (tp1 !== null && (isBuy ? livePrice >= tp1 : livePrice <= tp1)) {
-      label = `TP1 touch\u00e9 \u2014 prix $${livePrice.toFixed(2)}`;
+      label = `Prix au-delà du TP1 — prix $${livePrice.toFixed(2)} (TP1 $${tp1.toFixed(2)})`;
       color = 'text-emerald-400';
     }
 
