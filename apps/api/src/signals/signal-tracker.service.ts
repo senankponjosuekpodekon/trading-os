@@ -122,10 +122,10 @@ export class SignalTrackerService {
       });
     }
 
-    await this.recalculateOutcome(signalId, direction, worstPrice);
+    await this.recalculateOutcome(signalId, direction, worstPrice, newCandles);
   }
 
-  private async recalculateOutcome(signalId: string, direction: Direction, worstPrice: number | null): Promise<void> {
+  private async recalculateOutcome(signalId: string, direction: Direction, worstPrice: number | null, candles: RepoCandle[]): Promise<void> {
     const updated = await this.prisma.signal.findUniqueOrThrow({ where: { id: signalId }, include: { executionEvents: true } });
     const entryEvent = updated.executionEvents.find((e) => e.type === 'ENTRY_HIT');
     if (!entryEvent) return;
@@ -133,12 +133,21 @@ export class SignalTrackerService {
     const outcome = deriveSignalOutcome(Number(entryEvent.price), direction, updated.executionEvents as any);
     const mae = worstPrice !== null ? computeMaxAdverseExcursion(Number(entryEvent.price), direction, worstPrice) : null;
 
+    // Calculer MFE (Maximum Favorable Excursion) — prix le plus favorable atteint
+    const favorablePrice = direction === 'LONG'
+      ? Math.max(...candles.map(c => c.high))
+      : Math.min(...candles.map(c => c.low));
+    const mfe = direction === 'LONG'
+      ? ((favorablePrice - Number(entryEvent.price)) / Number(entryEvent.price)) * 100
+      : ((Number(entryEvent.price) - favorablePrice) / Number(entryEvent.price)) * 100;
+
     await this.prisma.signal.update({
       where: { id: signalId },
       data: {
         executionStatus: outcome.status as PrismaSignalExecutionStatus,
         ...(outcome.pnlPct !== null ? { finalPnlPct: outcome.pnlPct } : {}),
         ...(mae !== null ? { maxAdverseExcursionPct: mae } : {}),
+        maxFavorableExcursionPct: mfe,
       },
     });
   }

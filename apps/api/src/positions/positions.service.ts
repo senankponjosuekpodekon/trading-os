@@ -12,6 +12,7 @@ import { CreatePositionDto } from './dto/create-position.dto';
 import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
 import { CrossPositionRiskService } from './cross-position-risk.service';
+import { CronConfigService } from '../admin/cron-config.service';
 
 const BINANCE_TICKER = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -36,8 +37,22 @@ export class PositionsService {
     private audit: AuditService,
     private health: SystemHealthService,
     private crossRisk: CrossPositionRiskService,
+    private cronConfig: CronConfigService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
+  }
+
+  private async _run(name: string, fn: () => Promise<void>): Promise<void> {
+    const enabled = await this.cronConfig.isEnabled(name);
+    if (!enabled) return;
+
+    try {
+      await fn();
+      await this.cronConfig.setLastRun(name);
+    } catch (error) {
+      await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
+      throw error;
+    }
   }
 
   // Runs `fn` inside a single Postgres transaction, manually re-injecting the
@@ -655,10 +670,7 @@ export class PositionsService {
 
   @Cron('*/30 * * * * *')
   async syncTrailingStops() {
-    if (!this.config.get<string>('TRAILING_STOPS_ENABLED', 'true').toLowerCase().match(/^(1|true|yes|on)$/)) {
-      return;
-    }
-    try {
+    await this._run('TRAILING_STOPS_ENABLED', async () => {
       this.logger.log('TRAILING: synchronisation des trailing stops');
       const open = await this.systemPrisma.position.findMany({
         where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } },
@@ -676,10 +688,7 @@ export class PositionsService {
           this.logger.warn(`syncTrailingStops failed for ${pos.asset.symbol}: ${e?.message}`);
         }
       }
-      this.health.recordCronRun('sync-trailing-stops', 'ok');
-    } catch (e: any) {
-      this.health.recordCronRun('sync-trailing-stops', 'error', e?.message);
-    }
+    });
   }
 
   private async _syncOneTrailingStop(pos: any) {

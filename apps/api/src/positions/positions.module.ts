@@ -7,9 +7,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { JournalModule } from '../journal/journal.module';
 import { AuditModule } from '../audit/audit.module';
 import { SystemHealthModule } from '../system-health/system-health.module';
+import { CronConfigModule } from '../admin/cron-config.module';
 
 @Module({
-  imports: [HttpModule, NotificationsModule, JournalModule, AuditModule, SystemHealthModule],
+  imports: [HttpModule, NotificationsModule, JournalModule, AuditModule, SystemHealthModule, CronConfigModule],
   controllers: [PositionsController],
   providers: [PositionsService, CrossPositionRiskService],
   exports: [PositionsService, CrossPositionRiskService],

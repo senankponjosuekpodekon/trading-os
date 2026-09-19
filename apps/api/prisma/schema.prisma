@@ -295,6 +295,7 @@ model Signal {
   lastProcessedCandle DateTime? @map("last_processed_candle")
   finalPnlPct Decimal? @map("final_pnl_pct") @db.Decimal(8, 4)
   maxAdverseExcursionPct Decimal? @map("max_adverse_excursion_pct") @db.Decimal(8, 4)
+  maxFavorableExcursionPct Decimal? @map("max_favorable_excursion_pct") @db.Decimal(8, 4)
   riskRewardRatio Decimal? @map("risk_reward_ratio") @db.Decimal(8, 4)
   createdAt    DateTime   @default(now())
 
@@ -444,6 +445,23 @@ model SignalExecutionEvent {
   @@index([signalId, candleTime])
   @@index([signalId, type])
   @@map("signal_execution_events")
+}
+
+model Candle {
+  id        String   @id @default(cuid())
+  symbol    String
+  timeframe String
+  openTime  DateTime @map("open_time")
+  open      Decimal  @db.Decimal(18, 8)
+  high      Decimal  @db.Decimal(18, 8)
+  low       Decimal  @db.Decimal(18, 8)
+  close     Decimal  @db.Decimal(18, 8)
+  volume    Decimal? @db.Decimal(18, 8)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([symbol, timeframe, openTime])
+  @@index([symbol, timeframe])
+  @@map("candles")
 }
 
 model SignalLog {

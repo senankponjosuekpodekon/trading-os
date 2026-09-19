@@ -37,19 +37,27 @@ export class SignalExecutionService {
       },
     });
 
-    // Notify on SL/TP hits — non-blocking, don't break the event log
-    if (['SL_HIT', 'TP1_HIT', 'TP2_HIT', 'TP3_HIT'].includes(input.type)) {
+    // Notify on SL/TP hits, ENTRY_HIT, EXPIRED — non-blocking, don't break the event log
+    const notifyTypes = ['SL_HIT', 'TP1_HIT', 'TP2_HIT', 'TP3_HIT', 'ENTRY_HIT', 'EXPIRED'];
+    if (notifyTypes.includes(input.type)) {
       try {
         const signal = await this.prisma.signal.findUnique({
           where: { id: input.signalId },
           include: { asset: true },
         });
         if (signal) {
-          const isWin = input.type !== 'SL_HIT';
+          const labels: Record<string, string> = {
+            SL_HIT: 'SL touché',
+            TP1_HIT: 'TP1 touché',
+            TP2_HIT: 'TP2 touché',
+            TP3_HIT: 'TP3 touché',
+            ENTRY_HIT: 'Entrée touchée',
+            EXPIRED: 'Signal expiré',
+          };
           await this.notifications.push({
             userId: '*',
             type: 'SIGNAL',
-            title: `${isWin ? 'TP' : 'SL'} touché — ${signal.asset.symbol}`,
+            title: `${labels[input.type]} — ${signal.asset.symbol}`,
             message: `${signal.signal} ${signal.asset.symbol} : ${input.type.replace('_', ' ')} à ${input.price}`,
             data: { signalId: signal.id, type: input.type, price: input.price },
           });

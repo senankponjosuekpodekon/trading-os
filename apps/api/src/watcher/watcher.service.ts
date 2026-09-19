@@ -12,6 +12,7 @@ import { PriceAlertsService } from '../price-alerts/price-alerts.service';
 import { retryWithBackoff } from '../utils/retry';
 import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { CronConfigService } from '../admin/cron-config.service';
 
 const BINANCE_PRICES = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -34,8 +35,22 @@ export class WatcherService {
     private priceAlerts: PriceAlertsService,
     private config: ConfigService,
     private health: SystemHealthService,
+    private cronConfig: CronConfigService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
+  }
+
+  private async _run(name: string, fn: () => Promise<void>): Promise<void> {
+    const enabled = await this.cronConfig.isEnabled(name);
+    if (!enabled) return;
+
+    try {
+      await fn();
+      await this.cronConfig.setLastRun(name);
+    } catch (error) {
+      await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
+      throw error;
+    }
   }
 
   private _isEnabled(key: string): boolean {
@@ -113,8 +128,7 @@ export class WatcherService {
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async watchPositions() {
-    if (!this._isEnabled('WATCHER_POSITIONS_ENABLED')) return;
-    try {
+    await this._run('WATCHER_POSITIONS_ENABLED', async () => {
       const openPositions = await this.systemPrisma.position.findMany({
         where: { status: 'OPEN' },
         include: {
@@ -150,10 +164,7 @@ export class WatcherService {
         this.logger.warn(`Watcher: price alert check failed — ${e?.message}`);
       }
       this.health.recordCronRun('watch-positions', 'ok');
-    } catch (e: any) {
-      this.health.recordCronRun('watch-positions', 'error', e?.message);
-      this.logger.warn(`Watcher: watchPositions failed — ${e?.message}`);
-    }
+    });
   }
 
   /** Returns true if the position was closed. */
@@ -216,8 +227,7 @@ export class WatcherService {
   // Sprint 3 — Cycle de vie PENDING → ACTIVE / INVALIDATED pour les setups RETEST/LIMIT.
   @Cron(CronExpression.EVERY_5_MINUTES)
   async watchPendingSignals() {
-    if (!this._isEnabled('WATCHER_PENDING_SIGNALS_ENABLED')) return;
-    try {
+    await this._run('WATCHER_PENDING_SIGNALS_ENABLED', async () => {
       const now = new Date();
 
       const expired = await this.prisma.signal.updateMany({
@@ -259,17 +269,13 @@ export class WatcherService {
         this.logger.log(`Watcher: ${activated} signal(s) PENDING activé(s)`);
       }
       this.health.recordCronRun('watch-pending-signals', 'ok');
-    } catch (e: any) {
-      this.health.recordCronRun('watch-pending-signals', 'error', e?.message);
-      this.logger.warn(`Watcher: watchPendingSignals failed — ${e?.message}`);
-    }
+    });
   }
 
   /** Auto-transition PENDING positions → OPEN (exchange fill confirmed) or expire after 24h. */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async watchPendingPositions() {
-    if (!this._isEnabled('WATCHER_PENDING_POSITIONS_ENABLED')) return;
-    try {
+    await this._run('WATCHER_PENDING_POSITIONS_ENABLED', async () => {
       const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h ago
 
       // Expire old PENDING positions (no fill confirmation within 24h)
@@ -349,9 +355,6 @@ export class WatcherService {
         this.logger.log(`Watcher: ${confirmed} PENDING position(s) auto-confirmed`);
       }
       this.health.recordCronRun('watch-pending-positions', 'ok');
-    } catch (e: any) {
-      this.health.recordCronRun('watch-pending-positions', 'error', e?.message);
-      this.logger.warn(`Watcher: watchPendingPositions failed — ${e?.message}`);
-    }
+    });
   }
 }

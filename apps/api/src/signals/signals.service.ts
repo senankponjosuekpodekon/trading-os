@@ -6,6 +6,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AlertService } from '../notifications/alert.service';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { SignalTrackerService } from './signal-tracker.service';
+import { SignalStatsService } from './signal-stats.service';
+import { CronConfigService } from '../admin/cron-config.service';
 import { FeatureStoreService } from './feature-store.service';
 import { RegimeClassifierService } from './regime-classifier.service';
 import { SignalPredictorService, SignalFeatures } from './signal-predictor.service';
@@ -36,10 +38,21 @@ export class SignalsService {
     private patternPredictor: PatternPredictorService,
     private expectedMove: ExpectedMoveService,
     private config: ConfigService,
+    private stats: SignalStatsService,
+    private cronConfig: CronConfigService,
   ) {}
 
-  private _isEnabled(key: string): boolean {
-    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  private async _run(name: string, fn: () => Promise<void>): Promise<void> {
+    const enabled = await this.cronConfig.isEnabled(name);
+    if (!enabled) return;
+
+    try {
+      await fn();
+      await this.cronConfig.setLastRun(name);
+    } catch (error) {
+      await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
+      throw error;
+    }
   }
 
   private _ttlForTimeframe(tf: string | undefined | null): number {
@@ -140,50 +153,36 @@ export class SignalsService {
 
   @Cron('0 6 * * *', { timeZone: 'UTC' })
   async scheduledMorningScan() {
-    if (!this._isEnabled('SIGNALS_MORNING_SCAN_ENABLED')) return;
-    this.logger.log('CRON: lancement du scan matinal (06:00 UTC)');
-    try {
+    await this._run('SIGNALS_MORNING_SCAN_ENABLED', async () => {
+      this.logger.log('CRON: lancement du scan matinal (06:00 UTC)');
       await this._scanActiveAssetsByTimeframe();
       this.health.recordCronRun('morning-scan', 'ok');
-    } catch (e: any) {
-      this.health.recordCronRun('morning-scan', 'error', e?.message);
-    }
+    });
   }
 
   @Cron('0 */4 * * *', { timeZone: 'UTC' })
   async scheduledDayScan() {
-    if (!this._isEnabled('SIGNALS_DAY_SCAN_ENABLED')) return;
-    this.logger.log('CRON: lancement du scan toutes les 4h');
-    try {
+    await this._run('SIGNALS_DAY_SCAN_ENABLED', async () => {
+      this.logger.log('CRON: lancement du scan toutes les 4h');
       await this._scanActiveAssetsByTimeframe();
       this.health.recordCronRun('day-scan', 'ok');
-    } catch (e: any) {
-      this.health.recordCronRun('day-scan', 'error', e?.message);
-    }
+    });
   }
 
   @Cron('15 */6 * * *', { timeZone: 'UTC' })
   async scheduledPredictorTraining() {
-    if (!this._isEnabled('SIGNALS_PREDICTOR_TRAINING_ENABLED')) return;
-    try {
+    await this._run('SIGNALS_PREDICTOR_TRAINING_ENABLED', async () => {
       await this.trainPredictor({ market: 'CRYPTO', timeframe: '1h' });
       this.health.recordCronRun('predictor-training', 'ok');
-    } catch (error) {
-      this.logger.warn('scheduled_predictor_train_failed', { error: (error as any)?.message ?? error });
-      this.health.recordCronRun('predictor-training', 'error', (error as any)?.message);
-    }
+    });
   }
 
   @Cron('45 */6 * * *', { timeZone: 'UTC' })
   async scheduledPatternPredictorTraining() {
-    if (!this._isEnabled('SIGNALS_PATTERN_PREDICTOR_ENABLED')) return;
-    try {
+    await this._run('SIGNALS_PATTERN_PREDICTOR_ENABLED', async () => {
       const result = await this.patternPredictor.train();
       this.health.recordCronRun('pattern-predictor-training', result.trained ? 'ok' : 'error');
-    } catch (error) {
-      this.logger.warn('scheduled_pattern_predictor_train_failed', { error: (error as any)?.message ?? error });
-      this.health.recordCronRun('pattern-predictor-training', 'error', (error as any)?.message);
-    }
+    });
   }
 
   /**
@@ -868,6 +867,10 @@ export class SignalsService {
 
   async notifyCandleClosed(symbol: string, timeframe: string) {
     return this.tracker.processActiveSignals();
+  }
+
+  async getStats(filters?: { strategyId?: string; assetId?: string; timeframe?: string; minConfidence?: number }) {
+    return this.stats.getStats(filters);
   }
 
   async getTrackingSignals(opts: { page: number; limit: number; status?: string }) {

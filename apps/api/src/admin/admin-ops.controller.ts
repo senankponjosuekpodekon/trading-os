@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Body, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { CronConfigService } from './cron-config.service';
 
 const execAsync = promisify(exec);
 
@@ -19,6 +20,7 @@ export class AdminOpsController {
     private prisma: PrismaService,
     private healthService: SystemHealthService,
     private config: ConfigService,
+    private cronConfig: CronConfigService,
   ) {}
 
   @Get('health')
@@ -217,5 +219,16 @@ export class AdminOpsController {
     }
 
     return { api: apiInfo, engine: engineInfo, containers: dockerStats, hostCpu, topProcesses };
+  }
+
+  @Get('crons')
+  async getCrons() {
+    return this.cronConfig.getAll();
+  }
+
+  @Patch('crons')
+  async updateCron(@Body() body: { name: string; enabled: boolean }) {
+    await this.cronConfig.setEnabled(body.name, body.enabled);
+    return { name: body.name, enabled: body.enabled };
   }
 }

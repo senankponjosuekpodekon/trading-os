@@ -241,6 +241,22 @@ export class SignalsController {
     });
   }
 
+  @Get('execution-stats')
+  @UseGuards(JwtAuthGuard)
+  async getExecutionStats(
+    @Query('strategyId') strategyId?: string,
+    @Query('assetId') assetId?: string,
+    @Query('timeframe') timeframe?: string,
+    @Query('minConfidence') minConfidence?: string,
+  ) {
+    return this.signalsService.getStats({
+      strategyId,
+      assetId,
+      timeframe,
+      minConfidence: minConfidence ? parseFloat(minConfidence) : undefined,
+    });
+  }
+
   @Get('scan-history/db')
   @UseGuards(JwtAuthGuard)
   async scanHistoryDb(
