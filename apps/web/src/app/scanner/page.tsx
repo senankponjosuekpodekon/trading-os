@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, Suspense } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -52,7 +52,7 @@ function computeOpportunityScore(s: Signal): number {
   return Math.round(Math.min(100, conf * Math.min(rr, 5) * mtfBonus / 2));
 }
 
-export default function ScannerPage() {
+function ScannerPageInner() {
   const { toast } = useToast();
   const { notifications } = useNotifications();
   const { supported: pushSupported, subscribed: pushSubscribed, requestPermission: requestPush, unsubscribe: unsubscribePush } = usePushNotifications();
@@ -745,5 +745,13 @@ function CountBadge({ icon, label, count, color }: { icon: React.ReactNode; labe
       <span className="font-medium">{count}</span>
       <span className="opacity-70">{label}</span>
     </div>
+  );
+}
+
+export default function ScannerPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-gray-500">Chargement…</div>}>
+      <ScannerPageInner />
+    </Suspense>
   );
 }

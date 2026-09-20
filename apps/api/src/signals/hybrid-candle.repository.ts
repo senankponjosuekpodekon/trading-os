@@ -5,6 +5,7 @@ import { EngineCandleRepository } from './engine-candle.repository';
 import { BinanceCandleRepository } from './binance-candle.repository';
 import { YahooCandleRepository } from './yahoo-candle.repository';
 import { TwelveDataCandleRepository } from './twelvedata-candle.repository';
+import { AlphaVantageCandleRepository } from './alphavantage-candle.repository';
 
 const CRYPTO_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'MATIC', 'NEAR'];
 
@@ -23,6 +24,7 @@ export class HybridCandleRepository extends CandleRepository {
     private binanceRepo: BinanceCandleRepository,
     private yahooRepo: YahooCandleRepository,
     private twelveDataRepo: TwelveDataCandleRepository,
+    private alphaVantageRepo: AlphaVantageCandleRepository,
   ) {
     super();
   }
@@ -52,12 +54,22 @@ export class HybridCandleRepository extends CandleRepository {
       return candles;
     }
 
-    // Non-crypto: essayer Twelve Data puis Yahoo
+    // Non-crypto: essayer Twelve Data, puis Alpha Vantage, puis Yahoo
     this.logger.log(`TwelveData fallback for ${symbol} ${timeframe}`);
     const twelveData = await this.twelveDataRepo.getSince(symbol, timeframe, since);
     if (twelveData.length > 0) {
       await this.localRepo.store(symbol, timeframe, twelveData);
       return twelveData;
+    }
+
+    // Pour XAG/USD, utiliser Alpha Vantage (Twelve Data n'a pas de données)
+    if (symbol === 'XAG/USD') {
+      this.logger.log(`AlphaVantage fallback for ${symbol} ${timeframe}`);
+      const alphaVantage = await this.alphaVantageRepo.getSince(symbol, timeframe, since);
+      if (alphaVantage.length > 0) {
+        await this.localRepo.store(symbol, timeframe, alphaVantage);
+        return alphaVantage;
+      }
     }
 
     this.logger.log(`Yahoo fallback for ${symbol} ${timeframe}`);

@@ -11,6 +11,7 @@ import { LocalCandleRepository } from './local-candle.repository';
 import { BinanceCandleRepository } from './binance-candle.repository';
 import { YahooCandleRepository } from './yahoo-candle.repository';
 import { TwelveDataCandleRepository } from './twelvedata-candle.repository';
+import { AlphaVantageCandleRepository } from './alphavantage-candle.repository';
 import { HybridCandleRepository } from './hybrid-candle.repository';
 import { MaintenanceService } from '../admin/maintenance.service';
 import { SignalStatsService } from './signal-stats.service';
@@ -43,6 +44,7 @@ import { CronConfigModule } from '../admin/cron-config.module';
     BinanceCandleRepository,
     YahooCandleRepository,
     TwelveDataCandleRepository,
+    AlphaVantageCandleRepository,
     { provide: 'CandleRepository', useClass: HybridCandleRepository },
     SignalPredictorService,
     PatternPredictorService,

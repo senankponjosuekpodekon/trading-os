@@ -14,6 +14,7 @@ interface CronConfig {
 
 export default function AdminOpsPage() {
   const [crons, setCrons] = useState<CronConfig[]>([]);
+  const [maintenance, setMaintenance] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -25,8 +26,15 @@ export default function AdminOpsPage() {
       .finally(() => setLoading(false));
   };
 
+  const fetchMaintenance = () => {
+    api.get('/admin/ops/maintenance')
+      .then(res => setMaintenance(res.data.enabled))
+      .catch(() => setError('Impossible de charger le mode maintenance'));
+  };
+
   useEffect(() => {
     fetchCrons();
+    fetchMaintenance();
   }, []);
 
   const toggleCron = async (name: string, enabled: boolean) => {
@@ -41,6 +49,18 @@ export default function AdminOpsPage() {
     }
   };
 
+  const toggleMaintenance = async (enabled: boolean) => {
+    setSaving('maintenance');
+    try {
+      await api.patch('/admin/ops/maintenance', { enabled });
+      setMaintenance(enabled);
+    } catch {
+      setError('Impossible de mettre à jour le mode maintenance');
+    } finally {
+      setSaving(null);
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="flex items-center gap-2 mb-6">
@@ -50,6 +70,31 @@ export default function AdminOpsPage() {
 
       {loading && <p className="text-gray-500">Chargement…</p>}
       {error && <p className="text-red-400">{error}</p>}
+
+      <div className="mb-6 p-4 bg-gray-900 border border-gray-800 rounded-xl">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Mode maintenance</h2>
+            <p className="text-sm text-gray-400">Bloque toutes les requêtes sauf pour les super admins</p>
+          </div>
+          <button
+            onClick={() => toggleMaintenance(!maintenance)}
+            disabled={saving === 'maintenance'}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              maintenance ? 'bg-emerald-500' : 'bg-gray-700'
+            } ${saving === 'maintenance' ? 'opacity-50' : ''}`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                maintenance ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+          <span className={`ml-2 text-xs ${maintenance ? 'text-emerald-400' : 'text-gray-500'}`}>
+            {maintenance ? 'Activé' : 'Désactivé'}
+          </span>
+        </div>
+      </div>
 
       <div className="rounded-xl border border-gray-800 overflow-hidden">
         <table className="w-full text-sm">
