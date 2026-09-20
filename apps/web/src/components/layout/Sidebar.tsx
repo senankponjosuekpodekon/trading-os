@@ -36,6 +36,7 @@ const groups: NavGroup[] = [
       { href: '/scanner',    label: 'Scanner',    icon: Search },
       { href: '/signals',    label: 'Signaux',    icon: TrendingUp },
       { href: '/signals/tracking', label: 'Suivi signaux', icon: History },
+      { href: '/signals/stats',   label: 'Stats signaux', icon: BarChart3 },
       { href: '/chart',      label: 'Graphique',  icon: LineChart },
     ],
   },

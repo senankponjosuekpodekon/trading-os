@@ -8,6 +8,10 @@ import { SignalTrackerService } from './signal-tracker.service';
 import { SignalTrackerScheduler } from './signal-tracker.scheduler';
 import { EngineCandleRepository } from './engine-candle.repository';
 import { LocalCandleRepository } from './local-candle.repository';
+import { BinanceCandleRepository } from './binance-candle.repository';
+import { YahooCandleRepository } from './yahoo-candle.repository';
+import { TwelveDataCandleRepository } from './twelvedata-candle.repository';
+import { HybridCandleRepository } from './hybrid-candle.repository';
 import { SignalStatsService } from './signal-stats.service';
 import { SignalPredictorService } from './signal-predictor.service';
 import { PatternPredictorService } from './pattern-predictor.service';
@@ -33,7 +37,12 @@ import { CronConfigModule } from '../admin/cron-config.module';
     SignalTrackerService,
     SignalTrackerScheduler,
     SignalStatsService,
-    { provide: 'CandleRepository', useClass: LocalCandleRepository },
+    LocalCandleRepository,
+    EngineCandleRepository,
+    BinanceCandleRepository,
+    YahooCandleRepository,
+    TwelveDataCandleRepository,
+    { provide: 'CandleRepository', useClass: HybridCandleRepository },
     SignalPredictorService,
     PatternPredictorService,
     FeatureStoreService,

@@ -4,9 +4,10 @@ import { SystemHealthService } from './system-health.service';
 import { SystemHealthController } from './system-health.controller';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EngineHttpModule } from '../engine/engine-http.module';
+import { CronConfigModule } from '../admin/cron-config.module';
 
 @Module({
-  imports: [HttpModule, NotificationsModule, EngineHttpModule],
+  imports: [HttpModule, NotificationsModule, EngineHttpModule, CronConfigModule],
   controllers: [SystemHealthController],
   providers: [SystemHealthService],
   exports: [SystemHealthService],

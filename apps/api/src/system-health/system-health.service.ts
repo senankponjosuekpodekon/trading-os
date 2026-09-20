@@ -6,6 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EngineHttpService } from '../engine/engine-http.service';
+import { CronConfigService } from '../admin/cron-config.service';
 
 export interface HealthCheckResult {
   name: string;
@@ -27,16 +28,25 @@ export class SystemHealthService {
     private config: ConfigService,
     private notifications: NotificationsService,
     private engineHttp: EngineHttpService,
+    private cronConfig: CronConfigService,
   ) {}
 
-  private _isEnabled(key: string): boolean {
-    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  private async _run(name: string, fn: () => Promise<void>): Promise<void> {
+    const enabled = await this.cronConfig.isEnabled(name);
+    if (!enabled) return;
+
+    try {
+      await fn();
+      await this.cronConfig.setLastRun(name);
+    } catch (error) {
+      await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
+      throw error;
+    }
   }
 
   @Cron('*/15 * * * *')
   async runHealthChecks() {
-    if (!this._isEnabled('SYSTEM_HEALTH_ENABLED')) return;
-    try {
+    await this._run('SYSTEM_HEALTH_ENABLED', async () => {
       const results: HealthCheckResult[] = [];
       results.push(await this.checkEngine());
       results.push(await this.checkDatabase());
@@ -55,10 +65,7 @@ export class SystemHealthService {
         this.logger.log('Health checks: all OK');
       }
       this.recordCronRun('health-checks', 'ok');
-    } catch (e: any) {
-      this.recordCronRun('health-checks', 'error', e?.message);
-      throw e;
-    }
+    });
   }
 
   private async checkEngine(): Promise<HealthCheckResult> {

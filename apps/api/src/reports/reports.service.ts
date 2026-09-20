@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
+import { CronConfigService } from '../admin/cron-config.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -14,17 +15,27 @@ export class ReportsService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private cronConfig: CronConfigService,
   ) {}
 
-  private _isEnabled(key: string): boolean {
-    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  private async _run<T>(name: string, fn: () => Promise<T>): Promise<T | undefined> {
+    const enabled = await this.cronConfig.isEnabled(name);
+    if (!enabled) return undefined;
+
+    try {
+      const result = await fn();
+      await this.cronConfig.setLastRun(name);
+      return result;
+    } catch (error) {
+      await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
+      throw error;
+    }
   }
 
   @Cron('0 6 * * *', { timeZone: 'UTC' })
   async generateDailyReport() {
-    if (!this._isEnabled('REPORTS_ENABLED')) return;
-    this.logger.log('Starting daily report generation...');
-    try {
+    return this._run('REPORTS_ENABLED', async () => {
+      this.logger.log('Starting daily report generation...');
       const report = await this.collectReportData();
       const summary = this.buildSummary(report);
       const interpretation = this.buildInterpretation(report);
@@ -40,9 +51,7 @@ export class ReportsService {
 
       this.logger.log(`Daily report saved: ${saved.id}`);
       return saved;
-    } catch (err) {
-      this.logger.error('Failed to generate daily report', err);
-    }
+    });
   }
 
   async listReports(limit = 30) {

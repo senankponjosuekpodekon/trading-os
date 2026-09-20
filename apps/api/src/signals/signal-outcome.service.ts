@@ -8,6 +8,7 @@ import { FeatureStoreService } from './feature-store.service';
 import { SignalExecutionService } from './signal-execution.service';
 import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { CronConfigService } from '../admin/cron-config.service';
 
 const TF_TO_BARS_LOOKBACK: Record<string, number> = {
   '1m': 60, '5m': 50, '15m': 50, '1h': 50, '4h': 50, '1d': 50,
@@ -29,12 +30,22 @@ export class SignalOutcomeService {
     private featureStore: FeatureStoreService,
     private health: SystemHealthService,
     private executionService: SignalExecutionService,
+    private cronConfig: CronConfigService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
 
-  private _isEnabled(key: string): boolean {
-    return this.config.get<string>(key, 'true').toLowerCase().match(/^(1|true|yes|on)$/) !== null;
+  private async _run(name: string, fn: () => Promise<void>): Promise<void> {
+    const enabled = await this.cronConfig.isEnabled(name);
+    if (!enabled) return;
+
+    try {
+      await fn();
+      await this.cronConfig.setLastRun(name);
+    } catch (error) {
+      await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
+      throw error;
+    }
   }
 
   async logSignal(r: any, market: string) {
@@ -107,8 +118,7 @@ export class SignalOutcomeService {
 
   @Cron('0 * * * *')
   async resolveOutcomes() {
-    if (!this._isEnabled('SIGNAL_OUTCOME_ENABLED')) return;
-    try {
+    await this._run('SIGNAL_OUTCOME_ENABLED', async () => {
       this.logger.log('OUTCOME: vérification des signaux PENDING');
 
       const pending = await this.prisma.signalLog.findMany({
@@ -136,9 +146,7 @@ export class SignalOutcomeService {
         `OUTCOME: ${pending.length} vérifiés — ${resolved} résolus, ${stillOpen} encore ouverts, ${expired} expirés`,
       );
       this.health.recordCronRun('resolve-outcomes', 'ok');
-    } catch (e: any) {
-      this.health.recordCronRun('resolve-outcomes', 'error', e?.message);
-    }
+    });
   }
 
   private async _resolveOne(log: any): Promise<'RESOLVED' | 'STILL_OPEN' | 'EXPIRED' | 'SKIP'> {

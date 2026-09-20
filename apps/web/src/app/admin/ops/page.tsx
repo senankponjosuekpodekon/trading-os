@@ -8,6 +8,8 @@ interface CronConfig {
   name: string;
   enabled: boolean;
   description: string;
+  lastRun?: string;
+  lastError?: string;
 }
 
 export default function AdminOpsPage() {
@@ -56,6 +58,8 @@ export default function AdminOpsPage() {
               <th className="px-4 py-3 text-left">Cron</th>
               <th className="px-4 py-3 text-left">Description</th>
               <th className="px-4 py-3 text-left">État</th>
+              <th className="px-4 py-3 text-left">Dernier run</th>
+              <th className="px-4 py-3 text-left">Dernière erreur</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
@@ -80,6 +84,12 @@ export default function AdminOpsPage() {
                   <span className={`ml-2 text-xs ${cron.enabled ? 'text-emerald-400' : 'text-gray-500'}`}>
                     {cron.enabled ? 'Activé' : 'Désactivé'}
                   </span>
+                </td>
+                <td className="px-4 py-3 text-gray-400 text-xs">
+                  {cron.lastRun ? new Date(cron.lastRun).toLocaleString('fr-FR') : '—'}
+                </td>
+                <td className="px-4 py-3 text-red-400 text-xs">
+                  {cron.lastError ?? '—'}
                 </td>
               </tr>
             ))}

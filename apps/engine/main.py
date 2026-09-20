@@ -258,6 +258,43 @@ async def get_candles(
         })
     return {"symbol": symbol, "timeframe": timeframe, "candles": candles}
 
+
+@app.get("/candles/{symbol:path}/history", tags=["Market Data"])
+async def get_candles_history(
+    symbol: str,
+    timeframe: str = _Query("1h"),
+    start: int = _Query(..., description="Start timestamp in ms"),
+    end: int = _Query(..., description="End timestamp in ms"),
+):
+    """Return historical OHLCV candles for a symbol (multi-provider fallback)."""
+    from routers.scan import (
+        fetch_klines_fallback,
+        TF_MAP,
+    )
+    import pandas as pd
+
+    tf = TF_MAP.get(timeframe, timeframe)
+    df = await fetch_klines_fallback(symbol, tf, limit=1000, timeout=8.0)
+    if df is None or df.empty:
+        return _JSONResponse(status_code=404, content={"error": f"No data for {symbol}/{timeframe}"})
+
+    # Filter by time range
+    df["time_ms"] = df["time"].astype(int)
+    df = df[(df["time_ms"] >= start) & (df["time_ms"] <= end)]
+    df = df.sort_values("time_ms")
+
+    candles = []
+    for _, row in df.iterrows():
+        candles.append({
+            "time": int(row["time_ms"]),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+    return {"symbol": symbol, "timeframe": timeframe, "candles": candles}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
