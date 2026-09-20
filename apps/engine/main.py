@@ -271,7 +271,6 @@ async def get_candles_history(
         fetch_klines_fallback,
         TF_MAP,
     )
-    import pandas as pd
 
     tf = TF_MAP.get(timeframe, timeframe)
     df = await fetch_klines_fallback(symbol, tf, limit=1000, timeout=8.0)
@@ -306,10 +305,6 @@ async def get_deriv_history(
     """Return historical OHLCV candles for a Deriv synthetic index."""
     from routers.scan_fetchers import fetch_deriv_klines
     import pandas as pd
-
-    # Deriv utilise des timestamps en secondes, pas en ms
-    start_sec = start // 1000
-    end_sec = (end // 1000) if end else int(pd.Timestamp.now().timestamp())
 
     df = await fetch_deriv_klines(symbol, timeframe, limit=5000)
     if df is None or df.empty:
