@@ -5,6 +5,7 @@ import { AdminLogsController } from './admin-logs.controller';
 import { AssetConfigController } from './asset-config.controller';
 import { AssetConfigService } from './asset-config.service';
 import { CronConfigService } from './cron-config.service';
+import { MaintenanceService } from './maintenance.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { SystemHealthModule } from '../system-health/system-health.module';
@@ -12,6 +13,6 @@ import { SystemHealthModule } from '../system-health/system-health.module';
 @Module({
   imports: [PrismaModule, AuthModule, SystemHealthModule],
   controllers: [AdminUsersController, AdminOpsController, AdminLogsController, AssetConfigController],
-  providers: [AssetConfigService, CronConfigService],
+  providers: [AssetConfigService, CronConfigService, MaintenanceService],
 })
 export class AdminModule {}

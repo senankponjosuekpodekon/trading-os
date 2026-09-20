@@ -295,6 +295,43 @@ async def get_candles_history(
         })
     return {"symbol": symbol, "timeframe": timeframe, "candles": candles}
 
+
+@app.get("/candles/{symbol:path}/deriv-history", tags=["Market Data"])
+async def get_deriv_history(
+    symbol: str,
+    timeframe: str = _Query("1h"),
+    start: int = _Query(..., description="Start timestamp in ms"),
+    end: int = _Query(None, description="End timestamp in ms"),
+):
+    """Return historical OHLCV candles for a Deriv synthetic index."""
+    from routers.scan_fetchers import fetch_deriv_klines
+    import pandas as pd
+
+    # Deriv utilise des timestamps en secondes, pas en ms
+    start_sec = start // 1000
+    end_sec = (end // 1000) if end else int(pd.Timestamp.now().timestamp())
+
+    df = await fetch_deriv_klines(symbol, timeframe, limit=5000)
+    if df is None or df.empty:
+        return _JSONResponse(status_code=404, content={"error": f"No data for {symbol}/{timeframe}"})
+
+    # Filter by time range
+    df["time_ms"] = df["time"].astype(int) * 1000
+    df = df[(df["time_ms"] >= start) & (df["time_ms"] <= (end or int(pd.Timestamp.now().timestamp() * 1000)))]
+    df = df.sort_values("time_ms")
+
+    candles = []
+    for _, row in df.iterrows():
+        candles.append({
+            "time": int(row["time_ms"]),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+    return {"symbol": symbol, "timeframe": timeframe, "candles": candles}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

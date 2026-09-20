@@ -9,6 +9,7 @@ import { UserRole } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { CronConfigService } from './cron-config.service';
+import { MaintenanceService } from './maintenance.service';
 
 const execAsync = promisify(exec);
 
@@ -21,6 +22,7 @@ export class AdminOpsController {
     private healthService: SystemHealthService,
     private config: ConfigService,
     private cronConfig: CronConfigService,
+    private maintenanceService: MaintenanceService,
   ) {}
 
   @Get('health')
@@ -230,5 +232,16 @@ export class AdminOpsController {
   async updateCron(@Body() body: { name: string; enabled: boolean }) {
     await this.cronConfig.setEnabled(body.name, body.enabled);
     return { name: body.name, enabled: body.enabled };
+  }
+
+  @Get('maintenance')
+  async getMaintenanceMode() {
+    return { enabled: this.maintenanceService.isMaintenanceMode() };
+  }
+
+  @Patch('maintenance')
+  async setMaintenanceMode(@Body() body: { enabled: boolean }) {
+    this.maintenanceService.setMaintenanceMode(body.enabled);
+    return { enabled: body.enabled };
   }
 }

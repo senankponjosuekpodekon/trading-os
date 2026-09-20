@@ -48,6 +48,28 @@ export class EngineCandleRepository extends CandleRepository {
     }
   }
 
+  async getDerivHistory(symbol: string, timeframe: string, since: Date): Promise<Candle[]> {
+    const sinceMs = since.getTime();
+    const url = `${this.engineUrl}/candles/${encodeURIComponent(symbol)}/deriv-history?timeframe=${timeframe}&start=${sinceMs}`;
+    try {
+      const { data } = await firstValueFrom(this.http.get(url, { headers: engineHeaders(this.config) }));
+      const candles = Array.isArray(data) ? data : (data?.candles ?? []);
+      return candles
+        .map((c: any) => ({
+          openTime: typeof c.timestamp === 'number' ? c.timestamp * 1000 : new Date(c.timestamp ?? c.time ?? c.date).getTime(),
+          open: parseFloat(c.open ?? c.o),
+          high: parseFloat(c.high ?? c.h),
+          low: parseFloat(c.low ?? c.l),
+          close: parseFloat(c.close ?? c.c),
+        }))
+        .filter((c: Candle) => c.openTime >= sinceMs)
+        .sort((a: Candle, b: Candle) => a.openTime - b.openTime);
+    } catch (error) {
+      this.logger.warn(`getDerivHistory failed for ${symbol} ${timeframe}: ${(error as Error)?.message}`);
+      return [];
+    }
+  }
+
   async getLowerTimeframeWindow(symbol: string, timeframe: string, candleOpenTime: number): Promise<Candle[]> {
     return this.getSince(symbol, '1m', new Date(candleOpenTime - 3_600_000));
   }

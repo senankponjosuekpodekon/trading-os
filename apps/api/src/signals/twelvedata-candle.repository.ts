@@ -10,11 +10,16 @@ const TWELVEDATA_SYMBOL_MAP: Record<string, string> = {
   'USD/JPY': 'USD/JPY',
   'XAU/USD': 'XAU/USD',
   'XAG/USD': 'XAG/USD',
+  'WTI/USD': 'WTI/USD',
+  'BRENT/USD': 'BRENT/USD',
   'AAPL': 'AAPL',
   'MSFT': 'MSFT',
   'GOOGL': 'GOOGL',
   'AMZN': 'AMZN',
   'TSLA': 'TSLA',
+  'US30': 'DJI',
+  'NAS100': 'IXIC',
+  'SPX500': 'GSPC',
 };
 
 const TWELVEDATA_TIMEFRAME_MAP: Record<string, string> = {

@@ -9,6 +9,8 @@ const YAHOO_SYMBOL_MAP: Record<string, string> = {
   'USD/JPY': 'USDJPY=X',
   'XAU/USD': 'GC=F',
   'XAG/USD': 'SI=F',
+  'WTI/USD': 'CL=F',
+  'BRENT/USD': 'BZ=F',
   'AAPL': 'AAPL',
   'MSFT': 'MSFT',
   'GOOGL': 'GOOGL',
@@ -31,6 +33,8 @@ const YAHOO_TIMEFRAME_MAP: Record<string, string> = {
 @Injectable()
 export class YahooCandleRepository extends CandleRepository {
   private readonly logger = new Logger(YahooCandleRepository.name);
+  private lastCall = 0;
+  private readonly minDelay = 5000; // 5s entre les requêtes — évite le rate limit
 
   constructor(private http: HttpService) {
     super();
@@ -41,6 +45,13 @@ export class YahooCandleRepository extends CandleRepository {
     const interval = YAHOO_TIMEFRAME_MAP[timeframe] ?? '1h';
     const sinceMs = since.getTime();
     const nowMs = Date.now();
+
+    // Rate limit: attendre si nécessaire
+    const elapsed = Date.now() - this.lastCall;
+    if (elapsed < this.minDelay) {
+      await new Promise(resolve => setTimeout(resolve, this.minDelay - elapsed));
+    }
+    this.lastCall = Date.now();
 
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=${interval}&period1=${sinceMs}&period2=${nowMs}`;

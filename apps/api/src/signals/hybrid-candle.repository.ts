@@ -6,7 +6,7 @@ import { BinanceCandleRepository } from './binance-candle.repository';
 import { YahooCandleRepository } from './yahoo-candle.repository';
 import { TwelveDataCandleRepository } from './twelvedata-candle.repository';
 
-const CRYPTO_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'MATIC'];
+const CRYPTO_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'MATIC', 'NEAR'];
 
 function isCrypto(symbol: string): boolean {
   const base = symbol.split('/')[0];

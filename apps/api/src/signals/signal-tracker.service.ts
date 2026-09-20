@@ -18,7 +18,7 @@ export class SignalTrackerService {
     private readonly executionService: SignalExecutionService,
   ) {}
 
-  async processActiveSignals(limit = 50): Promise<void> {
+  async processActiveSignals(limit = 200): Promise<void> {
     const active = await this.prisma.signal.findMany({
       where: { executionStatus: { in: ['PENDING', 'ACTIVE'] } },
       select: { id: true },
