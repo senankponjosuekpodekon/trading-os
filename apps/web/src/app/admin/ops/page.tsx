@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Settings, Cpu } from 'lucide-react';
+import { AppLayout } from '@/components/layout/AppLayout';
 
 interface CronConfig {
   name: string;
@@ -62,6 +63,7 @@ export default function AdminOpsPage() {
   };
 
   return (
+    <AppLayout title="Gestion des crons">
     <div className="p-6">
       <div className="flex items-center gap-2 mb-6">
         <Cpu className="w-6 h-6 text-emerald-400" />
@@ -142,5 +144,6 @@ export default function AdminOpsPage() {
         </table>
       </div>
     </div>
+    </AppLayout>
   );
 }

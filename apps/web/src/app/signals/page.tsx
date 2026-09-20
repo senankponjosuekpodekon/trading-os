@@ -1,9 +1,11 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, RefreshCw, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Scale, Brain, UserCircle, AlertTriangle, Activity, Radar } from 'lucide-react';
+import { TrendingUp, RefreshCw, Zap, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Scale, Brain, UserCircle, AlertTriangle, Activity, Radar, History, BarChart3 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { SignalCard } from '@/components/signals/SignalCard';
+import { SignalTrackingView } from '@/components/signals/SignalTrackingView';
+import { SignalStatsView } from '@/components/signals/SignalStatsView';
 import { SkeletonSignalCard } from '@/components/ui/Skeleton';
 import { api } from '@/lib/api';
 import { useTradingStore } from '@/store/trading.store';
@@ -86,7 +88,11 @@ export default function SignalsPage() {
     } catch { return ALL_SYMBOLS; }
   });
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
-  const [activeTab, setActiveTab] = useState<'signals' | 'scanner'>('signals');
+  const [activeTab, setActiveTab] = useState<'signals' | 'scanner' | 'suivi' | 'stats'>(() => {
+    if (typeof window === 'undefined') return 'signals';
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return t === 'scanner' || t === 'suivi' || t === 'stats' ? t : 'signals';
+  });
 
   // Persister sélection dans localStorage
   useEffect(() => { localStorage.setItem(LS_SYMBOLS, JSON.stringify(selectedSymbols)); }, [selectedSymbols]);
@@ -206,9 +212,21 @@ export default function SignalsPage() {
               </span>
             )}
           </button>
+          <button onClick={() => setActiveTab('suivi')}
+            className={`flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-colors ${activeTab === 'suivi' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}>
+            <History className="w-4 h-4" />Suivi
+          </button>
+          <button onClick={() => setActiveTab('stats')}
+            className={`flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-colors ${activeTab === 'stats' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}>
+            <BarChart3 className="w-4 h-4" />Stats
+          </button>
         </div>
 
-        {activeTab === 'scanner' ? (
+        {activeTab === 'suivi' ? (
+          <SignalTrackingView />
+        ) : activeTab === 'stats' ? (
+          <SignalStatsView />
+        ) : activeTab === 'scanner' ? (
           <ScannerView
             entries={scanHistoryData?.entries ?? []}
             loading={scanHistoryLoading}
