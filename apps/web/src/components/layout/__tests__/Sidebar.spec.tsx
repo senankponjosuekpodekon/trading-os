@@ -44,7 +44,7 @@ describe('Sidebar', () => {
     render(<Sidebar />);
 
     // Trading group auto-expands because /signals is active
-    expect(screen.getByRole('link', { name: /Signaux/i }).className).toContain('text-emerald-400');
+    expect(screen.getByRole('link', { name: 'Signaux' }).className).toContain('text-emerald-400');
     // Dashboard is also in Trading group (expanded)
     expect(screen.getByRole('link', { name: /Dashboard/i }).className).not.toContain('text-emerald-400');
   });
