@@ -5,6 +5,7 @@ import { EngineCandleRepository } from './engine-candle.repository';
 import { BinanceCandleRepository } from './binance-candle.repository';
 import { YahooCandleRepository } from './yahoo-candle.repository';
 import { TwelveDataCandleRepository } from './twelvedata-candle.repository';
+import { AlphaVantageCandleRepository } from './alphavantage-candle.repository';
 
 const mockLocalRepo = {
   getSince: jest.fn(),
@@ -28,6 +29,10 @@ const mockTwelveDataRepo = {
   getSince: jest.fn(),
 };
 
+const mockAlphaVantageRepo = {
+  getSince: jest.fn(),
+};
+
 describe('HybridCandleRepository', () => {
   let repository: HybridCandleRepository;
 
@@ -40,6 +45,7 @@ describe('HybridCandleRepository', () => {
         { provide: BinanceCandleRepository, useValue: mockBinanceRepo },
         { provide: YahooCandleRepository, useValue: mockYahooRepo },
         { provide: TwelveDataCandleRepository, useValue: mockTwelveDataRepo },
+        { provide: AlphaVantageCandleRepository, useValue: mockAlphaVantageRepo },
       ],
     }).compile();
 

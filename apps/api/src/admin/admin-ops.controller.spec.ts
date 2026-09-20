@@ -3,6 +3,8 @@ import { AdminOpsController } from './admin-ops.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemHealthService } from '../system-health/system-health.service';
 import { ConfigService } from '@nestjs/config';
+import { CronConfigService } from './cron-config.service';
+import { MaintenanceService } from './maintenance.service';
 
 describe('AdminOpsController', () => {
   let controller: AdminOpsController;
@@ -34,6 +36,8 @@ describe('AdminOpsController', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: SystemHealthService, useValue: healthService },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('') } },
+        { provide: CronConfigService, useValue: { getAll: jest.fn().mockResolvedValue([]), setEnabled: jest.fn() } },
+        { provide: MaintenanceService, useValue: { isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn() } },
       ],
     }).compile();
 

@@ -11,6 +11,8 @@ import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { QuotaService } from '../billing/quota.service';
 import { EngineHttpService } from '../engine/engine-http.service';
+import { CronConfigService } from '../admin/cron-config.service';
+import { MaintenanceService } from '../admin/maintenance.service';
 
 const fakeGuard: CanActivate = {
   canActivate: (context: ExecutionContext) => {
@@ -18,6 +20,8 @@ const fakeGuard: CanActivate = {
     return true;
   },
 };
+
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'ci-test-secret-key-at-least-32-chars-long';
 
 describe('SignalsController (integration)', () => {
   let app: INestApplication;
@@ -73,6 +77,10 @@ describe('SignalsController (integration)', () => {
         assertSignalQuota: jest.fn().mockResolvedValue({ limit: null, used: 0 }),
         incrementSignalUsage: jest.fn().mockResolvedValue(undefined),
       })
+      .overrideProvider(CronConfigService)
+      .useValue({ isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) })
+      .overrideProvider(MaintenanceService)
+      .useValue({ isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn() })
       .overrideGuard(JwtAuthGuard)
       .useValue(fakeGuard)
       .compile();

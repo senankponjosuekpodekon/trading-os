@@ -6,6 +6,7 @@ import { SystemHealthService } from './system-health.service';
 import { PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EngineHttpService } from '../engine/engine-http.service';
+import { CronConfigService } from '../admin/cron-config.service';
 
 describe('SystemHealthService', () => {
   let service: SystemHealthService;
@@ -37,6 +38,7 @@ describe('SystemHealthService', () => {
           useValue: { get: jest.fn().mockReturnValue('http://localhost:8000') },
         },
         { provide: EngineHttpService, useValue: { getCircuitState: jest.fn().mockReturnValue('CLOSED'), resetCircuit: jest.fn() } },
+        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 

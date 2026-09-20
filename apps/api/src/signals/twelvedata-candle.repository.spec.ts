@@ -38,8 +38,8 @@ describe('TwelveDataCandleRepository', () => {
   it('should return candles for EUR/USD', async () => {
     const mockCandles = {
       values: [
-        { datetime: '2026-09-18 00:00:00', open: '1.0850', high: '1.0860', low: '1.0840', close: '1.0855' },
-        { datetime: '2026-09-18 01:00:00', open: '1.0855', high: '1.0870', low: '1.0850', close: '1.0865' },
+        { datetime: '2026-09-18T00:00:00Z', open: '1.0850', high: '1.0860', low: '1.0840', close: '1.0855' },
+        { datetime: '2026-09-18T01:00:00Z', open: '1.0855', high: '1.0870', low: '1.0850', close: '1.0865' },
       ],
     };
 
@@ -47,7 +47,7 @@ describe('TwelveDataCandleRepository', () => {
       of({ data: mockCandles } as AxiosResponse),
     );
 
-    const since = new Date('2026-09-18');
+    const since = new Date('2026-09-17T00:00:00Z');
     const result = await repository.getSince('EUR/USD', '1h', since);
 
     expect(result.length).toBe(2);

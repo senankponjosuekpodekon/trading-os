@@ -9,6 +9,7 @@ import { PositionsService } from './positions.service';
 import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JournalService } from '../journal/journal.service';
+import { CronConfigService } from '../admin/cron-config.service';
 
 describe('openPosition → watcher → closePosition flow', () => {
   let positionsService: PositionsService;
@@ -61,6 +62,8 @@ describe('openPosition → watcher → closePosition flow', () => {
       .useValue(notifications as any)
       .overrideProvider(JournalService)
       .useValue(journal as any)
+      .overrideProvider(CronConfigService)
+      .useValue({ isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) })
       .compile();
 
     positionsService = moduleRef.get<PositionsService>(PositionsService);
@@ -78,7 +81,7 @@ describe('openPosition → watcher → closePosition flow', () => {
       portfolioId: portfolio.id,
       assetId: asset.id,
       asset: { symbol: asset.symbol },
-      portfolio: { userId: portfolio.userId },
+      portfolio: { userId: portfolio.userId, currentCapital: portfolio.currentCapital },
       direction: 'BUY',
       entryPrice: '100',
       quantity: '1',

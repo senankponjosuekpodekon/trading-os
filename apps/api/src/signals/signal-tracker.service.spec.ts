@@ -16,6 +16,10 @@ describe('SignalTrackerService', () => {
       findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
     },
+    signalExecutionEvent: {
+      create: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     $transaction: jest.fn((callback) => callback(mockPrisma)),
   };
 
@@ -75,7 +79,7 @@ describe('SignalTrackerService', () => {
       expect(mockPrisma.signal.findMany).toHaveBeenCalledWith({
         where: { executionStatus: { in: ['PENDING', 'ACTIVE'] } },
         select: { id: true },
-        take: 50,
+        take: 200,
         orderBy: { createdAt: 'asc' },
       });
     });
@@ -104,11 +108,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockExecutionService.logEvent).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          signalId: '1',
-          type: 'ENTRY_HIT',
-          price: 100,
+          data: expect.objectContaining({
+            signalId: '1',
+            type: 'ENTRY_HIT',
+            price: 100,
+          }),
         })
       );
     });
@@ -136,11 +142,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockExecutionService.logEvent).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          signalId: '1',
-          type: 'SL_HIT',
-          price: 90,
+          data: expect.objectContaining({
+            signalId: '1',
+            type: 'SL_HIT',
+            price: 90,
+          }),
         })
       );
     });
@@ -168,11 +176,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockExecutionService.logEvent).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          signalId: '1',
-          type: 'TP1_HIT',
-          price: 110,
+          data: expect.objectContaining({
+            signalId: '1',
+            type: 'TP1_HIT',
+            price: 110,
+          }),
         })
       );
     });
@@ -200,11 +210,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockExecutionService.logEvent).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          signalId: '1',
-          type: 'SL_HIT',
-          resolvedBy: 'CONSERVATIVE_SL_FIRST',
+          data: expect.objectContaining({
+            signalId: '1',
+            type: 'SL_HIT',
+            resolvedBy: 'CONSERVATIVE_SL_FIRST',
+          }),
         })
       );
     });
@@ -226,14 +238,18 @@ describe('SignalTrackerService', () => {
       };
 
       mockPrisma.signal.findUniqueOrThrow.mockResolvedValue(signal);
-      mockCandleRepo.getSince.mockResolvedValue([]);
+      mockCandleRepo.getSince.mockResolvedValue([
+        { openTime: new Date('2024-01-02').getTime(), open: 95, high: 105, low: 95, close: 100 },
+      ]);
 
       await service.processSignal('1');
 
-      expect(mockExecutionService.logEvent).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          signalId: '1',
-          type: 'EXPIRED',
+          data: expect.objectContaining({
+            signalId: '1',
+            type: 'EXPIRED',
+          }),
         })
       );
     });

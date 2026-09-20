@@ -13,6 +13,10 @@ import { MarketDataService } from '../market-data/market-data.service';
 import { QuotaService } from '../billing/quota.service';
 import { EngineHttpService } from '../engine/engine-http.service';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { SignalTrackerService } from './signal-tracker.service';
+import { SignalStatsService } from './signal-stats.service';
+import { CronConfigService } from '../admin/cron-config.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('SignalsService', () => {
   let service: SignalsService;
@@ -114,6 +118,10 @@ describe('SignalsService', () => {
         { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
         { provide: PatternPredictorService, useValue: { train: jest.fn().mockResolvedValue(undefined), predict: jest.fn().mockResolvedValue({ probability: NaN }) } },
         { provide: ExpectedMoveService, useValue: { getExpectedMove: jest.fn().mockResolvedValue(null) } },
+        { provide: SignalTrackerService, useValue: { processSignal: jest.fn().mockResolvedValue(undefined) } },
+        { provide: SignalStatsService, useValue: {} },
+        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
+        { provide: ConfigService, useValue: { get: jest.fn((k: string, d: any) => d) } },
       ],
     }).compile();
 
@@ -374,10 +382,10 @@ describe('SignalsService', () => {
       expect(trainSpy).toHaveBeenCalledWith({ market: 'CRYPTO', timeframe: '1h' });
     });
 
-    it('scheduledPredictorTraining swallows training errors without throwing', async () => {
+    it('scheduledPredictorTraining records training errors via setLastError', async () => {
       jest.spyOn(service, 'trainPredictor').mockRejectedValue(new Error('training failed'));
 
-      await expect(service.scheduledPredictorTraining()).resolves.toBeUndefined();
+      await expect(service.scheduledPredictorTraining()).rejects.toThrow('training failed');
     });
   });
 

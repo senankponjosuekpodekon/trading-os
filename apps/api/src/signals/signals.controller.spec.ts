@@ -8,6 +8,8 @@ import { PatternPredictorService } from './pattern-predictor.service';
 import { EngineHttpService } from '../engine/engine-http.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { EngineKeyGuard } from '../auth/engine-key.guard';
+import { MaintenanceService } from '../admin/maintenance.service';
+import { SignalExecutionService } from './signal-execution.service';
 
 describe('SignalsController', () => {
   let controller: SignalsController;
@@ -55,6 +57,8 @@ describe('SignalsController', () => {
         { provide: SignalOutcomeService, useValue: mockOutcomeService },
         { provide: PatternPredictorService, useValue: mockPatternPredictorService },
         { provide: EngineHttpService, useValue: mockEngine },
+        { provide: MaintenanceService, useValue: { isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn() } },
+        { provide: SignalExecutionService, useValue: { logEvent: jest.fn() } },
       ],
     })
       .overrideGuard(JwtAuthGuard)

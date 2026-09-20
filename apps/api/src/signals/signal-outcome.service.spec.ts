@@ -6,6 +6,8 @@ import { SignalOutcomeService } from './signal-outcome.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FeatureStoreService } from './feature-store.service';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { CronConfigService } from '../admin/cron-config.service';
+import { SignalExecutionService } from './signal-execution.service';
 
 describe('SignalOutcomeService', () => {
   let service: SignalOutcomeService;
@@ -39,6 +41,8 @@ describe('SignalOutcomeService', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: FeatureStoreService, useValue: mockFeatureStore },
         { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
+        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
+        { provide: SignalExecutionService, useValue: { logEvent: jest.fn() } },
       ],
     }).compile();
 
