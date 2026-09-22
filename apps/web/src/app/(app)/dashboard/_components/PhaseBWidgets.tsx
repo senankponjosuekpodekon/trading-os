@@ -181,7 +181,8 @@ function MlFeedbackWidget() {
     queryKey: ['phase-b', 'ml-feedback-leaderboard'],
     queryFn: async () => {
       const res = await api.get('/phase-b/ml-feedback/leaderboard');
-      return res.data.data as MlLeaderboardRow[];
+      // L'API retourne l'array brut (pas de wrapper { data })
+      return (Array.isArray(res.data) ? res.data : res.data?.data ?? []) as MlLeaderboardRow[];
     },
   });
 

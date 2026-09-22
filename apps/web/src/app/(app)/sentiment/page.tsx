@@ -34,7 +34,7 @@ export default function SentimentPage() {
 
   const { data: socialAggregate } = useQuery({
     queryKey: ['social-aggregate', category],
-    queryFn: async () => (await api.post('/social/sentiment/aggregate', { category })).data,
+    queryFn: async () => (await api.get('/social/sentiment/aggregate', { params: { category } })).data,
     staleTime: 1000 * 60 * 10,
   });
 

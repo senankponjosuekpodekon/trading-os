@@ -263,9 +263,10 @@ export class EngineProxyController {
     return this.engine.get('/social/youtube/sentiment');
   }
 
-  @Post('social/sentiment/aggregate')
-  socialSentimentAggregate(@Body() body: any) {
-    return this.engine.post('/social/sentiment/aggregate', body, { timeout: 30_000 });
+  @Get('social/sentiment/aggregate')
+  socialSentimentAggregate(@Query() query: any) {
+    // L'engine expose GET /social/sentiment/aggregate?category=X&refresh=Y
+    return this.engine.get('/social/sentiment/aggregate', { params: query, timeout: 30_000 });
   }
 
   // ── On-chain & DEX ────────────────────────────────────────────────
