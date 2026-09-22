@@ -17,19 +17,6 @@ const TYPE_TOAST_TYPE: Record<string, 'info' | 'success' | 'warning' | 'error'> 
   SYSTEM:   'info',
 };
 
-// Persiste entre les remounts d'AppLayout (un par navigation) :
-// évite le flash de spinner à chaque changement de page
-let appBooted = false;
-// Prefetch une seule fois par session — le AbortController tuait la requête
-// à chaque remount (status 0 × 16 navigations observés dans le HAR)
-let prefetchDone = false;
-
-// Réinitialise l'état module — usage réservé aux tests
-export function __resetAppLayoutState() {
-  appBooted = false;
-  prefetchDone = false;
-}
-
 export function AppLayout({ children, title }: { children: React.ReactNode; title: string }) {
   const { user, init } = useAuthStore();
   const router = useRouter();
@@ -38,10 +25,8 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
   const { notifications } = useNotifications();
   const lastShownRef = useRef<string | null>(null);
   const initialized = useRef(false);
+  const prefetched = useRef(false);
   const [ready, setReady] = useState(false);
-  // Une fois true, ne repasse jamais à false : évite le remount complet
-  // (spinner infini) si `user` devient transitoirement null pendant une navigation
-  const [appReady, setAppReady] = useState(appBooted);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -49,13 +34,6 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
     init();
     setReady(true);
   }, [init]);
-
-  useEffect(() => {
-    if (ready && user) {
-      appBooted = true;
-      setAppReady(true);
-    }
-  }, [ready, user]);
 
   // Filet de sécurité : si un chunk JS échoue au chargement (deploy en cours,
   // coupure réseau), on reload une fois au lieu de laisser la page figée
@@ -83,8 +61,8 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
   }, []);
 
   useEffect(() => {
-    if (!user || prefetchDone) return;
-    prefetchDone = true;
+    if (!user || prefetched.current) return;
+    prefetched.current = true;
     // Pas d'AbortController : la requête doit finir pour remplir le cache
     // React Query (persistant entre les remounts), sinon elle est annulée
     // à chaque navigation sans jamais servir.
@@ -136,7 +114,7 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
     if (!stored) router.replace('/auth/login');
   }, [ready, router]);
 
-  if (!appReady) {
+  if (!ready || !user) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />

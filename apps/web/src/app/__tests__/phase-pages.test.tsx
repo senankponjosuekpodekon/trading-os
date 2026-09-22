@@ -51,38 +51,38 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 
 describe('Phase Pages', () => {
   it('Hidden Gems — renders title', async () => {
-    const { default: Page } = await import('@/app/hidden-gems/page');
+    const { default: Page } = await import('@/app/(app)/hidden-gems/page');
     render(<Wrapper><Page /></Wrapper>);
     expect(screen.getByText('Hidden Gems')).toBeInTheDocument();
   });
 
   it('AI Defense — renders title', async () => {
-    const { default: Page } = await import('@/app/ai-defense/page');
+    const { default: Page } = await import('@/app/(app)/ai-defense/page');
     render(<Wrapper><Page /></Wrapper>);
     expect(screen.getByText('AI Defense')).toBeInTheDocument();
   });
 
   it('Rebalancing — renders title', async () => {
-    const { default: Page } = await import('@/app/rebalancing/page');
+    const { default: Page } = await import('@/app/(app)/rebalancing/page');
     render(<Wrapper><Page /></Wrapper>);
     expect(screen.getByText('Portfolio Rebalancing')).toBeInTheDocument();
   });
 
   it('Sentiment — renders title and tabs', async () => {
-    const { default: Page } = await import('@/app/sentiment/page');
+    const { default: Page } = await import('@/app/(app)/sentiment/page');
     render(<Wrapper><Page /></Wrapper>);
     expect(screen.getByText('Social Sentiment')).toBeInTheDocument();
     expect(screen.getByText('YouTube')).toBeInTheDocument();
   });
 
   it('Pre-Listing — renders title', async () => {
-    const { default: Page } = await import('@/app/pre-listing/page');
+    const { default: Page } = await import('@/app/(app)/pre-listing/page');
     render(<Wrapper><Page /></Wrapper>);
     expect(screen.getByText('Pre-Listing Alpha')).toBeInTheDocument();
   });
 
   it('Scientific Backtest — renders title and tabs', async () => {
-    const { default: Page } = await import('@/app/scientific-backtest/page');
+    const { default: Page } = await import('@/app/(app)/scientific-backtest/page');
     render(<Wrapper><Page /></Wrapper>);
     expect(screen.getByText('Scientific Backtest')).toBeInTheDocument();
     expect(screen.getByText('Full Report')).toBeInTheDocument();

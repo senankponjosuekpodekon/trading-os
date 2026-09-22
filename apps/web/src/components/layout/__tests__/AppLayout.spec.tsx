@@ -5,7 +5,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useToast } from '@/hooks/useToast';
 import { api } from '@/lib/api';
-import { AppLayout, __resetAppLayoutState } from '../AppLayout';
+import { AppLayout } from '../AppLayout';
 
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
@@ -48,7 +48,6 @@ describe('AppLayout', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
-    __resetAppLayoutState();
     (useRouter as unknown as jest.Mock).mockReturnValue({ replace });
     (useNotifications as unknown as jest.Mock).mockReturnValue({ notifications: [] });
     (useToast as unknown as jest.Mock).mockReturnValue({ toast });
