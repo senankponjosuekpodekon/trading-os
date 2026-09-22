@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-import Script from 'next/script';
 import { Providers } from '@/components/Providers';
 import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
 import './globals.css';
@@ -31,7 +30,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased bg-gray-950 text-gray-100" style={{ fontFamily: 'var(--font-sans)' }}>
         <Providers>{children}</Providers>
         <ServiceWorkerRegistration />
-        <Script
+        {/* Widget chat désactivé — intercepte XMLHttpRequest et spamme la
+            console avec des erreurs M_ID. Réactiver une fois corrigé. */}
+        {/* <Script
           id="chat-widget"
           strategy="afterInteractive"
           src="https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app/api/widget/embed.js"
@@ -40,7 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           data-title="Chat IA"
           data-position="bottom-right"
           data-api="https://bot-int-git-dev-senankponjosuekpodekons-projects.vercel.app/api"
-        />
+        /> */}
       </body>
     </html>
   );
