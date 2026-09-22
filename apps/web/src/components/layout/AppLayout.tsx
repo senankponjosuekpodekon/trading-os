@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/auth.store';
 import { useNotifications } from '@/hooks/useNotifications';
@@ -27,6 +27,21 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
   const initialized = useRef(false);
   const prefetched = useRef(false);
   const [ready, setReady] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pathname = usePathname();
+
+  // Ferme le drawer mobile à chaque navigation
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  // Ferme le drawer sur Escape
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -128,10 +143,27 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
         <Sidebar />
       </div>
       <div className="flex-1 flex flex-col min-w-0 pb-16 md:pb-0">
-        <Topbar title={title} />
+        <Topbar title={title} onMenuClick={() => setMenuOpen(true)} />
         <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
       </div>
       <BottomNav />
+
+      {/* Drawer mobile : la Sidebar complète en overlay, fermée au clic
+          sur le backdrop ou à chaque navigation (useEffect pathname) */}
+      <div
+        className={`md:hidden fixed inset-0 z-[70] ${menuOpen ? '' : 'pointer-events-none'}`}
+        aria-hidden={!menuOpen}
+      >
+        <div
+          className={`absolute inset-0 bg-black/60 transition-opacity duration-200 ${menuOpen ? 'opacity-100' : 'opacity-0'}`}
+          onClick={() => setMenuOpen(false)}
+        />
+        <div
+          className={`absolute left-0 top-0 bottom-0 w-64 transition-transform duration-200 ease-out ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        >
+          <Sidebar />
+        </div>
+      </div>
     </div>
   );
 }

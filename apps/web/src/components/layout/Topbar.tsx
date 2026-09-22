@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Bell, User, Wifi, WifiOff, X } from 'lucide-react';
+import { Bell, Menu, User, Wifi, WifiOff, X } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useTradingStore } from '@/store/trading.store';
 import { useNotifications } from '@/hooks/useNotifications';
@@ -25,7 +25,7 @@ const TYPE_COLOR: Record<string, string> = {
   SYSTEM:   'text-gray-400',
 };
 
-export function Topbar({ title }: { title: string }) {
+export function Topbar({ title, onMenuClick }: { title: string; onMenuClick?: () => void }) {
   const user = useAuthStore((s) => s.user);
   const prices = useTradingStore((s) => s.prices);
   const connected = useTradingStore((s) => s.wsConnected);
@@ -38,8 +38,17 @@ export function Topbar({ title }: { title: string }) {
   };
 
   return (
-    <header className="h-16 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-6 relative z-50">
-      <h1 className="text-lg font-semibold text-white">{title}</h1>
+    <header className="h-16 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 md:px-6 relative z-50">
+      <div className="flex items-center gap-1 min-w-0">
+        <button
+          onClick={onMenuClick}
+          aria-label="Ouvrir le menu"
+          className="md:hidden p-2 -ml-2 text-gray-400 hover:text-white transition-colors shrink-0"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        <h1 className="text-lg font-semibold text-white truncate">{title}</h1>
+      </div>
 
       <div className="flex items-center gap-3">
         {/* Prix live */}
@@ -51,7 +60,7 @@ export function Topbar({ title }: { title: string }) {
           {connected
             ? <Wifi className="w-3.5 h-3.5 text-emerald-400" />
             : <WifiOff className="w-3.5 h-3.5 text-gray-600" />}
-          <span className={connected ? 'text-emerald-400' : 'text-gray-600'}>
+          <span className={`hidden sm:inline ${connected ? 'text-emerald-400' : 'text-gray-600'}`}>
             {connected ? 'LIVE' : 'OFF'}
           </span>
         </div>
@@ -133,12 +142,12 @@ export function Topbar({ title }: { title: string }) {
           )}
         </div>
 
-        {/* User */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700">
+        {/* User — avatar seul sur mobile, nom+rôle sur desktop */}
+        <div className="flex items-center gap-2 px-2 md:px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700">
           <div className="w-7 h-7 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
             <User className="w-3.5 h-3.5 text-emerald-400" />
           </div>
-          <div className="text-sm">
+          <div className="text-sm hidden md:block">
             <p className="text-white font-medium leading-none">{user?.name ?? '...'}</p>
             <p className="text-gray-500 text-xs mt-0.5">{user?.role}</p>
           </div>

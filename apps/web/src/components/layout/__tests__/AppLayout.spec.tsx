@@ -9,6 +9,7 @@ import { AppLayout } from '../AppLayout';
 
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
+  usePathname: jest.fn(() => '/dashboard'),
 }));
 
 jest.mock('@/store/auth.store', () => ({
@@ -93,7 +94,8 @@ describe('AppLayout', () => {
 
     renderLayout();
 
-    expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+    // sidebar desktop + drawer mobile
+    expect(screen.getAllByTestId('sidebar').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('topbar')).toHaveTextContent('Dashboard');
     expect(screen.getByTestId('bottom-nav')).toBeInTheDocument();
     expect(screen.getByTestId('children')).toBeInTheDocument();

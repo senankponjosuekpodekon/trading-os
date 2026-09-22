@@ -12,7 +12,7 @@ export function ModeToggle() {
       aria-label={isPro ? 'Passer en mode débutant' : 'Passer en mode professionnel'}
       className="relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-800 text-xs font-medium transition-colors hover:border-gray-700"
     >
-      <span className={clsx('transition-colors', isPro ? 'text-gray-500' : 'text-emerald-400')}>Débutant</span>
+      <span className={clsx('transition-colors hidden sm:inline', isPro ? 'text-gray-500' : 'text-emerald-400')}>Débutant</span>
       <span
         className={clsx(
           'relative w-8 h-4 rounded-full transition-colors',
@@ -26,7 +26,7 @@ export function ModeToggle() {
           )}
         />
       </span>
-      <span className={clsx('transition-colors', isPro ? 'text-emerald-400' : 'text-gray-500')}>Pro</span>
+      <span className={clsx('transition-colors hidden sm:inline', isPro ? 'text-emerald-400' : 'text-gray-500')}>Pro</span>
     </button>
   );
 }
