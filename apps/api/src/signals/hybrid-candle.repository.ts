@@ -18,6 +18,14 @@ function isCrypto(symbol: string): boolean {
 export class HybridCandleRepository extends CandleRepository {
   private readonly logger = new Logger(HybridCandleRepository.name);
 
+  // Cooldown anti-rate-limit : un provider qui échoue en boucle est mis en
+  // pause 15 min au lieu d'être retesté pour chaque signal du backfill.
+  private static readonly COOLDOWN_MS = 15 * 60_000;
+  private static readonly SYMBOL_FAIL_MAX = 2;   // ex: 404 symbole non supporté
+  private static readonly PROVIDER_FAIL_MAX = 6; // ex: 429 quota compte épuisé
+  private readonly cooldown = new Map<string, number>();
+  private readonly failStreak = new Map<string, number>();
+
   constructor(
     private localRepo: LocalCandleRepository,
     private engineRepo: EngineCandleRepository,
@@ -27,6 +35,42 @@ export class HybridCandleRepository extends CandleRepository {
     private alphaVantageRepo: AlphaVantageCandleRepository,
   ) {
     super();
+  }
+
+  private cooledDown(key: string): boolean {
+    return (this.cooldown.get(key) ?? 0) > Date.now();
+  }
+
+  private fail(provider: string, symbol: string): void {
+    for (const [key, max] of [
+      [`${provider}:${symbol}`, HybridCandleRepository.SYMBOL_FAIL_MAX],
+      [provider, HybridCandleRepository.PROVIDER_FAIL_MAX],
+    ] as const) {
+      const n = (this.failStreak.get(key) ?? 0) + 1;
+      this.failStreak.set(key, n);
+      if (n >= max && !this.cooledDown(key)) {
+        this.cooldown.set(key, Date.now() + HybridCandleRepository.COOLDOWN_MS);
+        this.logger.warn(`Provider en cooldown 15min : ${key} (${n} échecs)`);
+      }
+    }
+  }
+
+  private succeed(provider: string, symbol: string): void {
+    this.failStreak.delete(`${provider}:${symbol}`);
+    this.failStreak.delete(provider);
+  }
+
+  private async tryRepo(provider: string, repo: CandleRepository, symbol: string, timeframe: string, since: Date): Promise<Candle[] | null> {
+    if (this.cooledDown(provider) || this.cooledDown(`${provider}:${symbol}`)) return null;
+    this.logger.log(`${provider} fallback for ${symbol} ${timeframe}`);
+    const candles = await repo.getSince(symbol, timeframe, since);
+    if (candles.length === 0) {
+      this.fail(provider, symbol);
+      return null;
+    }
+    this.succeed(provider, symbol);
+    await this.localRepo.store(symbol, timeframe, candles);
+    return candles;
   }
 
   async getSince(symbol: string, timeframe: string, since: Date): Promise<Candle[]> {
@@ -46,38 +90,19 @@ export class HybridCandleRepository extends CandleRepository {
 
     // 3. Fallback sur le bon provider selon le marché
     if (isCrypto(symbol)) {
-      this.logger.log(`Binance fallback for ${symbol} ${timeframe}`);
-      const candles = await this.binanceRepo.getSince(symbol, timeframe, since);
-      if (candles.length > 0) {
-        await this.localRepo.store(symbol, timeframe, candles);
-      }
-      return candles;
+      return (await this.tryRepo('Binance', this.binanceRepo, symbol, timeframe, since)) ?? [];
     }
 
-    // Non-crypto: essayer Twelve Data, puis Alpha Vantage, puis Yahoo
-    this.logger.log(`TwelveData fallback for ${symbol} ${timeframe}`);
-    const twelveData = await this.twelveDataRepo.getSince(symbol, timeframe, since);
-    if (twelveData.length > 0) {
-      await this.localRepo.store(symbol, timeframe, twelveData);
-      return twelveData;
-    }
+    // Non-crypto: Twelve Data, puis Alpha Vantage (XAG/USD), puis Yahoo
+    const twelveData = await this.tryRepo('TwelveData', this.twelveDataRepo, symbol, timeframe, since);
+    if (twelveData) return twelveData;
 
-    // Pour XAG/USD, utiliser Alpha Vantage (Twelve Data n'a pas de données)
     if (symbol === 'XAG/USD') {
-      this.logger.log(`AlphaVantage fallback for ${symbol} ${timeframe}`);
-      const alphaVantage = await this.alphaVantageRepo.getSince(symbol, timeframe, since);
-      if (alphaVantage.length > 0) {
-        await this.localRepo.store(symbol, timeframe, alphaVantage);
-        return alphaVantage;
-      }
+      const alphaVantage = await this.tryRepo('AlphaVantage', this.alphaVantageRepo, symbol, timeframe, since);
+      if (alphaVantage) return alphaVantage;
     }
 
-    this.logger.log(`Yahoo fallback for ${symbol} ${timeframe}`);
-    const yahoo = await this.yahooRepo.getSince(symbol, timeframe, since);
-    if (yahoo.length > 0) {
-      await this.localRepo.store(symbol, timeframe, yahoo);
-    }
-    return yahoo;
+    return (await this.tryRepo('Yahoo', this.yahooRepo, symbol, timeframe, since)) ?? [];
   }
 
   async getLowerTimeframeWindow(symbol: string, timeframe: string, candleOpenTime: number): Promise<Candle[]> {
