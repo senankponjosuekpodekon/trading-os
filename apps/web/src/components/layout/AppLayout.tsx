@@ -17,6 +17,10 @@ const TYPE_TOAST_TYPE: Record<string, 'info' | 'success' | 'warning' | 'error'> 
   SYSTEM:   'info',
 };
 
+// Persiste entre les remounts d'AppLayout (un par navigation) :
+// évite le flash de spinner à chaque changement de page
+let appBooted = false;
+
 export function AppLayout({ children, title }: { children: React.ReactNode; title: string }) {
   const { user, init } = useAuthStore();
   const router = useRouter();
@@ -27,6 +31,9 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
   const initialized = useRef(false);
   const prefetched = useRef(false);
   const [ready, setReady] = useState(false);
+  // Une fois true, ne repasse jamais à false : évite le remount complet
+  // (spinner infini) si `user` devient transitoirement null pendant une navigation
+  const [appReady, setAppReady] = useState(appBooted);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -34,6 +41,38 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
     init();
     setReady(true);
   }, [init]);
+
+  useEffect(() => {
+    if (ready && user) {
+      appBooted = true;
+      setAppReady(true);
+    }
+  }, [ready, user]);
+
+  // Filet de sécurité : si un chunk JS échoue au chargement (deploy en cours,
+  // coupure réseau), on reload une fois au lieu de laisser la page figée
+  useEffect(() => {
+    function handleChunkError(event: ErrorEvent | PromiseRejectionEvent) {
+      const msg = 'reason' in event ? String(event.reason) : event.message ?? '';
+      if (
+        msg.includes('Failed to fetch dynamically imported module') ||
+        msg.includes('ChunkLoadError') ||
+        msg.includes('Loading chunk')
+      ) {
+        const key = 'chunk_reload_attempted';
+        if (!sessionStorage.getItem(key)) {
+          sessionStorage.setItem(key, '1');
+          window.location.reload();
+        }
+      }
+    }
+    window.addEventListener('error', handleChunkError);
+    window.addEventListener('unhandledrejection', handleChunkError);
+    return () => {
+      window.removeEventListener('error', handleChunkError);
+      window.removeEventListener('unhandledrejection', handleChunkError);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user || prefetched.current) return;
@@ -88,7 +127,7 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
     if (!stored) router.replace('/auth/login');
   }, [ready, router]);
 
-  if (!ready || !user) {
+  if (!appReady) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
