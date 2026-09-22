@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react';
 import { useAuthStore } from '@/store/auth.store';
-import { useNotifications } from '../useNotifications';
+import { useNotifications, __resetNotificationsConnection } from '../useNotifications';
 
 jest.mock('@/store/auth.store', () => ({
   useAuthStore: jest.fn(),
@@ -38,6 +38,9 @@ describe('useNotifications', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
+    // La connexion SSE est un singleton module-level : reset explicite
+    // pour repartir d'un état propre à chaque test.
+    __resetNotificationsConnection();
     MockEventSource.instances = [];
     (global as any).EventSource = MockEventSource;
     (global as any).fetch = mockFetch;
@@ -51,6 +54,7 @@ describe('useNotifications', () => {
   });
 
   afterEach(() => {
+    __resetNotificationsConnection();
     jest.useRealTimers();
   });
 
@@ -182,7 +186,7 @@ describe('useNotifications', () => {
     expect(MockEventSource.instances).toHaveLength(2);
   });
 
-  it('closes the connection and stops retrying on unmount', async () => {
+  it('keeps the shared connection alive on unmount (module singleton)', async () => {
     (useAuthStore as unknown as jest.Mock).mockReturnValue({ id: '1' });
     let unmount: () => void;
     await act(async () => {
@@ -193,10 +197,9 @@ describe('useNotifications', () => {
     const es1 = MockEventSource.instances[0];
 
     unmount!();
-    expect(es1.closeCalls).toBe(1);
-
-    act(() => jest.advanceTimersByTime(60_000));
-    expect(MockEventSource.instances).toHaveLength(1);
+    // La connexion SSE survit au unmount : elle est partagée entre les
+    // remounts de AppLayout lors des navigations.
+    expect(es1.closeCalls).toBe(0);
   });
 
   it('re-opens a new connection when the user changes', async () => {
