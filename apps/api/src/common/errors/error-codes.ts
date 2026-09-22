@@ -35,6 +35,10 @@ export enum ErrorCode {
   // Billing / limits
   PLAN_LIMIT_REACHED = 'PLAN_LIMIT_REACHED',
   SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
+
+  // Runtime flags
+  MAINTENANCE_MODE = 'MAINTENANCE_MODE',
+  REGISTRATION_DISABLED = 'REGISTRATION_DISABLED',
 }
 
 export const HTTP_STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -62,4 +66,7 @@ export const HTTP_STATUS_BY_CODE: Record<ErrorCode, number> = {
 
   [ErrorCode.PLAN_LIMIT_REACHED]: 403,
   [ErrorCode.SUBSCRIPTION_INACTIVE]: 403,
+
+  [ErrorCode.MAINTENANCE_MODE]: 503,
+  [ErrorCode.REGISTRATION_DISABLED]: 403,
 };

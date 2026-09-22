@@ -1,17 +1,25 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Zap, AlertCircle } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
+import { api } from '@/lib/api';
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [closed, setClosed] = useState<boolean | null>(null);
   const { register, isLoading } = useAuthStore();
   const router = useRouter();
+
+  useEffect(() => {
+    api.get('/auth/registration-status')
+      .then((res) => setClosed(!res.data?.enabled))
+      .catch(() => setClosed(false)); // en cas d'erreur, on laisse le backend décider
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +46,16 @@ export default function RegisterPage() {
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-8">
+          {closed ? (
+            <div className="text-center py-6">
+              <AlertCircle className="w-10 h-10 text-amber-400 mx-auto mb-4" />
+              <p className="text-white font-semibold mb-2">Inscriptions fermées</p>
+              <p className="text-gray-400 text-sm">
+                La création de compte est temporairement désactivée.
+                Réessayez plus tard ou contactez un administrateur.
+              </p>
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
               <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
@@ -90,6 +108,7 @@ export default function RegisterPage() {
               {isLoading ? 'Création...' : 'Créer mon compte'}
             </button>
           </form>
+          )}
 
           <p className="text-center text-sm text-gray-500 mt-6">
             Déjà un compte ?{' '}

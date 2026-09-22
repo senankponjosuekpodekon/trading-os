@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, HttpCode, HttpStatus, Logger, Req, UnauthorizedException, Res, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { IsString, IsOptional, IsEmail, MinLength } from 'class-validator';
@@ -7,6 +7,10 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ConfigService } from '@nestjs/config';
+import { FeatureFlagsService } from '../common/services/feature-flags.service';
+import { ApplicationException } from '../common/errors/application.exception';
+import { ErrorCode } from '../common/errors/error-codes';
+import { REGISTRATION_FLAG } from '../common/services/feature-flags.service';
 
 class RefreshDto {
   @IsString()
@@ -61,6 +65,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private config: ConfigService,
+    private flags: FeatureFlagsService,
   ) {}
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
@@ -88,8 +93,19 @@ export class AuthController {
     res.clearCookie('refresh_token', { path: '/' });
   }
 
+  @Get('registration-status')
+  async registrationStatus() {
+    return { enabled: await this.flags.getFlag(REGISTRATION_FLAG, true) };
+  }
+
   @Post('register')
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+    if (!(await this.flags.getFlag(REGISTRATION_FLAG, true))) {
+      throw new ApplicationException(
+        ErrorCode.REGISTRATION_DISABLED,
+        'Les inscriptions sont temporairement fermées',
+      );
+    }
     const data = await this.authService.register(dto);
     this.setAuthCookies(res, data.access_token, data.refresh_token);
     return data;

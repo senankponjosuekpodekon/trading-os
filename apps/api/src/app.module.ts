@@ -8,6 +8,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { MaintenanceGuard } from './common/guards/maintenance.guard';
 import { SecurityModule } from './common/security/security.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -106,6 +107,7 @@ import { MailModule } from './mail/mail.module';
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
+    { provide: APP_GUARD, useClass: MaintenanceGuard },
     RolesGuard,
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_INTERCEPTOR, useClass: RlsContextInterceptor },

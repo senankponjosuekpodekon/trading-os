@@ -236,12 +236,23 @@ export class AdminOpsController {
 
   @Get('maintenance')
   async getMaintenanceMode() {
-    return { enabled: this.maintenanceService.isMaintenanceMode() };
+    return { enabled: await this.maintenanceService.isMaintenanceMode() };
   }
 
   @Patch('maintenance')
   async setMaintenanceMode(@Body() body: { enabled: boolean }) {
-    this.maintenanceService.setMaintenanceMode(body.enabled);
+    await this.maintenanceService.setMaintenanceMode(body.enabled);
+    return { enabled: body.enabled };
+  }
+
+  @Get('registration')
+  async getRegistrationEnabled() {
+    return { enabled: await this.maintenanceService.isRegistrationEnabled() };
+  }
+
+  @Patch('registration')
+  async setRegistrationEnabled(@Body() body: { enabled: boolean }) {
+    await this.maintenanceService.setRegistrationEnabled(body.enabled);
     return { enabled: body.enabled };
   }
 }

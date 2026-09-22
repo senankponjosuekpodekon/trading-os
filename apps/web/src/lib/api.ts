@@ -47,6 +47,16 @@ api.interceptors.response.use(
   async (err: AxiosError) => {
     const original = err.config as RetryRequestConfig | undefined;
     const status = err.response?.status;
+    const code = (err.response?.data as any)?.code;
+
+    // Mode maintenance : redirige vers la page dédiée (sauf admins —
+    // le backend les laisse passer, ils ne verront jamais ce code)
+    if (code === 'MAINTENANCE_MODE' && typeof window !== 'undefined') {
+      if (!window.location.pathname.startsWith('/maintenance')) {
+        window.location.href = '/maintenance';
+      }
+      return Promise.reject(err);
+    }
 
     if (status === 401 && typeof window !== 'undefined' && original && !original._retry) {
       original._retry = true;

@@ -37,7 +37,7 @@ describe('AdminOpsController', () => {
         { provide: SystemHealthService, useValue: healthService },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('') } },
         { provide: CronConfigService, useValue: { getAll: jest.fn().mockResolvedValue([]), setEnabled: jest.fn() } },
-        { provide: MaintenanceService, useValue: { isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn() } },
+        { provide: MaintenanceService, useValue: { isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn(), isRegistrationEnabled: jest.fn().mockReturnValue(true), setRegistrationEnabled: jest.fn() } },
       ],
     }).compile();
 

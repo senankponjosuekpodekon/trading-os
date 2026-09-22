@@ -11,6 +11,10 @@ jest.mock('@/store/auth.store', () => ({
   useAuthStore: jest.fn() as jest.Mock,
 }));
 
+jest.mock('@/lib/api', () => ({
+  api: { get: jest.fn().mockResolvedValue({ data: { enabled: true } }) },
+}));
+
 describe('RegisterPage', () => {
   const mockReplace = jest.fn();
   const mockRegister = jest.fn();

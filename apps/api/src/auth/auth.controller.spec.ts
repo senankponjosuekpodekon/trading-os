@@ -3,6 +3,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
+import { FeatureFlagsService } from '../common/services/feature-flags.service';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -25,6 +26,7 @@ describe('AuthController', () => {
       providers: [
         { provide: AuthService, useValue: mockAuthService },
         { provide: ConfigService, useValue: { get: jest.fn((key: string, def: any) => def) } },
+        { provide: FeatureFlagsService, useValue: { getFlag: jest.fn().mockResolvedValue(true), setFlag: jest.fn() } },
       ],
     }).compile();
 

@@ -11,6 +11,7 @@ import { TwoFactorService } from './two-factor.service';
 import { AuditModule } from '../audit/audit.module';
 import { MailModule } from '../mail/mail.module';
 import { LoggerModule } from '../logger/logger.module';
+import { FeatureFlagsService } from '../common/services/feature-flags.service';
 
 @Module({
   imports: [
@@ -28,7 +29,7 @@ import { LoggerModule } from '../logger/logger.module';
     LoggerModule,
   ],
   controllers: [AuthController, TwoFactorController],
-  providers: [AuthService, TwoFactorService, JwtStrategy, EngineKeyGuard],
+  providers: [AuthService, TwoFactorService, JwtStrategy, EngineKeyGuard, FeatureFlagsService],
   exports: [JwtModule, AuthService, TwoFactorService, EngineKeyGuard],
 })
 export class AuthModule {}

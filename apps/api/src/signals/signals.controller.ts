@@ -8,7 +8,6 @@ import { PatternPredictorService, PatternFeaturesInput } from './pattern-predict
 import { EngineHttpService } from '../engine/engine-http.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { EngineKeyGuard } from '../auth/engine-key.guard';
-import { MaintenanceGuard } from '../common/guards/maintenance.guard';
 
 @Controller('signals')
 export class SignalsController {
@@ -21,7 +20,7 @@ export class SignalsController {
   ) {}
 
   @Get()
-  @UseGuards(JwtAuthGuard, MaintenanceGuard)
+  @UseGuards(JwtAuthGuard)
   findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -41,7 +40,7 @@ export class SignalsController {
   }
 
   @Post('scan')
-  @UseGuards(JwtAuthGuard, MaintenanceGuard)
+  @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   triggerScan(
     @Request() req: any,

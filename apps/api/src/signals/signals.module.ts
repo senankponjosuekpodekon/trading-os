@@ -14,6 +14,7 @@ import { TwelveDataCandleRepository } from './twelvedata-candle.repository';
 import { AlphaVantageCandleRepository } from './alphavantage-candle.repository';
 import { HybridCandleRepository } from './hybrid-candle.repository';
 import { MaintenanceService } from '../admin/maintenance.service';
+import { FeatureFlagsService } from '../common/services/feature-flags.service';
 import { SignalStatsService } from './signal-stats.service';
 import { SignalPredictorService } from './signal-predictor.service';
 import { PatternPredictorService } from './pattern-predictor.service';
@@ -51,6 +52,7 @@ import { CronConfigModule } from '../admin/cron-config.module';
     FeatureStoreService,
     RegimeClassifierService,
     MaintenanceService,
+    FeatureFlagsService,
   ],
   exports: [SignalsService, SignalOutcomeService, SignalExecutionService, SignalPredictorService, PatternPredictorService, FeatureStoreService, RegimeClassifierService],
 })
