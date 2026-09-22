@@ -134,7 +134,7 @@ async def predict_regime(body: PredictRequest):
 @router.get("/ml/regime/status")
 async def regime_status():
     if not classifier.model:
-        raise HTTPException(status_code=404, detail="model_not_trained")
+        return {"trained": False}
     model: RegimeModel = classifier.model
     return {
         "states": STATE_LABELS,

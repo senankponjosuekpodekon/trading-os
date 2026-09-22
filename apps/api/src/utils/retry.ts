@@ -5,6 +5,7 @@ export async function retryWithBackoff<T>(
     baseDelayMs?: number;
     maxDelayMs?: number;
     jitter?: boolean;
+    isRetryable?: (err: Error) => boolean;
     onRetry?: (attempt: number, err: Error) => void;
   } = {},
 ): Promise<T> {
@@ -13,6 +14,7 @@ export async function retryWithBackoff<T>(
     baseDelayMs = 500,
     maxDelayMs = 10_000,
     jitter = true,
+    isRetryable,
     onRetry,
   } = options;
 
@@ -23,7 +25,7 @@ export async function retryWithBackoff<T>(
       return await fn();
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-      if (attempt === maxRetries) break;
+      if (attempt === maxRetries || (isRetryable && !isRetryable(lastErr))) break;
       let delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
       if (jitter) delay *= 0.75 + Math.random() * 0.5;
       if (onRetry) onRetry(attempt + 1, lastErr);

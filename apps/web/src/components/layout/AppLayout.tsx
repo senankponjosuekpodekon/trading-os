@@ -20,6 +20,15 @@ const TYPE_TOAST_TYPE: Record<string, 'info' | 'success' | 'warning' | 'error'> 
 // Persiste entre les remounts d'AppLayout (un par navigation) :
 // évite le flash de spinner à chaque changement de page
 let appBooted = false;
+// Prefetch une seule fois par session — le AbortController tuait la requête
+// à chaque remount (status 0 × 16 navigations observés dans le HAR)
+let prefetchDone = false;
+
+// Réinitialise l'état module — usage réservé aux tests
+export function __resetAppLayoutState() {
+  appBooted = false;
+  prefetchDone = false;
+}
 
 export function AppLayout({ children, title }: { children: React.ReactNode; title: string }) {
   const { user, init } = useAuthStore();
@@ -29,7 +38,6 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
   const { notifications } = useNotifications();
   const lastShownRef = useRef<string | null>(null);
   const initialized = useRef(false);
-  const prefetched = useRef(false);
   const [ready, setReady] = useState(false);
   // Une fois true, ne repasse jamais à false : évite le remount complet
   // (spinner infini) si `user` devient transitoirement null pendant une navigation
@@ -75,20 +83,21 @@ export function AppLayout({ children, title }: { children: React.ReactNode; titl
   }, []);
 
   useEffect(() => {
-    if (!user || prefetched.current) return;
-    prefetched.current = true;
-    const abort = new AbortController();
+    if (!user || prefetchDone) return;
+    prefetchDone = true;
+    // Pas d'AbortController : la requête doit finir pour remplir le cache
+    // React Query (persistant entre les remounts), sinon elle est annulée
+    // à chaque navigation sans jamais servir.
     qc.prefetchQuery({
       queryKey: ['portfolios'],
-      queryFn: async () => (await api.get('/portfolios', { signal: abort.signal })).data,
+      queryFn: async () => (await api.get('/portfolios')).data,
       staleTime: 60_000,
     });
     qc.prefetchQuery({
       queryKey: ['signals'],
-      queryFn: async () => (await api.get('/signals?limit=5', { signal: abort.signal })).data.data,
+      queryFn: async () => (await api.get('/signals?limit=5')).data.data,
       staleTime: 60_000,
     });
-    return () => abort.abort();
   }, [user, qc]);
 
   useEffect(() => {

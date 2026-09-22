@@ -5,6 +5,14 @@ import { firstValueFrom } from 'rxjs';
 import { retryWithBackoff } from '../utils/retry';
 import { CircuitBreaker, CircuitState } from '../utils/circuit-breaker';
 
+// Les erreurs 4xx (hors 429) sont permanentes — inutile de retester,
+// ça ajoute ~2s de latence avant l'échec pour aucun bénéfice.
+function isRetryableEngineError(err: any): boolean {
+  const status = err?.response?.status;
+  if (status && status >= 400 && status < 500) return status === 429;
+  return true;
+}
+
 @Injectable()
 export class EngineHttpService {
   private readonly logger = new Logger(EngineHttpService.name);
@@ -47,6 +55,7 @@ export class EngineHttpService {
         {
           maxRetries: 2,
           baseDelayMs: 500,
+          isRetryable: isRetryableEngineError,
           onRetry: (attempt, err) =>
             this.logger.warn(`Engine GET ${path} retry ${attempt} — ${err.message}`),
         },
@@ -67,6 +76,7 @@ export class EngineHttpService {
         {
           maxRetries: opts?.maxRetries ?? 2,
           baseDelayMs: 500,
+          isRetryable: isRetryableEngineError,
           onRetry: (attempt, err) =>
             this.logger.warn(`Engine POST ${path} retry ${attempt} — ${err.message}`),
         },

@@ -5,7 +5,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useToast } from '@/hooks/useToast';
 import { api } from '@/lib/api';
-import { AppLayout } from '../AppLayout';
+import { AppLayout, __resetAppLayoutState } from '../AppLayout';
 
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
@@ -48,6 +48,7 @@ describe('AppLayout', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
+    __resetAppLayoutState();
     (useRouter as unknown as jest.Mock).mockReturnValue({ replace });
     (useNotifications as unknown as jest.Mock).mockReturnValue({ notifications: [] });
     (useToast as unknown as jest.Mock).mockReturnValue({ toast });
@@ -106,8 +107,8 @@ describe('AppLayout', () => {
       renderLayout();
     });
 
-    expect(api.get).toHaveBeenCalledWith('/portfolios', expect.objectContaining({ signal: expect.anything() }));
-    expect(api.get).toHaveBeenCalledWith('/signals?limit=5', expect.objectContaining({ signal: expect.anything() }));
+    expect(api.get).toHaveBeenCalledWith('/portfolios');
+    expect(api.get).toHaveBeenCalledWith('/signals?limit=5');
   });
 
   it('shows a toast for the newest notification exactly once', () => {
