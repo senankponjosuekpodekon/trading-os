@@ -1,64 +1,138 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AiService } from '../ai/ai.service';
 
 export interface PresaleProject {
   id: string;
   name: string;
   symbol: string;
   chain: string;
-  stage: 'seed' | 'private' | 'public';
+  stage: string;
+  listingType: string;
+  platform: string;
   raiseUsd: number;
-  fdvUsd: number;
+  goalUsd: number;
+  fundingPct: number;
   price: number;
-  vesting: string;
-  riskScore: number; // 0-100
+  website: string;
+  twitter: string;
+  asymmetricScore: number;
+  riskScore: number; // 100 - asymmetricScore (rétrocompat affichage)
+  riskFlags: string[];
+  opportunityFlags: string[];
+  githubCommits30d: number;
+  tvlMillions: number;
+  socialBuzz: number;
+  source: string;
+  url: string;
   tags: string[];
 }
 
 export interface OnChainAsym {
   assetSymbol: string;
+  chain: string;
+  overallSignal: string;
   whaleConcentration: number; // top 10 holders %
-  exchangeInflow24h: number;
-  exchangeOutflow24h: number;
-  netFlow24h: number;
-  developerActivity: number; // commits / week
-  ageDays: number;
-  socialMentionVelocity: number; // mentions/hour
-  asymmetricScore: number; // 0-100 composite
+  holderGrowth24h: number;
+  developerActivity: number; // commits 30j
+  socialMentionVelocity: number;
+  asymmetricScore: number; // pre_listing_score 0-100
+  signalCount: number;
+  topSignals: { type: string; severity: string; direction: string; message: string }[];
 }
+
+const VALID_SIGNAL_CHAINS = new Set(['ethereum', 'solana', 'bsc']);
 
 @Controller('early-alpha')
 @UseGuards(JwtAuthGuard)
 export class EarlyAlphaController {
-  private readonly projects: PresaleProject[] = [
-    { id: 'p1', name: 'Nexum Protocol', symbol: 'NXM', chain: 'ETH', stage: 'private', raiseUsd: 1_200_000, fdvUsd: 18_000_000, price: 0.12, vesting: '10% TGE, 6 mois lineaire', riskScore: 62, tags: ['DePIN', 'L2'] },
-    { id: 'p2', name: 'Aurora DAO', symbol: 'AURA', chain: 'SOL', stage: 'public', raiseUsd: 800_000, fdvUsd: 9_500_000, price: 0.05, vesting: '15% TGE, 12 mois lineaire', riskScore: 48, tags: ['DAO', 'RWA'] },
-    { id: 'p3', name: 'Orbit AI', symbol: 'ORAI', chain: 'ARB', stage: 'seed', raiseUsd: 2_500_000, fdvUsd: 45_000_000, price: 0.30, vesting: '5% TGE, 18 mois lineaire', riskScore: 75, tags: ['AI', 'Infra'] },
-    { id: 'p4', name: 'PulseNode', symbol: 'PULSE', chain: 'BSC', stage: 'private', raiseUsd: 600_000, fdvUsd: 6_000_000, price: 0.02, vesting: '20% TGE, 3 mois lineaire', riskScore: 81, tags: ['DeFi', 'Nodes'] },
-    { id: 'p5', name: 'Cypher Zero', symbol: 'CZERO', chain: 'ETH', stage: 'public', raiseUsd: 1_500_000, fdvUsd: 22_000_000, price: 0.08, vesting: '12% TGE, 9 mois lineaire', riskScore: 55, tags: ['Privacy', 'ZK'] },
-  ];
-
-  private readonly onChain: OnChainAsym[] = [
-    { assetSymbol: 'NXM/USDT', whaleConcentration: 34.5, exchangeInflow24h: 120_000, exchangeOutflow24h: 85_000, netFlow24h: 35_000, developerActivity: 42, ageDays: 180, socialMentionVelocity: 120, asymmetricScore: 68 },
-    { assetSymbol: 'AURA/USDT', whaleConcentration: 22.1, exchangeInflow24h: 45_000, exchangeOutflow24h: 78_000, netFlow24h: -33_000, developerActivity: 18, ageDays: 90, socialMentionVelocity: 65, asymmetricScore: 45 },
-    { assetSymbol: 'ORAI/USDT', whaleConcentration: 41.0, exchangeInflow24h: 310_000, exchangeOutflow24h: 95_000, netFlow24h: 215_000, developerActivity: 61, ageDays: 240, socialMentionVelocity: 210, asymmetricScore: 82 },
-    { assetSymbol: 'PULSE/USDT', whaleConcentration: 58.2, exchangeInflow24h: 250_000, exchangeOutflow24h: 40_000, netFlow24h: 210_000, developerActivity: 8, ageDays: 60, socialMentionVelocity: 340, asymmetricScore: 88 },
-    { assetSymbol: 'CZERO/USDT', whaleConcentration: 28.7, exchangeInflow24h: 90_000, exchangeOutflow24h: 92_000, netFlow24h: -2_000, developerActivity: 33, ageDays: 300, socialMentionVelocity: 95, asymmetricScore: 52 },
-  ];
+  constructor(private readonly ai: AiService) {}
 
   @Get('presales')
-  presales(@Query('chain') chain?: string, @Query('minRisk') minRisk?: string, @Query('maxRisk') maxRisk?: string) {
-    let data = this.projects;
+  async presales(
+    @Query('chain') chain?: string,
+    @Query('minRisk') minRisk?: string,
+    @Query('maxRisk') maxRisk?: string,
+  ) {
+    const res = await this.ai.preListingDiscover(0, 50);
+    let data: PresaleProject[] = (res?.projects ?? []).map((p: any) => {
+      const tags = [p.listing_type, p.platform].filter(Boolean);
+      return {
+        id: `${p.symbol}-${p.source}`,
+        name: p.name ?? '',
+        symbol: p.symbol ?? '',
+        chain: (p.chain ?? '').toUpperCase() || '—',
+        stage: p.status ?? 'upcoming',
+        listingType: p.listing_type ?? 'IDO',
+        platform: p.platform ?? '',
+        raiseUsd: p.funds_raised ?? 0,
+        goalUsd: p.fundraising_goal ?? 0,
+        fundingPct: p.funding_pct ?? 0,
+        price: p.token_price ?? 0,
+        website: p.website ?? '',
+        twitter: p.twitter ?? '',
+        asymmetricScore: p.asymmetric_score ?? 0,
+        riskScore: 100 - (p.asymmetric_score ?? 0),
+        riskFlags: p.risk_flags ?? [],
+        opportunityFlags: p.opportunity_flags ?? [],
+        githubCommits30d: p.github_commits_30d ?? 0,
+        tvlMillions: p.tvl_millions ?? 0,
+        socialBuzz: p.social_buzz ?? 0,
+        source: p.source ?? '',
+        url: p.url ?? p.website ?? '',
+        tags,
+      };
+    });
     if (chain) data = data.filter(p => p.chain.toLowerCase() === chain.toLowerCase());
     if (minRisk) data = data.filter(p => p.riskScore >= Number(minRisk));
     if (maxRisk) data = data.filter(p => p.riskScore <= Number(maxRisk));
-    return { data };
+    return { data, summary: res?.summary ?? '' };
   }
 
   @Get('onchain')
-  onchain(@Query('symbol') symbol?: string, @Query('minAsym') minAsym?: string) {
-    let data = this.onChain;
-    if (symbol) data = data.filter(o => o.assetSymbol.toLowerCase().includes(symbol.toLowerCase()));
+  async onchain(@Query('symbol') symbol?: string, @Query('minAsym') minAsym?: string) {
+    // Symboles candidats : projets découverts récemment (même pipeline que /presales)
+    const res = await this.ai.preListingDiscover(0, 50);
+    const projects: any[] = res?.projects ?? [];
+
+    const targets = symbol
+      ? projects.filter(p => (p.symbol ?? '').toLowerCase().includes(symbol.toLowerCase()))
+      : projects.slice(0, 8);
+
+    const settled = await Promise.allSettled(
+      targets.map(p => {
+        const chain = VALID_SIGNAL_CHAINS.has((p.chain ?? '').toLowerCase())
+          ? (p.chain as string).toLowerCase()
+          : 'ethereum';
+        return this.ai.preListingSignals(p.symbol, chain).then(r => ({ p, r }));
+      }),
+    );
+
+    let data: OnChainAsym[] = [];
+    for (const s of settled) {
+      if (s.status !== 'fulfilled') continue;
+      const { p, r } = s.value;
+      const holder = r?.raw_data?.holder_data ?? {};
+      const dev = r?.raw_data?.dev_activity ?? {};
+      data.push({
+        assetSymbol: r?.symbol ?? p.symbol,
+        chain: r?.chain ?? p.chain ?? '',
+        overallSignal: r?.overall_signal ?? 'NEUTRAL',
+        whaleConcentration: holder.top_10_holders_pct ?? p.top_holder_pct ?? 0,
+        holderGrowth24h: holder.holder_growth_24h ?? 0,
+        developerActivity: dev.commits_30d ?? p.github_commits_30d ?? 0,
+        socialMentionVelocity: p.social_buzz ?? 0,
+        asymmetricScore: r?.pre_listing_score ?? p.asymmetric_score ?? 0,
+        signalCount: r?.signal_count ?? 0,
+        topSignals: (r?.signals ?? []).slice(0, 3).map((sg: any) => ({
+          type: sg.signal_type,
+          severity: sg.severity,
+          direction: sg.direction,
+          message: sg.message,
+        })),
+      });
+    }
+
     if (minAsym) data = data.filter(o => o.asymmetricScore >= Number(minAsym));
     return { data };
   }

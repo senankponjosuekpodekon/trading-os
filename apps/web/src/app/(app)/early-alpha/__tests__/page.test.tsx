@@ -28,14 +28,15 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 
 const mockPresales = {
   data: [
-    { id: 'p1', name: 'Nexum', symbol: 'NXM', chain: 'ETH', stage: 'private', raiseUsd: 1200000, fdvUsd: 18000000, price: 0.12, vesting: '10% TGE', riskScore: 62, tags: ['DePIN'] },
-    { id: 'p2', name: 'Aurora', symbol: 'AURA', chain: 'SOL', stage: 'public', raiseUsd: 800000, fdvUsd: 9500000, price: 0.05, vesting: '15% TGE', riskScore: 48, tags: ['DAO'] },
-  ],
+      { id: 'p1', name: 'Nexum', symbol: 'NXM', chain: 'ETH', stage: 'private', listingType: 'IDO', platform: 'DAO Maker', raiseUsd: 1200000, goalUsd: 1800000, fundingPct: 67, price: 0.12, asymmetricScore: 62, riskScore: 38, riskFlags: ['Low funding'], opportunityFlags: [], githubCommits30d: 42, tvlMillions: 0, socialBuzz: 120, source: 'cryptorank', url: '', tags: ['IDO'] },
+      { id: 'p2', name: 'Aurora', symbol: 'AURA', chain: 'SOL', stage: 'public', listingType: 'IEO', platform: '', raiseUsd: 800000, goalUsd: 950000, fundingPct: 84, price: 0.05, asymmetricScore: 48, riskScore: 52, riskFlags: [], opportunityFlags: [], githubCommits30d: 0, tvlMillions: 0, socialBuzz: 65, source: 'cryptorank', url: '', tags: ['IEO'] },
+    ],
+  summary: '2 pre-listing opportunities',
 };
 
 const mockOnchain = {
   data: [
-    { assetSymbol: 'NXM/USDT', whaleConcentration: 34.5, exchangeInflow24h: 120000, exchangeOutflow24h: 85000, netFlow24h: 35000, developerActivity: 42, ageDays: 180, socialMentionVelocity: 120, asymmetricScore: 68 },
+      { assetSymbol: 'NXM', chain: 'ethereum', overallSignal: 'MILD_BULLISH', whaleConcentration: 34.5, holderGrowth24h: 12, developerActivity: 42, socialMentionVelocity: 120, asymmetricScore: 68, signalCount: 1, topSignals: [{ type: 'whale_accumulation', severity: 'high', direction: 'bullish', message: 'Whale accumulation detected' }] },
   ],
 };
 
@@ -59,7 +60,7 @@ describe('EarlyAlphaPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Nexum')).toBeInTheDocument();
       expect(screen.getByText('Aurora')).toBeInTheDocument();
-      expect(screen.getByText('NXM/USDT')).toBeInTheDocument();
+      expect(screen.getAllByText('NXM').length).toBeGreaterThan(0);
     });
   });
 
@@ -72,10 +73,10 @@ describe('EarlyAlphaPage', () => {
 
     await waitFor(() => expect(screen.getByText('Nexum')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ETH' } });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ETHEREUM' } });
 
     await waitFor(() => {
-      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/early-alpha/presales?chain=ETH'));
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/early-alpha/presales?chain=ETHEREUM'));
     });
   });
 
@@ -86,7 +87,7 @@ describe('EarlyAlphaPage', () => {
         return {
           data: {
             data: [
-              { assetSymbol: 'PULSE/USDT', whaleConcentration: 58.2, exchangeInflow24h: 250000, exchangeOutflow24h: 40000, netFlow24h: 210000, developerActivity: 8, ageDays: 60, socialMentionVelocity: 340, asymmetricScore: 88 },
+              { assetSymbol: 'PULSE', chain: 'ethereum', overallSignal: 'STRONG_BULLISH', whaleConcentration: 58.2, holderGrowth24h: 340, developerActivity: 8, socialMentionVelocity: 340, asymmetricScore: 88, signalCount: 3, topSignals: [] },
             ],
           },
         };
@@ -101,7 +102,7 @@ describe('EarlyAlphaPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('PULSE/USDT')).toBeInTheDocument();
+      expect(screen.getByText('PULSE')).toBeInTheDocument();
       expect(screen.getByText(/Signal d’asymétrie élevé/i)).toBeInTheDocument();
     });
   });

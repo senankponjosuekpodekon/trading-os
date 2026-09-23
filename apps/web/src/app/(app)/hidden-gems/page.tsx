@@ -102,6 +102,11 @@ export default function HiddenGemsPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-white">{gem.symbol}</span>
                     <span className="text-xs text-gray-500">{gem.chain}</span>
+                    {gem.narrative && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/40 bg-purple-500/10 text-purple-300">
+                        {gem.narrative}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">{gem.name}</p>
                 </div>

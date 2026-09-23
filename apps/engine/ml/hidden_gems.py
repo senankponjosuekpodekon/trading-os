@@ -41,6 +41,81 @@ class GemCandidate:
     social_buzz: float
     tokenomics_safety: float
     onchain: Dict[str, Any] | None = None
+    narrative: str | None = None
+    narrative_momentum: float | None = None
+
+
+# Narratives — taxonomie des thèmes de marché crypto.
+# Un token est rattaché à une narrative par keywords sur nom/symbole/description.
+_NARRATIVES: Dict[str, List[str]] = {
+    "AI": ["ai", "agent", "gpt", "llm", "neural", "bot", "intelligence", "inference"],
+    "AI Agents": ["agent", "autonomous", "swarm", "aixbt"],
+    "Meme": ["inu", "doge", "pepe", "wif", "bonk", "cat", "frog", "meme", "moon", "elon"],
+    "DePIN": ["depin", "node", "sensor", "network", "iot", "helium", "render", "compute", "gpu"],
+    "RWA": ["rwa", "real world", "asset", "estate", "bond", "treasury", "tokenized"],
+    "DeFi": ["swap", "dex", "lend", "yield", "vault", "stake", "liquidity", "amm"],
+    "Gaming": ["game", "play", "guild", "metaverse", "nft"],
+    "L2/Infra": ["layer", "rollup", "bridge", "zk", "evm", "chain", "protocol"],
+    "Privacy": ["privacy", "anon", "zero", "mix", "shield"],
+    "SocialFi": ["social", "friend", "creator", "fan"],
+    "Prediction": ["predict", "bet", "oracle", "market"],
+    "Stablecoin": ["usd", "stable", "dollar"],
+    "Solana Eco": ["solana", "sol", "pump", "raydium"],
+}
+
+# Narrative → mots-clés pour matcher les catégories CoinGecko
+_NARRATIVE_CG_KEYWORDS: Dict[str, List[str]] = {
+    "AI": ["artificial intelligence", "ai"],
+    "AI Agents": ["ai agents", "ai agent"],
+    "Meme": ["meme"],
+    "DePIN": ["depin"],
+    "RWA": ["real world assets", "rwa"],
+    "DeFi": ["decentralized finance", "defi", "dex", "lending"],
+    "Gaming": ["gaming", "gamefi", "metaverse", "nft"],
+    "L2/Infra": ["layer 2", "layer 1", "infrastructure", "zero knowledge"],
+    "Privacy": ["privacy"],
+    "SocialFi": ["social"],
+    "Prediction": ["prediction"],
+    "Stablecoin": ["stablecoin"],
+    "Solana Eco": ["solana ecosystem"],
+}
+
+
+def _classify_narrative(symbol: str, name: str, description: str = "") -> str | None:
+    """Classe le token dans une narrative par keywords. None = pas de thème clair."""
+    text = f"{symbol} {name} {description}".lower()
+    best, best_hits = None, 0
+    for narrative, kws in _NARRATIVES.items():
+        hits = sum(1 for kw in kws if kw in text)
+        if hits > best_hits:
+            best, best_hits = narrative, hits
+    return best if best_hits >= 1 else None
+
+
+async def _fetch_narrative_momentum() -> Dict[str, float]:
+    """
+    Momentum des narratives = variation mcap 24h des catégories CoinGecko.
+    Une seule requête pour toutes les catégories. Retourne {narrative: pct}.
+    """
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://api.coingecko.com/api/v3/coins/categories")
+            r.raise_for_status()
+            cats = r.json()
+        out: Dict[str, float] = {}
+        for narrative, kws in _NARRATIVE_CG_KEYWORDS.items():
+            vals = [
+                float(c.get("market_cap_change_24h") or 0)
+                for c in cats
+                if any(kw in (c.get("name") or "").lower() for kw in kws)
+            ]
+            if vals:
+                out[narrative] = sum(vals) / len(vals)
+        return out
+    except Exception as exc:
+        logger.debug("narrative_momentum_failed", error=str(exc))
+        return {}
 
 
 # DexScreener chainId → GoPlus chain id (EVM token_security endpoint)
@@ -312,6 +387,8 @@ def _compute_gem_score(
     sells_24h: float = 0.0,
     buys_1h: float = 0.0,
     sells_1h: float = 0.0,
+    narrative: str | None = None,
+    narrative_momentum: float | None = None,
 ) -> tuple[int, List[str], List[str]]:
     """
     Compute a 0-100 gem score.
@@ -405,6 +482,17 @@ def _compute_gem_score(
     score += oc_pts
     reasons.extend(oc_reasons)
     warnings.extend(oc_warnings)
+
+    # 8. Narrative momentum (-3/+5 pts) — le token surfe-t-il sur un thème chaud
+    if narrative and narrative_momentum is not None:
+        if narrative_momentum >= 5:
+            score += 5
+            reasons.append(f"Hot narrative: {narrative} sector {narrative_momentum:+.1f}% mcap 24h")
+        elif narrative_momentum >= 2:
+            score += 2
+        elif narrative_momentum <= -10:
+            score -= 3
+            warnings.append(f"Narrative cooling off: {narrative} {narrative_momentum:+.1f}% 24h")
 
     score = max(0, min(100, score))
     if honeypot:
@@ -598,6 +686,16 @@ async def discover_hidden_gems(
     for t in filtered:
         t["onchain"] = security.get(t.get("token_address", "")) or {}
 
+    # Narratives : classification + momentum sectoriel (CoinGecko categories)
+    try:
+        momentum = await _asyncio.wait_for(_fetch_narrative_momentum(), timeout=10.0)
+    except Exception:
+        momentum = {}
+    for t in filtered:
+        n = _classify_narrative(t.get("symbol", ""), t.get("name", ""), t.get("description", ""))
+        t["narrative"] = n
+        t["narrative_momentum"] = momentum.get(n) if n else None
+
     # Score each token
     candidates: List[GemCandidate] = []
     for t in filtered:
@@ -613,6 +711,8 @@ async def discover_hidden_gems(
             sells_24h=t.get("sells_24h", 0),
             buys_1h=t.get("buys_1h", 0),
             sells_1h=t.get("sells_1h", 0),
+            narrative=t.get("narrative"),
+            narrative_momentum=t.get("narrative_momentum"),
         )
 
         candidates.append(GemCandidate(
@@ -630,6 +730,8 @@ async def discover_hidden_gems(
             social_buzz=t.get("social_buzz", 0),
             tokenomics_safety=t.get("tokenomics_safety", 50),
             onchain=t.get("onchain") or {},
+            narrative=t.get("narrative"),
+            narrative_momentum=t.get("narrative_momentum"),
         ))
 
     # Sort by gem_score descending
@@ -651,6 +753,8 @@ async def discover_hidden_gems(
                 "social_buzz": c.social_buzz,
                 "tokenomics_safety": c.tokenomics_safety,
                 "onchain": c.onchain,
+                "narrative": c.narrative,
+                "narrative_momentum": c.narrative_momentum,
                 "reasons": c.reasons,
                 "warnings": c.warnings,
                 "url": next((t.get("url", "") for t in filtered if t.get("symbol") == c.symbol), ""),
