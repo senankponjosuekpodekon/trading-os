@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FeatureFlagsService, MAINTENANCE_FLAG, REGISTRATION_FLAG } from '../common/services/feature-flags.service';
+import { AUTO_TRADER_FLAG } from '../signals/auto-trader.service';
 
 @Injectable()
 export class MaintenanceService {
@@ -25,5 +26,13 @@ export class MaintenanceService {
 
   setRegistrationEnabled(enabled: boolean): Promise<void> {
     return this.flags.setFlag(REGISTRATION_FLAG, enabled);
+  }
+
+  isAutoTraderEnabled(): Promise<boolean> {
+    return this.flags.getFlag(AUTO_TRADER_FLAG, false);
+  }
+
+  setAutoTraderEnabled(enabled: boolean): Promise<void> {
+    return this.flags.setFlag(AUTO_TRADER_FLAG, enabled);
   }
 }

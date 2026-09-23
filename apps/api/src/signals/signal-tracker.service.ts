@@ -6,6 +6,7 @@ import { resolveIntrabarOrder, Candle, Direction, PriceLevels, TouchType } from 
 import { deriveSignalOutcome, computeMaxAdverseExcursion, SignalExecutionStatus } from './signal-status';
 import { SignalExecutionStatus as PrismaSignalExecutionStatus } from '@prisma/client';
 import { FeatureStoreService } from './feature-store.service';
+import { AutoTraderService } from './auto-trader.service';
 
 const DEFAULT_PARTIAL_EXIT_PCT = 33.3;
 // Zone d'entrée : le prix manque l'entrée de 0.37% en médiane (47% < 0.3%)
@@ -26,6 +27,7 @@ export class SignalTrackerService {
     @Inject('CandleRepository') private readonly candles: CandleRepository,
     private readonly executionService: SignalExecutionService,
     private readonly featureStore: FeatureStoreService,
+    private readonly autoTrader: AutoTraderService,
   ) {}
 
   async processActiveSignals(limit = 200): Promise<void> {
@@ -71,6 +73,7 @@ export class SignalTrackerService {
       .filter((v) => v != null)
       .map(Number);
     let worstPrice = signal.worstExcursionPrice != null ? Number(signal.worstExcursionPrice) : null;
+    const newEvents: { type: string; price: number }[] = [];
 
     const entryBase = signal.entryPrice ? Number(signal.entryPrice) : 0;
     const bufferPct = this._entryBufferPct(newCandles, entryBase);
@@ -85,6 +88,7 @@ export class SignalTrackerService {
           await tx.signalExecutionEvent.create({
             data: { signalId, type: 'EXPIRED', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe },
           });
+          newEvents.push({ type: 'EXPIRED', price: candle.close });
           await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'EXPIRED', lastProcessedCandle: new Date(candle.openTime) } });
           await this.featureStore.attachOutcome(signalId, 'EXPIRED', null);
           return;
@@ -96,6 +100,7 @@ export class SignalTrackerService {
             await tx.signalExecutionEvent.create({
               data: { signalId, type: 'ENTRY_HIT', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe },
             });
+            newEvents.push({ type: 'ENTRY_HIT', price: candle.close });
             entryAlreadyHit = true;
             worstPrice = candle.close;
             await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'ACTIVE', worstExcursionPrice: candle.close } });
@@ -128,6 +133,7 @@ export class SignalTrackerService {
               resolvedBy: result.method,
             },
           });
+          newEvents.push({ type, price });
           if (touch === 'SL') break;
         }
 
@@ -136,6 +142,11 @@ export class SignalTrackerService {
     }
 
     await this.recalculateOutcome(signalId, direction, worstPrice, newCandles);
+
+    // AutoPilot : portfolio PAPER piloté par les events réels (best-effort)
+    for (const ev of newEvents) {
+      await this.autoTrader.handleSignalEvent(signal, ev.type as any, ev.price);
+    }
   }
 
   // ATR(14) des bougies récentes → taille de zone proportionnelle à la volatilité

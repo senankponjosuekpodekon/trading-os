@@ -5,6 +5,7 @@ import { SignalsService } from './signals.service';
 import { SignalOutcomeService } from './signal-outcome.service';
 import { SignalExecutionService } from './signal-execution.service';
 import { SignalTrackerService } from './signal-tracker.service';
+import { AutoTraderService } from './auto-trader.service';
 import { SignalTrackerScheduler } from './signal-tracker.scheduler';
 import { EngineCandleRepository } from './engine-candle.repository';
 import { LocalCandleRepository } from './local-candle.repository';
@@ -53,6 +54,7 @@ import { CronConfigModule } from '../admin/cron-config.module';
     RegimeClassifierService,
     MaintenanceService,
     FeatureFlagsService,
+    AutoTraderService,
   ],
   exports: [SignalsService, SignalOutcomeService, SignalExecutionService, SignalPredictorService, PatternPredictorService, FeatureStoreService, RegimeClassifierService],
 })

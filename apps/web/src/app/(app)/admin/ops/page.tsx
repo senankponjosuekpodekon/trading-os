@@ -16,6 +16,7 @@ export default function AdminOpsPage() {
   const [crons, setCrons] = useState<CronConfig[]>([]);
   const [maintenance, setMaintenance] = useState(false);
   const [registration, setRegistration] = useState(true);
+  const [autoTrader, setAutoTrader] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -34,6 +35,9 @@ export default function AdminOpsPage() {
   };
 
   const fetchRegistration = () => {
+    api.get('/admin/ops/auto-trader')
+      .then(res => setAutoTrader(res.data.enabled))
+      .catch(() => {});
     api.get('/admin/ops/registration')
       .then(res => setRegistration(res.data.enabled))
       .catch(() => setError('Impossible de charger le statut des inscriptions'));
@@ -76,6 +80,18 @@ export default function AdminOpsPage() {
       setRegistration(enabled);
     } catch {
       setError('Impossible de mettre à jour les inscriptions');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const toggleAutoTrader = async (enabled: boolean) => {
+    setSaving('auto-trader');
+    try {
+      await api.patch('/admin/ops/auto-trader', { enabled });
+      setAutoTrader(enabled);
+    } catch {
+      setError("Impossible de mettre à jour l'AutoPilot");
     } finally {
       setSaving(null);
     }
@@ -148,6 +164,36 @@ export default function AdminOpsPage() {
               </button>
               <span className={`ml-2 text-xs ${registration ? 'text-emerald-400' : 'text-gray-500'}`}>
                 {registration ? 'Ouvertes' : 'Fermées'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">AutoPilot</h2>
+              <p className="text-sm text-gray-400">
+                Portfolio PAPER auto — ouvre des positions sur les signaux ≥70% qui touchent leur entry (risque 1%/trade, cap 10% expo, kill switch −50%)
+              </p>
+            </div>
+            <div className="flex items-center">
+              <button
+                onClick={() => toggleAutoTrader(!autoTrader)}
+                disabled={saving === 'auto-trader'}
+                aria-label="Basculer l'AutoPilot"
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  autoTrader ? 'bg-emerald-500' : 'bg-gray-700'
+                } ${saving === 'auto-trader' ? 'opacity-50' : ''}`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    autoTrader ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className={`ml-2 text-xs ${autoTrader ? 'text-emerald-400' : 'text-gray-500'}`}>
+                {autoTrader ? 'Actif' : 'Inactif'}
               </span>
             </div>
           </div>

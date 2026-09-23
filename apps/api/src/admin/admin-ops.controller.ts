@@ -255,4 +255,15 @@ export class AdminOpsController {
     await this.maintenanceService.setRegistrationEnabled(body.enabled);
     return { enabled: body.enabled };
   }
+
+  @Get('auto-trader')
+  async getAutoTrader() {
+    return { enabled: await this.maintenanceService.isAutoTraderEnabled() };
+  }
+
+  @Patch('auto-trader')
+  async setAutoTrader(@Body() body: { enabled: boolean }) {
+    await this.maintenanceService.setAutoTraderEnabled(body.enabled);
+    return { enabled: body.enabled };
+  }
 }
