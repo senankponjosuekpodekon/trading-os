@@ -27,6 +27,12 @@ export default function CopilotPage() {
     staleTime: 60_000,
   });
 
+  const { data: quota, refetch: refetchQuota } = useQuery({
+    queryKey: ['ai-quota'],
+    queryFn: async () => (await api.get('/ai/quota')).data,
+    staleTime: 30_000,
+  });
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -50,6 +56,7 @@ export default function CopilotPage() {
       }
       const { data } = await api.post('/ai/chat', payload);
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply, model: data.model, provider: data.provider }]);
+      refetchQuota();
     } catch (e: any) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Erreur : ${e?.response?.data?.message || e.message}` }]);
     } finally {
@@ -111,6 +118,14 @@ export default function CopilotPage() {
           >
             <Send className="w-4 h-4" />
           </button>
+          {quota && quota.limit > 0 && (
+            <span
+              className={`text-[10px] px-2 py-1 rounded border whitespace-nowrap ${quota.remaining <= 5 ? 'text-red-400 border-red-500/40' : 'text-gray-500 border-gray-800'}`}
+              title="Messages IA restants aujourd'hui"
+            >
+              {quota.remaining}/{quota.limit}
+            </span>
+          )}
         </div>
       </div>
     </>

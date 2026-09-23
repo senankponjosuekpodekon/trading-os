@@ -1,6 +1,7 @@
-import { Controller, Post, Get, Body, Param, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, Request, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AiService } from './ai.service';
+import { LlmQuotaService } from './llm-quota.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -21,7 +22,23 @@ export class AiController {
     private ai: AiService,
     private prisma: PrismaService,
     private http: HttpService,
+    private quota: LlmQuotaService,
   ) {}
+
+  private async consumeQuota(req: any) {
+    const q = await this.quota.checkAndConsume(req.user.id, req.user.role);
+    if (!q.allowed) {
+      throw new HttpException(
+        {
+          code: 'LLM_QUOTA_EXCEEDED',
+          message: `Quota quotidien IA atteint (${q.limit} messages). Réessaie demain.`,
+          limit: q.limit,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    return q;
+  }
 
   @Get('health')
   health() {
@@ -29,7 +46,8 @@ export class AiController {
   }
 
   @Post('explain/signal/:signalId')
-  async explainSignal(@Param('signalId') signalId: string) {
+  async explainSignal(@Request() req: any, @Param('signalId') signalId: string) {
+    await this.consumeQuota(req);
     const signal = await this.prisma.signal.findUnique({
       where: { id: signalId },
       include: { asset: true },
@@ -69,13 +87,21 @@ export class AiController {
   }
 
   @Post('weekly-report')
-  weeklyReport(@Body() body: any) {
+  async weeklyReport(@Request() req: any, @Body() body: any) {
+    await this.consumeQuota(req);
     return this.ai.weeklyReport(body);
   }
 
   @Post('chat')
-  chat(@Body() body: any) {
-    return this.ai.chat(body);
+  async chat(@Request() req: any, @Body() body: any) {
+    const q = await this.consumeQuota(req);
+    const res = await this.ai.chat(body);
+    return { ...res, quota: { remaining: q.remaining, limit: q.limit } };
+  }
+
+  @Get('quota')
+  getQuota(@Request() req: any) {
+    return this.quota.getUsage(req.user.id, req.user.role);
   }
 
   @Get('daily-pulse')
@@ -222,6 +248,7 @@ export class AiController {
 
   @Post('review/position/:positionId')
   async reviewPosition(@Request() req: any, @Param('positionId') positionId: string) {
+    await this.consumeQuota(req);
     const position = await this.prisma.position.findUnique({
       where: { id: positionId },
       include: { asset: true, portfolio: { include: { user: { select: { id: true } } } } },
