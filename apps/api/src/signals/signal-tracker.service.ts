@@ -9,9 +9,13 @@ import { FeatureStoreService } from './feature-store.service';
 
 const DEFAULT_PARTIAL_EXIT_PCT = 33.3;
 // Zone d'entrée : le prix manque l'entrée de 0.37% en médiane (47% < 0.3%)
-// → buffer asymétrique 0.5% dans le sens adverse (fill légèrement moins bon,
-// mais convertit ~la moitié des EXPIRED en vrais trades)
-const ENTRY_ZONE_BUFFER_PCT = 0.005;
+// → buffer asymétrique proportionnel à l'ATR (0.5×ATR, borné 0.15%–2%)
+// dans le sens adverse : fill légèrement moins bon mais convertit ~la
+// moitié des EXPIRED en vrais trades. Fallback fixe si pas assez de bougies.
+const ENTRY_ZONE_FALLBACK_PCT = 0.005;
+const ENTRY_ZONE_MIN_PCT = 0.0015;
+const ENTRY_ZONE_MAX_PCT = 0.02;
+const ENTRY_ZONE_ATR_COEF = 0.5;
 
 @Injectable()
 export class SignalTrackerService {
@@ -69,8 +73,9 @@ export class SignalTrackerService {
     let worstPrice = signal.worstExcursionPrice != null ? Number(signal.worstExcursionPrice) : null;
 
     const entryBase = signal.entryPrice ? Number(signal.entryPrice) : 0;
-    const entryLow = direction === 'SHORT' ? entryBase * (1 - ENTRY_ZONE_BUFFER_PCT) : entryBase;
-    const entryHigh = direction === 'LONG' ? entryBase * (1 + ENTRY_ZONE_BUFFER_PCT) : entryBase;
+    const bufferPct = this._entryBufferPct(newCandles, entryBase);
+    const entryLow = direction === 'SHORT' ? entryBase * (1 - bufferPct) : entryBase;
+    const entryHigh = direction === 'LONG' ? entryBase * (1 + bufferPct) : entryBase;
 
     for (const raw of newCandles) {
       const candle: Candle = { openTime: raw.openTime, open: raw.open, high: raw.high, low: raw.low, close: raw.close };
@@ -131,6 +136,20 @@ export class SignalTrackerService {
     }
 
     await this.recalculateOutcome(signalId, direction, worstPrice, newCandles);
+  }
+
+  // ATR(14) des bougies récentes → taille de zone proportionnelle à la volatilité
+  private _entryBufferPct(candles: RepoCandle[], entryBase: number): number {
+    if (entryBase <= 0 || candles.length < 5) return ENTRY_ZONE_FALLBACK_PCT;
+    const recent = candles.slice(-14);
+    let sum = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const c = recent[i];
+      const p = recent[i - 1];
+      sum += Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    }
+    const atrPct = sum / (recent.length - 1) / entryBase;
+    return Math.min(Math.max(ENTRY_ZONE_ATR_COEF * atrPct, ENTRY_ZONE_MIN_PCT), ENTRY_ZONE_MAX_PCT);
   }
 
   private async recalculateOutcome(signalId: string, direction: Direction, worstPrice: number | null, candles: RepoCandle[]): Promise<void> {
