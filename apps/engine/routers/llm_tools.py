@@ -148,7 +148,26 @@ async def _get_market_price(symbol: str) -> Dict[str, Any]:
             except Exception:
                 pass  # fallback DB candles
 
-    # Fallback : dernière bougie en DB (peut être stale)
+    # Fallback multi-marchés : fetchers engine (TwelveData/yfinance/Deriv)
+    # → prix live pour forex, métaux, synthétiques — pas la DB stale.
+    try:
+        from routers.scan_fetchers import fetch_klines_fallback
+        df = await fetch_klines_fallback(symbol, "1h", limit=5)
+        if df is not None and not df.empty:
+            last = df.iloc[-1]
+            first = df.iloc[0]
+            change = round((float(last["close"]) - float(first["close"])) / float(first["close"]) * 100, 2)
+            return {
+                "symbol": symbol,
+                "price": float(last["close"]),
+                "change_pct": change,
+                "asof": str(last["time"]),
+                "source": "engine_fetchers",
+            }
+    except Exception:
+        pass
+
+    # Dernier recours : dernière bougie en DB (peut être stale)
     pool = await get_shared_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -231,17 +250,15 @@ async def _get_signal_details(signal_id: str) -> Dict[str, Any]:
 
 
 async def _get_market_regime(symbol: str) -> Dict[str, Any]:
-    pool = await get_shared_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """SELECT close FROM candles
-               WHERE symbol = $1 AND timeframe = '1d'
-               ORDER BY open_time DESC LIMIT 200""",
-            symbol,
-        )
-    prices = [float(r["close"]) for r in reversed(rows)]
-    if len(prices) < 20:
+    # Bougies daily live via les fetchers multi-provider (DB candles trop sparse)
+    try:
+        from routers.scan_fetchers import fetch_klines_fallback
+        df = await fetch_klines_fallback(symbol, "1d", limit=200)
+    except Exception:
+        df = None
+    if df is None or len(df) < 20:
         return {"error": f"pas assez de données daily pour {symbol}"}
+    prices = df["close"].astype(float).tolist()
     from routers.ml_regime import classifier
     if not classifier.model:
         return {"regime": "unknown", "detail": "modèle non entraîné"}
