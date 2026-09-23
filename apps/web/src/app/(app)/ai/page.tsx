@@ -1,15 +1,9 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Brain, FileText, RefreshCw, Zap, MessageSquare, Send, BookOpen, Search, Trash2 } from 'lucide-react';
+import { Brain, FileText, RefreshCw, Zap, MessageSquare, BookOpen } from 'lucide-react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  sources?: { title: string; category: string; score: number }[];
-  loading?: boolean;
-}
 
 interface AiHealth {
   openai_configured: boolean;
@@ -28,7 +22,7 @@ interface RagDoc {
 
 export default function AiPage() {
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'chat' | 'report' | 'explain' | 'knowledge'>('chat');
+  const [activeTab, setActiveTab] = useState<'report' | 'explain' | 'knowledge'>('report');
   const [report, setReport]       = useState<string | null>(null);
   const [explain, setExplain]     = useState<string | null>(null);
   const [customSignal, setCustomSignal] = useState({
@@ -38,46 +32,6 @@ export default function AiPage() {
   const [newDoc, setNewDoc] = useState({
     title: '', category: 'general', content: '', metadata: '',
   });
-
-  // ── Chat RAG ───────────────────────────────────────────────────
-  const [messages, setMessages]     = useState<ChatMessage[]>([
-    { role: 'assistant', content: 'Bonjour ! Je suis ton assistant trading. Pose-moi une question sur les indicateurs, la stratégie SMC, le risk management ou les marchés.' },
-  ]);
-  const [chatInput, setChatInput]   = useState('');
-  const [chatCategory, setChatCategory] = useState<string>('');
-  const messagesEndRef              = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  async function sendMessage() {
-    const q = chatInput.trim();
-    if (!q) return;
-    setChatInput('');
-    const userMsg: ChatMessage = { role: 'user', content: q };
-    const loadingMsg: ChatMessage = { role: 'assistant', content: '', loading: true };
-    setMessages(prev => [...prev, userMsg, loadingMsg]);
-
-    try {
-      const { data } = await api.post('/rag/query', {
-        question: q, top_k: 4, category: chatCategory || undefined, generate: true,
-      });
-      setMessages(prev => [
-        ...prev.slice(0, -1),
-        {
-          role: 'assistant',
-          content: data.answer || data.detail || 'Aucune réponse.',
-          sources: data.documents?.map((d: any) => ({ title: d.title, category: d.category, score: d.score })),
-        },
-      ]);
-    } catch {
-      setMessages(prev => [
-        ...prev.slice(0, -1),
-        { role: 'assistant', content: 'Erreur de connexion au moteur IA.' },
-      ]);
-    }
-  }
 
   const { data: health } = useQuery<AiHealth>({
     queryKey: ['ai-health'],
@@ -176,16 +130,11 @@ export default function AiPage() {
     enabled: activeTab === 'knowledge',
   });
 
-  const CATEGORIES = ['', 'indicateurs', 'smc', 'risk', 'brvm', 'deriv', 'trading'];
+  const CATEGORIES = ['indicateurs', 'smc', 'risk', 'brvm', 'deriv', 'trading', 'general'];
   const CAT_LABELS: Record<string, string> = {
-    '': 'Tout', indicateurs: 'Indicateurs', smc: 'SMC', risk: 'Risk',
-    brvm: 'BRVM', deriv: 'Deriv', trading: 'Trading',
+    indicateurs: 'Indicateurs', smc: 'SMC', risk: 'Risk',
+    brvm: 'BRVM', deriv: 'Deriv', trading: 'Trading', general: 'Général',
   };
-  const SUGGESTIONS = [
-    'Comment fonctionne le RSI ?', 'Qu\'est-ce qu\'un Fair Value Gap ?',
-    'Comment calculer la taille d\'une position ?', 'Stratégie scalp V75 Deriv ?',
-    'Qu\'est-ce qu\'un Order Block ?', 'Explique le BOS et CHoCH',
-  ];
 
   return (
     <>
@@ -200,21 +149,21 @@ export default function AiPage() {
           <Brain className="w-4 h-4 shrink-0" />
           <span className="font-semibold flex-1">
             {health?.status === 'ready'
-              ? `${health.provider === 'ollama' ? '🦙 Ollama' : '☁️ OpenAI'} — ${health.model}`
+              ? `${health.provider === 'ollama' ? '🦙 Ollama' : '☁️ ' + health.provider} — ${health.model}`
               : 'Mode démo — aucun LLM configuré (RAG fonctionne, génération désactivée)'}
           </span>
-          {health?.status === 'ready' && (
-            <span className="text-xs px-2 py-0.5 rounded border border-current opacity-60 font-mono">{health.model}</span>
-          )}
+          <Link href="/copilot"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-400 text-white transition-colors">
+            <MessageSquare className="w-3.5 h-3.5" /> Ouvrir le Copilot
+          </Link>
         </div>
 
         {/* Onglets */}
         <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1">
           {([
-            { id: 'chat',     icon: MessageSquare, label: 'Chat RAG' },
-            { id: 'report',   icon: FileText,      label: 'Rapport hebdo' },
-            { id: 'explain',  icon: Zap,           label: 'Signal' },
-            { id: 'knowledge', icon: BookOpen,    label: 'Base RAG' },
+            { id: 'report',   icon: FileText, label: 'Rapport hebdo' },
+            { id: 'explain',  icon: Zap,      label: 'Expliquer un signal' },
+            { id: 'knowledge', icon: BookOpen, label: 'Base de connaissances' },
           ] as const).map(({ id, icon: Icon, label }) => (
             <button key={id} onClick={() => setActiveTab(id)}
               className={`flex items-center gap-2 flex-1 justify-center py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
@@ -226,102 +175,6 @@ export default function AiPage() {
             </button>
           ))}
         </div>
-
-        {/* ── TAB CHAT RAG ─────────────────────────────────────────── */}
-        {activeTab === 'chat' && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col" style={{ height: 560 }}>
-
-            {/* Toolbar */}
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800">
-              <Search className="w-4 h-4 text-gray-500" />
-              <span className="text-xs text-gray-500 mr-1">Filtre :</span>
-              <div className="flex gap-1 flex-wrap">
-                {CATEGORIES.map(cat => (
-                  <button key={cat} onClick={() => setChatCategory(cat)}
-                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                      chatCategory === cat
-                        ? 'bg-violet-500 border-violet-500 text-white'
-                        : 'border-gray-700 text-gray-400 hover:border-violet-500 hover:text-violet-400'
-                    }`}>
-                    {CAT_LABELS[cat]}
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => setMessages([{ role: 'assistant', content: 'Conversation réinitialisée. Comment puis-je t\'aider ?' }])}
-                className="ml-auto text-gray-600 hover:text-red-400 transition-colors" title="Effacer">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-2' : 'order-1'}`}>
-                    {msg.role === 'assistant' && (
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Brain className="w-3 h-3 text-violet-400" />
-                        <span className="text-xs text-violet-400 font-medium">Assistant RAG</span>
-                      </div>
-                    )}
-                    <div className={`rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-violet-500 text-white'
-                        : 'bg-gray-800 text-gray-200'
-                    }`}>
-                      {msg.loading
-                        ? <span className="flex items-center gap-2"><RefreshCw className="w-3 h-3 animate-spin text-violet-400" /><span className="text-gray-400">Recherche en cours…</span></span>
-                        : <span className="whitespace-pre-wrap">{msg.content}</span>
-                      }
-                    </div>
-                    {/* Sources */}
-                    {msg.sources && msg.sources.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <BookOpen className="w-3 h-3 text-gray-600 mt-0.5" />
-                        {msg.sources.map((s, si) => (
-                          <span key={si} className="text-xs px-2 py-0.5 bg-gray-800 border border-gray-700 rounded-full text-gray-400 flex items-center gap-1">
-                            <span className="text-violet-400">{s.category}</span>
-                            <span>·</span>
-                            {s.title.length > 28 ? s.title.slice(0, 28) + '…' : s.title}
-                            <span className="text-gray-600">{(s.score * 100).toFixed(0)}%</span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Suggestions */}
-            {messages.length <= 1 && (
-              <div className="px-4 pb-2 flex flex-wrap gap-1.5">
-                {SUGGESTIONS.map(s => (
-                  <button key={s} onClick={() => { setChatInput(s); }}
-                    className="text-xs px-3 py-1 bg-gray-800 hover:bg-violet-500/20 border border-gray-700 hover:border-violet-500/40 rounded-full text-gray-400 hover:text-violet-300 transition-colors">
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Input */}
-            <div className="px-4 py-3 border-t border-gray-800 flex gap-2">
-              <input
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                placeholder="Pose une question sur le trading…"
-                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-violet-500 transition-colors"
-              />
-              <button onClick={sendMessage} disabled={!chatInput.trim()}
-                className="px-3 py-2 bg-violet-500 hover:bg-violet-400 disabled:opacity-40 text-white rounded-lg transition-colors">
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* ── TAB RAPPORT ──────────────────────────────────────────── */}
         {activeTab === 'report' && (
@@ -366,7 +219,7 @@ export default function AiPage() {
               <h2 className="text-white font-semibold">Enrichir la base RAG</h2>
             </div>
             <p className="text-gray-500 text-sm mb-4">
-              Ajoute un document à la base de connaissances de l’assistant. L’embedding sera calculé automatiquement.
+              Ajoute un document à la base de connaissances — le Copilot le cite dans ses réponses. L'embedding est calculé automatiquement.
             </p>
             <div className="space-y-3 mb-4">
               <div className="grid grid-cols-2 gap-3">
@@ -382,7 +235,7 @@ export default function AiPage() {
                   <select value={newDoc.category}
                     onChange={e => setNewDoc(v => ({ ...v, category: e.target.value }))}
                     className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-violet-500">
-                    {CATEGORIES.filter(c => c).map(c => <option key={c} value={c}>{CAT_LABELS[c]}</option>)}
+                    {CATEGORIES.map(c => <option key={c} value={c}>{CAT_LABELS[c]}</option>)}
                   </select>
                 </div>
               </div>

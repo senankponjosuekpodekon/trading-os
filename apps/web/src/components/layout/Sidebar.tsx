@@ -71,7 +71,7 @@ const groups: NavGroup[] = [
       { href: '/ai-defense',   label: 'AI Defense',    icon: ShieldAlert },
       { href: '/rebalancing',  label: 'Rebalancing',   icon: Scale },
       { href: '/copilot',      label: 'Copilot',       icon: MessageSquare },
-      { href: '/ai',           label: 'Assistant IA',  icon: Brain },
+      { href: '/ai',           label: 'Outils IA',     icon: Brain },
       { href: '/memory',       label: 'Mémoire',       icon: DatabaseBackup },
     ],
   },
