@@ -216,6 +216,97 @@ def _compute_asymmetric_score(
     return score, risks, opportunities
 
 
+def _compute_listed_score(
+    liquidity: float,
+    volume_24h: float,
+    price_change_24h: float,
+    social_buzz: int,
+    market_cap_rank: int | None = None,
+    github_commits_30d: int = 0,
+    pair_age_hours: float | None = None,
+) -> tuple[int, List[str], List[str]]:
+    """
+    Score asymétrique pour tokens DÉJÀ listés (DEX pairs, CoinGecko trending).
+    Les critères presale (funding, audit, launchpad) ne s'appliquent pas —
+    on score la traction réelle : liquidité, volume, rang, buzz, dev.
+    """
+    score = 50
+    risks: List[str] = []
+    opportunities: List[str] = []
+
+    # Liquidité (±12)
+    if liquidity >= 500_000:
+        score += 12
+        opportunities.append(f"Deep liquidity (${liquidity:,.0f})")
+    elif liquidity >= 100_000:
+        score += 8
+        opportunities.append(f"Good liquidity (${liquidity:,.0f})")
+    elif liquidity >= 30_000:
+        score += 4
+    elif liquidity > 0:
+        score -= 8
+        risks.append(f"Thin liquidity (${liquidity:,.0f}) — slippage risk")
+    else:
+        score -= 10
+        risks.append("No liquidity data")
+
+    # Volume 24h (±12)
+    if volume_24h >= 500_000:
+        score += 12
+        opportunities.append(f"High 24h volume (${volume_24h:,.0f})")
+    elif volume_24h >= 100_000:
+        score += 7
+        opportunities.append(f"Solid 24h volume (${volume_24h:,.0f})")
+    elif volume_24h >= 20_000:
+        score += 3
+    elif volume_24h > 0:
+        score -= 6
+        risks.append(f"Low volume (${volume_24h:,.0f}) — weak traction")
+    else:
+        score -= 8
+        risks.append("No trading volume")
+
+    # Market cap rank CoinGecko (±8)
+    if market_cap_rank and market_cap_rank <= 300:
+        score += 8
+        opportunities.append(f"Top {market_cap_rank} by market cap")
+    elif market_cap_rank and market_cap_rank <= 1500:
+        score += 3
+
+    # Social buzz (±10)
+    if social_buzz > 500:
+        score += 10
+        opportunities.append(f"High social buzz ({social_buzz} mentions)")
+    elif social_buzz > 100:
+        score += 6
+        opportunities.append(f"Growing attention ({social_buzz} mentions)")
+    elif social_buzz > 20:
+        score += 3
+
+    # Dev activity (±10)
+    if github_commits_30d >= 30:
+        score += 10
+        opportunities.append(f"Active dev team ({github_commits_30d} commits/30j)")
+    elif github_commits_30d >= 10:
+        score += 5
+        opportunities.append(f"Steady development ({github_commits_30d} commits/30j)")
+
+    # Fraîcheur de la pair (±5)
+    if pair_age_hours is not None and pair_age_hours <= 72:
+        score += 5
+        opportunities.append(f"Very new pair ({pair_age_hours:.0f}h)")
+
+    # Sanity check prix (−8)
+    if price_change_24h > 200:
+        score -= 8
+        risks.append(f"Extreme 24h pump ({price_change_24h:+.0f}%) — FOMO risk")
+    elif price_change_24h < -50:
+        score -= 5
+        risks.append(f"Sharp 24h dump ({price_change_24h:+.0f}%)")
+
+    return max(0, min(100, score)), risks, opportunities
+
+
 async def _fetch_coingecko_upcoming() -> List[Dict[str, Any]]:
     """Fetch upcoming/recently listed coins from CoinGecko."""
     try:
@@ -275,6 +366,10 @@ async def _fetch_dex_new_pairs() -> List[Dict[str, Any]]:
         projects = []
         for p in pairs:
             base = p.get("baseToken", {})
+            symbol = base.get("symbol", "")
+            # Filtre les pairs-spam (symbole géant concaténé, nom vide, etc.)
+            if not symbol or len(symbol) > 20 or not base.get("name"):
+                continue
             projects.append({
                 "name": base.get("name", ""),
                 "symbol": base.get("symbol", ""),
@@ -803,20 +898,39 @@ async def discover_pre_listing(
         if p.get("source") == "cryptorank" and p.get("audit_status"):
             audit = p.get("audit_status")
 
-        score, risks, opportunities = _compute_asymmetric_score(
-            funding_pct=funding_pct,
-            audit_status=audit,
-            social_buzz=social_buzz,
-            has_website=has_website,
-            has_twitter=has_twitter,
-            listing_type=listing_type,
-            platform=platform,
-            github_commits_30d=p.get("github_commits_30d", 0),
-            tvl_millions=p.get("tvl_millions", 0),
-            tvl_growing=p.get("tvl_growing", False),
-            healthy_unlocks=p.get("healthy_unlocks"),
-            top_holder_pct=p.get("top_holder_pct"),
-        )
+        # Les sources "listed" (DEX pairs, CG trending) ne sont pas des presales :
+        # funding/audit/platform n'existent pas pour elles — score dédié.
+        if p.get("source") in ("dex_screener", "coingecko_trending"):
+            created = p.get("created_at")
+            pair_age = (
+                (time.time() * 1000 - created) / 3_600_000
+                if isinstance(created, (int, float)) and created > 0
+                else None
+            )
+            score, risks, opportunities = _compute_listed_score(
+                liquidity=p.get("liquidity", 0),
+                volume_24h=p.get("volume_24h", 0),
+                price_change_24h=p.get("price_change_24h", 0),
+                social_buzz=social_buzz,
+                market_cap_rank=p.get("market_cap_rank"),
+                github_commits_30d=p.get("github_commits_30d", 0),
+                pair_age_hours=pair_age,
+            )
+        else:
+            score, risks, opportunities = _compute_asymmetric_score(
+                funding_pct=funding_pct,
+                audit_status=audit,
+                social_buzz=social_buzz,
+                has_website=has_website,
+                has_twitter=has_twitter,
+                listing_type=listing_type,
+                platform=platform,
+                github_commits_30d=p.get("github_commits_30d", 0),
+                tvl_millions=p.get("tvl_millions", 0),
+                tvl_growing=p.get("tvl_growing", False),
+                healthy_unlocks=p.get("healthy_unlocks"),
+                top_holder_pct=p.get("top_holder_pct"),
+            )
 
         p["funding_pct"] = round(funding_pct, 1)
         p["asymmetric_score"] = score

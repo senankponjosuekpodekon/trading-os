@@ -155,50 +155,126 @@ async def _fetch_dex_liquidity_history(symbol: str) -> Dict[str, Any]:
 
 async def _fetch_holder_growth(symbol: str, chain: str = "ethereum") -> Dict[str, Any]:
     """
-    Fetch holder count and growth.
-    Uses Etherscan API (free tier) or BSCScan.
+    Holder count réel : résout symbol → token address via DexScreener,
+    puis GoPlus/RugCheck (fetch_onchain_security). La croissance 24h vient
+    de l'historique longitudinal gem_snapshots si le token y est tracké.
     """
-    # This would use Etherscan API in production
-    # For now, return a mock structure that would be populated
+    empty = {
+        "symbol": symbol, "chain": chain, "holder_count": 0,
+        "holder_growth_24h": 0, "holder_growth_7d": 0,
+        "top_10_holders_pct": 0, "source": "not_found",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.dexscreener.com/latest/dex/search",
+                params={"q": symbol},
+            )
+            r.raise_for_status()
+            pairs = r.json().get("pairs") or []
+
+        match = next(
+            (p for p in pairs
+             if (p.get("baseToken") or {}).get("symbol", "").upper() == symbol.upper()),
+            pairs[0] if pairs else None,
+        )
+        if not match:
+            return empty
+        tok = match.get("baseToken") or {}
+        addr = tok.get("address", "")
+        real_chain = match.get("chainId", chain)
+        if not addr:
+            return empty
+
+        from ml.hidden_gems import fetch_onchain_security, _load_gem_history
+        sec = await fetch_onchain_security(
+            [{"chain": real_chain, "token_address": addr}]
+        )
+        info = sec.get(addr) or {}
+
+        # Croissance depuis les snapshots longitudinaux (si tracké)
+        history = await _load_gem_history(real_chain, addr)
+        growth_24h = 0
+        if len(history) >= 2:
+            newest = history[0]
+            cutoff = newest["ts"] - 86400
+            base = next((s for s in history if s["ts"] <= cutoff), history[-1])
+            growth_24h = max(0, (newest.get("holders") or 0) - (base.get("holders") or 0))
+
+        return {
+            "symbol": symbol,
+            "chain": real_chain,
+            "holder_count": info.get("holder_count", 0),
+            "holder_growth_24h": growth_24h,
+            "holder_growth_7d": 0,
+            "top_10_holders_pct": info.get("top10_pct", 0),
+            "source": info.get("source", "unavailable") if info.get("available") else "unavailable",
+        }
+    except Exception as exc:
+        logger.debug("holder_growth_fetch_failed", symbol=symbol, error=str(exc))
+        return empty
+
+
+def _dev_unavailable(symbol: str) -> Dict[str, Any]:
     return {
-        "symbol": symbol,
-        "chain": chain,
-        "holder_count": 0,  # Would be fetched from block explorer
-        "holder_growth_24h": 0,  # New holders in 24h
-        "holder_growth_7d": 0,  # New holders in 7d
-        "top_10_holders_pct": 0,  # Concentration metric
-        "source": "mock",
+        "symbol": symbol, "commits_30d": 0, "contributors": 0,
+        "rank": 0, "source": "unavailable",
     }
 
 
 async def _fetch_dev_activity(symbol: str) -> Dict[str, Any]:
     """
-    Fetch developer activity (GitHub commits, contributor count).
-    Uses CryptoMiso or direct GitHub API.
+    Developer activity : DexScreener → liens du token (websites/socials)
+    → repo GitHub → commits 30j via _fetch_github_activity.
+    CryptoMiso est mort (404) et CoinGecko free n'expose plus developer_data.
     """
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # CryptoMiso — ranks coins by GitHub commits
-            r = await client.get(f"https://www.cryptomiso.com/api/v1/coins/{symbol.lower()}")
-            if r.status_code == 200:
-                data = r.json()
-                return {
-                    "symbol": symbol,
-                    "commits_30d": data.get("commits", 0),
-                    "contributors": data.get("contributors", 0),
-                    "rank": data.get("rank", 0),
-                    "source": "cryptomiso",
-                }
-    except Exception:
-        pass
+            r = await client.get(
+                "https://api.dexscreener.com/latest/dex/search",
+                params={"q": symbol},
+            )
+            r.raise_for_status()
+            pairs = r.json().get("pairs") or []
 
-    return {
-        "symbol": symbol,
-        "commits_30d": 0,
-        "contributors": 0,
-        "rank": 0,
-        "source": "unavailable",
-    }
+        match = next(
+            (p for p in pairs
+             if (p.get("baseToken") or {}).get("symbol", "").upper() == symbol.upper()),
+            pairs[0] if pairs else None,
+        )
+        if not match:
+            return _dev_unavailable(symbol)
+
+        # Cherche un lien GitHub dans websites + socials
+        info = match.get("info") or {}
+        candidates = [w.get("url", "") for w in (info.get("websites") or [])]
+        candidates += [s.get("url", "") for s in (info.get("socials") or [])]
+        repo = None
+        for url in candidates:
+            if "github.com" in url:
+                from routers.pre_listing import _extract_github_repo
+                repo = _extract_github_repo(url, symbol)
+                if repo:
+                    break
+        if not repo:
+            return _dev_unavailable(symbol)
+
+        from routers.pre_listing import _fetch_github_activity
+        gh = await _fetch_github_activity(repo)
+        if not gh:
+            return _dev_unavailable(symbol)
+        return {
+            "symbol": symbol,
+            "commits_30d": gh.get("commits_30d", 0),
+            "contributors": 0,
+            "stars": gh.get("stars", 0),
+            "rank": 0,
+            "repo": gh.get("repo", ""),
+            "source": "github",
+        }
+    except Exception as exc:
+        logger.debug("dev_activity_fetch_failed", symbol=symbol, error=str(exc))
+        return _dev_unavailable(symbol)
 
 
 def _analyze_whale_accumulation(
