@@ -5,6 +5,7 @@ Extracted from scan.py for modularity. All fetch functions share a single
 HTTP client and klines cache with per-timeframe TTL.
 """
 import asyncio
+import os
 import time
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -122,12 +123,71 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
 
 @rate_limit(max_concurrent=15, min_delay=0.05)
 async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Optional[pd.DataFrame]:
-    """Fetch OHLCV from Deriv WebSocket — for synthetic indices."""
+    """Fetch OHLCV from Deriv WebSocket — for synthetic indices.
+    Fallback : DERIV_PROXY_URL (relais HTTP, ex. Cloudflare Worker) si le
+    WS direct est bloqué (IP datacenter refusée par Deriv → 520)."""
     import websockets
     import json as _json
     deriv_sym = SYMBOL_TO_DERIV.get(symbol)
     if not deriv_sym:
         return None
+
+    df = await _deriv_klines_ws(deriv_sym, interval, limit)
+    if df is not None:
+        return df
+    return await _deriv_klines_proxy(deriv_sym, interval, limit)
+
+
+async def _deriv_klines_proxy(deriv_sym: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
+    """Fallback via relais HTTP DERIV_PROXY_URL (CF Worker)."""
+    proxy_url = os.environ.get("DERIV_PROXY_URL")
+    if not proxy_url:
+        return None
+    granularity = TF_TO_DERIV_GRANULARITY.get(interval, 3600)
+    cache_key = f"derivproxy:{deriv_sym}:{granularity}:{limit}"
+    now = time.monotonic()
+    if cache_key in _klines_cache:
+        ts, df = _klines_cache[cache_key]
+        if now - ts < _get_cache_ttl(interval):
+            return df
+    try:
+        headers = {}
+        relay_key = os.environ.get("DERIV_PROXY_KEY")
+        if relay_key:
+            headers["X-Relay-Key"] = relay_key
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"{proxy_url.rstrip('/')}/candles",
+                params={"symbol": deriv_sym, "granularity": granularity, "count": limit},
+                headers=headers,
+            )
+            r.raise_for_status()
+            candles_raw = r.json().get("candles") or []
+        if not candles_raw:
+            return None
+        df = pd.DataFrame([
+            {
+                "time":   c["epoch"],
+                "open":   float(c["open"]),
+                "high":   float(c["high"]),
+                "low":    float(c["low"]),
+                "close":  float(c["close"]),
+                "volume": float(c["high"]) - float(c["low"]),
+            }
+            for c in candles_raw
+        ])
+        _klines_cache[cache_key] = (time.monotonic(), df)
+        logger.info("deriv_klines_via_proxy", symbol=deriv_sym, rows=len(df))
+        return df
+    except Exception as exc:
+        logger.warning("deriv_proxy_error", symbol=deriv_sym, error=str(exc))
+        return None
+
+
+async def _deriv_klines_ws(deriv_sym: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
+    """WS direct vers Deriv (originale)."""
+    import websockets
+    import json as _json
 
     granularity = TF_TO_DERIV_GRANULARITY.get(interval, 3600)
     cache_key   = f"deriv:{deriv_sym}:{granularity}:{limit}"
@@ -137,7 +197,7 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
         if now - ts < _get_cache_ttl(interval):
             return df
 
-    ws_url = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+    ws_url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
     payload = {
         "ticks_history": deriv_sym,
         "adjust_start_time": 1,
@@ -171,7 +231,7 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
         _klines_cache[cache_key] = (time.monotonic(), df)
         return df
     except Exception as exc:
-        logger.warning("deriv_klines_error", symbol=symbol, error=str(exc))
+        logger.warning("deriv_klines_error", symbol=deriv_sym, error=str(exc))
         return None
 
 
