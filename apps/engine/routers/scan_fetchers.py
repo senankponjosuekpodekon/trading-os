@@ -126,8 +126,6 @@ async def fetch_deriv_klines(symbol: str, interval: str, limit: int = 300) -> Op
     """Fetch OHLCV from Deriv WebSocket — for synthetic indices.
     Fallback : DERIV_PROXY_URL (relais HTTP, ex. Cloudflare Worker) si le
     WS direct est bloqué (IP datacenter refusée par Deriv → 520)."""
-    import websockets
-    import json as _json
     deriv_sym = SYMBOL_TO_DERIV.get(symbol)
     if not deriv_sym:
         return None
