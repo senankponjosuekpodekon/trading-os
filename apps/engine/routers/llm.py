@@ -736,7 +736,11 @@ def _build_chat_system_prompt(req: ChatRequest) -> str:
         "Tu es Trading Copilot, un assistant trading professionnel. "
         "Réponds de manière concise, factuelle et actionnable en français. "
         "Tu peux expliquer des signaux, aider à lire les indicateurs, discuter de gestion du risque, "
-        "et proposer des idées de stratégies. Ne donne pas de conseils financiers réglementés."
+        "et proposer des idées de stratégies. Ne donne pas de conseils financiers réglementés. "
+        "Tu as des outils pour consulter les données live de la plateforme "
+        "(prix actuels, derniers signaux, détail d'un signal, régime de marché, "
+        "statistiques de performance) — utilise-les quand la question porte sur "
+        "des données récentes ou spécifiques plutôt que d'inventer des chiffres."
     )
     ctx_parts = []
     if req.asset:
@@ -776,6 +780,58 @@ def _build_chat_system_prompt(req: ChatRequest) -> str:
     return base + "\n\n" + "\n".join(ctx_parts) + "\n\n" + "Utilise ce contexte pour affiner tes réponses si pertinent."
 
 
+async def _chat_with_tools(messages: List[dict], max_tokens: int = 500, max_rounds: int = 3):
+    """Chat avec function calling : le LLM peut interroger les données live
+    (prix, signaux, régime, stats) via les tools de routers.llm_tools.
+
+    Boucle : completion → tool_calls ? exécute + append résultats → re-call.
+    Fallback sans tools si le provider ne les supporte pas.
+    """
+    from openai import AsyncOpenAI
+    from routers.llm_tools import TOOLS, run_tool
+
+    cfg = await _get_llm_config()
+    ollama_enabled = bool(cfg.get("ollamaEnabled", True)) and bool(OLLAMA_BASE_URL)
+    openai_enabled = bool(cfg.get("openaiEnabled", True)) and bool(OPENAI_API_KEY)
+    preferred = cfg.get("preferred", "openai")
+
+    clients = []
+    if openai_enabled:
+        clients.append(("openai", OPENAI_MODEL,
+                        AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, timeout=45.0)))
+    if ollama_enabled:
+        clients.append(("ollama", OLLAMA_MODEL,
+                        AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama",
+                                    timeout=OLLAMA_TIMEOUT_S, default_headers=_OLLAMA_CF_HEADERS or None)))
+    if preferred == "ollama":
+        clients.reverse()
+
+    for provider, model, client in clients:
+        try:
+            msgs = list(messages)
+            for _ in range(max_rounds):
+                response = await client.chat.completions.create(
+                    model=model, messages=msgs, tools=TOOLS, tool_choice="auto",
+                    max_tokens=max_tokens, temperature=0.7,
+                )
+                msg = response.choices[0].message
+                if not getattr(msg, "tool_calls", None):
+                    return (msg.content or "").strip(), provider, model
+                msgs.append(msg.model_dump(exclude_unset=True))
+                for tc in msg.tool_calls:
+                    result = await run_tool(tc.function.name, tc.function.arguments)
+                    msgs.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            # Max rounds atteint → dernière completion SANS tools pour forcer la synthèse
+            final = await client.chat.completions.create(
+                model=model, messages=msgs, max_tokens=max_tokens, temperature=0.7,
+            )
+            return (final.choices[0].message.content or "").strip(), provider, model
+        except Exception:
+            continue  # provider suivant
+
+    return None, "mock", "mock"
+
+
 @router.post("/llm/chat")
 async def chat(req: ChatRequest):
     system = _build_chat_system_prompt(req)
@@ -794,7 +850,10 @@ async def chat(req: ChatRequest):
 
     messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
 
-    reply, provider, model = await _call_llm_with_fallback(messages=messages, max_tokens=500)
+    reply, provider, model = await _chat_with_tools(messages, max_tokens=500)
+    if reply is None:
+        # Tools non supportés par le provider → chat classique
+        reply, provider, model = await _call_llm_with_fallback(messages=messages, max_tokens=500)
     if provider == "mock":
         reply = _mock_chat_response(req.message, error="ollama_openai_unavailable")
     return {"reply": reply, "model": model, "provider": provider, "language": req.language}
