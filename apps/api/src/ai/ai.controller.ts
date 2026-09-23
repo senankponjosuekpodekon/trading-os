@@ -95,7 +95,8 @@ export class AiController {
   @Post('chat')
   async chat(@Request() req: any, @Body() body: any) {
     const q = await this.consumeQuota(req);
-    const res = await this.ai.chat(body);
+    // user_id injecté serveur-side — écrase toute valeur client (anti-spoofing)
+    const res = await this.ai.chat({ ...body, user_id: req.user.id });
     return { ...res, quota: { remaining: q.remaining, limit: q.limit } };
   }
 

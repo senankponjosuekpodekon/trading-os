@@ -65,7 +65,8 @@ class SentimentRequest(BaseModel):
 
 @router.post("/ml/finbert-sentiment")
 async def finbert_sentiment(body: SentimentRequest):
-    from ml.finbert_sentiment import analyze_sentiment, analyze_batch, aggregate_sentiment, get_sentiment_bonus
+    from ml.finbert_sentiment import analyze_sentiment, analyze_batch, aggregate_sentiment, get_sentiment_bonus, _TRANSFORMERS_AVAILABLE
+    engine = "finbert" if _TRANSFORMERS_AVAILABLE else "heuristic"
 
     if body.texts and len(body.texts) > 0:
         results = analyze_batch(body.texts)
@@ -73,6 +74,7 @@ async def finbert_sentiment(body: SentimentRequest):
         bonus = get_sentiment_bonus(agg["overall_label"], agg["overall_score"])
         return {
             "mode": "batch",
+            "engine": engine,
             "aggregate": agg,
             "sentiment_bonus": round(bonus, 2),
             "items": [
@@ -85,6 +87,7 @@ async def finbert_sentiment(body: SentimentRequest):
         bonus = get_sentiment_bonus(result.label, result.score)
         return {
             "mode": "single",
+            "engine": engine,
             "label": result.label,
             "score": result.score,
             "confidence": result.confidence,

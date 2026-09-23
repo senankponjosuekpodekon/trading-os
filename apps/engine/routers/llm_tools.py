@@ -80,10 +80,18 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_portfolio",
+            "description": "Portfolio de l'utilisateur connecté : capital, positions ouvertes (symbole, direction, entry, qty, PnL).",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
-async def run_tool(name: str, arguments_json: str) -> str:
+async def run_tool(name: str, arguments_json: str, ctx: Optional[Dict[str, Any]] = None) -> str:
     """Exécute un tool et retourne le résultat sérialisé (string) pour le LLM."""
     try:
         args = json.loads(arguments_json) if arguments_json else {}
@@ -100,6 +108,13 @@ async def run_tool(name: str, arguments_json: str) -> str:
             result = await _get_market_regime(args.get("symbol", "BTC/USDT"))
         elif name == "get_signal_stats":
             result = await _get_signal_stats()
+        elif name == "get_portfolio":
+            # user_id vient du ctx injecté serveur-side — jamais des args LLM
+            uid = (ctx or {}).get("user_id")
+            if not uid:
+                result = {"error": "utilisateur non identifié"}
+            else:
+                result = await _get_portfolio(uid)
         else:
             result = {"error": f"unknown tool {name}"}
     except Exception as exc:
@@ -235,6 +250,47 @@ async def _get_market_regime(symbol: str) -> Dict[str, Any]:
     for r in regimes[-30:]:
         counts[r] = counts.get(r, 0) + 1
     return {"symbol": symbol, "regime": regimes[-1], "last_30d": counts}
+
+
+async def _get_portfolio(user_id: str) -> Dict[str, Any]:
+    pool = await get_shared_pool()
+    async with pool.acquire() as conn:
+        portfolios = await conn.fetch(
+            """SELECT id, name, type, currency, "initialCapital", "currentCapital"
+               FROM portfolios WHERE "userId" = $1""",
+            user_id,
+        )
+        if not portfolios:
+            return {"portfolios": [], "detail": "aucun portfolio"}
+        positions = await conn.fetch(
+            """SELECT p.id, a.symbol, p.direction, p.status, p."entryPrice",
+                      p.quantity, p.pnl, p."pnlPercent", pf.name AS portfolio_name
+               FROM positions p
+               JOIN portfolios pf ON pf.id = p."portfolioId"
+               JOIN assets a ON a.id = p."assetId"
+               WHERE pf."userId" = $1 AND p.status = 'OPEN'""",
+            user_id,
+        )
+    return {
+        "portfolios": [
+            {
+                "name": p["name"], "type": p["type"], "currency": p["currency"],
+                "capital": float(p["currentCapital"]),
+                "initial_capital": float(p["initialCapital"]),
+            }
+            for p in portfolios
+        ],
+        "open_positions": [
+            {
+                "symbol": r["symbol"], "direction": r["direction"],
+                "entry": float(r["entryPrice"]), "quantity": float(r["quantity"]),
+                "pnl": float(r["pnl"]) if r["pnl"] else None,
+                "pnl_pct": r["pnlPercent"],
+                "portfolio": r["portfolio_name"],
+            }
+            for r in positions
+        ],
+    }
 
 
 async def _get_signal_stats() -> Dict[str, Any]:

@@ -172,6 +172,7 @@ class ChatRequest(BaseModel):
     asset:          Optional[str] = None
     signal_context: Optional[dict] = None
     market_context: Optional[dict] = None
+    user_id:        Optional[str] = None  # injecté serveur-side par l'API (JWT)
 
 
 def _build_signal_prompt(req: ExplainRequest) -> str:
@@ -780,7 +781,7 @@ def _build_chat_system_prompt(req: ChatRequest) -> str:
     return base + "\n\n" + "\n".join(ctx_parts) + "\n\n" + "Utilise ce contexte pour affiner tes réponses si pertinent."
 
 
-async def _chat_with_tools(messages: List[dict], max_tokens: int = 500, max_rounds: int = 3):
+async def _chat_with_tools(messages: List[dict], max_tokens: int = 500, max_rounds: int = 3, ctx: Optional[dict] = None):
     """Chat avec function calling : le LLM peut interroger les données live
     (prix, signaux, régime, stats) via les tools de routers.llm_tools.
 
@@ -808,28 +809,58 @@ async def _chat_with_tools(messages: List[dict], max_tokens: int = 500, max_roun
 
     for provider, model, client in clients:
         try:
+            usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             msgs = list(messages)
             for _ in range(max_rounds):
                 response = await client.chat.completions.create(
                     model=model, messages=msgs, tools=TOOLS, tool_choice="auto",
                     max_tokens=max_tokens, temperature=0.7,
                 )
+                u = getattr(response, "usage", None)
+                if u:
+                    usage["prompt_tokens"] += getattr(u, "prompt_tokens", 0) or 0
+                    usage["completion_tokens"] += getattr(u, "completion_tokens", 0) or 0
+                    usage["total_tokens"] += getattr(u, "total_tokens", 0) or 0
                 msg = response.choices[0].message
                 if not getattr(msg, "tool_calls", None):
-                    return (msg.content or "").strip(), provider, model
+                    return (msg.content or "").strip(), provider, model, usage
                 msgs.append(msg.model_dump(exclude_unset=True))
                 for tc in msg.tool_calls:
-                    result = await run_tool(tc.function.name, tc.function.arguments)
+                    result = await run_tool(tc.function.name, tc.function.arguments, ctx=ctx)
                     msgs.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             # Max rounds atteint → dernière completion SANS tools pour forcer la synthèse
             final = await client.chat.completions.create(
                 model=model, messages=msgs, max_tokens=max_tokens, temperature=0.7,
             )
-            return (final.choices[0].message.content or "").strip(), provider, model
+            u = getattr(final, "usage", None)
+            if u:
+                usage["prompt_tokens"] += getattr(u, "prompt_tokens", 0) or 0
+                usage["completion_tokens"] += getattr(u, "completion_tokens", 0) or 0
+                usage["total_tokens"] += getattr(u, "total_tokens", 0) or 0
+            return (final.choices[0].message.content or "").strip(), provider, model, usage
         except Exception:
             continue  # provider suivant
 
-    return None, "mock", "mock"
+    return None, "mock", "mock", None
+
+
+async def _log_llm_usage(user_id: Optional[str], endpoint: str, provider: str,
+                         model: str, usage: dict) -> None:
+    """Best-effort : persiste la conso tokens dans llm_usage."""
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO llm_usage (user_id, endpoint, provider, model,
+                                          prompt_tokens, completion_tokens, total_tokens)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+                user_id, endpoint, provider, model,
+                int(usage.get("prompt_tokens", 0)),
+                int(usage.get("completion_tokens", 0)),
+                int(usage.get("total_tokens", 0)),
+            )
+    except Exception:
+        pass  # table absente ou DB down → on ne bloque pas le chat
 
 
 @router.post("/llm/chat")
@@ -850,13 +881,17 @@ async def chat(req: ChatRequest):
 
     messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
 
-    reply, provider, model = await _chat_with_tools(messages, max_tokens=500)
+    reply, provider, model, usage = await _chat_with_tools(messages, max_tokens=500, ctx={"user_id": req.user_id} if req.user_id else None)
     if reply is None:
         # Tools non supportés par le provider → chat classique
         reply, provider, model = await _call_llm_with_fallback(messages=messages, max_tokens=500)
+        usage = None
     if provider == "mock":
         reply = _mock_chat_response(req.message, error="ollama_openai_unavailable")
-    return {"reply": reply, "model": model, "provider": provider, "language": req.language}
+    if usage:
+        await _log_llm_usage(req.user_id, "chat", provider, model, usage)
+    return {"reply": reply, "model": model, "provider": provider, "language": req.language,
+            "usage": usage or {}}
 
 
 def _mock_chat_response(message: str, error: str = "") -> str:
