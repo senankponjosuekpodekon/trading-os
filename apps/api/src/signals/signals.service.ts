@@ -912,4 +912,82 @@ export class SignalsService {
       },
     };
   }
+
+  /**
+   * Courbe PnL mark-to-market d'un signal, calculée à la volée depuis les
+   * bougies Binance. Rien n'est persisté entre les événements — la courbe
+   * est reconstruite à l'affichage. PnL = 0 avant ENTRY_HIT.
+   */
+  async getPnlCurve(signalId: string) {
+    const signal = await this.prisma.signal.findUnique({
+      where: { id: signalId },
+      include: {
+        asset: true,
+        executionEvents: { orderBy: { candleTime: 'asc' } },
+      },
+    });
+    if (!signal) return { points: [], reason: 'not_found' };
+
+    const SYM_TO_BINANCE: Record<string, string> = {
+      'BTC/USDT': 'BTCUSDT', 'ETH/USDT': 'ETHUSDT', 'SOL/USDT': 'SOLUSDT',
+      'BNB/USDT': 'BNBUSDT', 'AVAX/USDT': 'AVAXUSDT', 'ADA/USDT': 'ADAUSDT',
+      'XRP/USDT': 'XRPUSDT', 'LINK/USDT': 'LINKUSDT', 'DOT/USDT': 'DOTUSDT',
+    };
+    const TF: Record<string, string> = {
+      '1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d',
+    };
+    const TF_MS: Record<string, number> = {
+      '1m': 60_000, '5m': 300_000, '15m': 900_000,
+      '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000,
+    };
+
+    const binSym = SYM_TO_BINANCE[signal.asset.symbol];
+    if (!binSym) return { points: [], reason: 'not_on_binance' };
+
+    const interval = TF[signal.timeframe] ?? '1h';
+    const tfMs = TF_MS[interval] ?? 3_600_000;
+    const entry = signal.entryPrice ? Number(signal.entryPrice) : null;
+    if (!entry) return { points: [], reason: 'no_entry_price' };
+
+    const entryEvt = signal.executionEvents.find(e => e.type === 'ENTRY_HIT');
+    const endEvt = signal.executionEvents.find(e =>
+      ['SL_HIT', 'TP1_HIT', 'TP2_HIT', 'TP3_HIT', 'EXPIRED', 'MANUAL_CLOSE'].includes(e.type),
+    );
+    const start = new Date(signal.createdAt).getTime();
+    const end = endEvt ? new Date(endEvt.candleTime).getTime() + tfMs : Date.now();
+    const spanCandles = Math.floor((end - start) / tfMs) + 1;
+    if (spanCandles > 1000) return { points: [], reason: 'span_too_long' };
+
+    const url = `https://api.binance.com/api/v3/klines?symbol=${binSym}&interval=${interval}&startTime=${start}&endTime=${end}&limit=${Math.min(1000, spanCandles)}`;
+    let klines: any[][];
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) return { points: [], reason: 'binance_error' };
+      klines = await res.json();
+    } catch {
+      return { points: [], reason: 'binance_unreachable' };
+    }
+
+    const dir = signal.signal === 'SELL' ? -1 : 1;
+    const entryTs = entryEvt ? new Date(entryEvt.candleTime).getTime() : null;
+    const points = (klines ?? []).map((k: any[]) => {
+      const t = k[0] as number;
+      const close = parseFloat(k[4]);
+      const active = entryTs !== null && t >= entryTs;
+      return {
+        t: new Date(t).toISOString(),
+        price: close,
+        pnl: active ? parseFloat(((dir * (close - entry)) / entry * 100).toFixed(3)) : 0,
+        active,
+      };
+    });
+
+    return {
+      points,
+      entry,
+      direction: signal.signal,
+      entry_at: entryEvt?.candleTime ?? null,
+      final_pnl_pct: signal.finalPnlPct ? Number(signal.finalPnlPct) : null,
+    };
+  }
 }

@@ -51,12 +51,20 @@ const statusLabel: Record<string, string> = {
 const fmt = (v?: string | number | null) =>
   v == null ? '—' : `$${parseFloat(String(v)).toFixed(2)}`;
 
+interface PnlPoint {
+  t: string;
+  price: number;
+  pnl: number;
+  active: boolean;
+}
+
 export function SignalTrackingSheet({
   signalId, symbol, signal, createdAt, confidence,
   entryPrice, stopLoss, takeProfit1, takeProfit2,
   executionStatus, finalPnlPct, open, onClose,
 }: SignalTrackingSheetProps) {
   const [events, setEvents] = useState<ExecutionEvent[]>([]);
+  const [pnlCurve, setPnlCurve] = useState<PnlPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -68,6 +76,9 @@ export function SignalTrackingSheet({
       .then(res => setEvents(res.data))
       .catch(() => setError('Impossible de charger le suivi'))
       .finally(() => setLoading(false));
+    api.get(`/signals/${signalId}/pnl-curve`)
+      .then(res => setPnlCurve(res.data?.points ?? []))
+      .catch(() => setPnlCurve([]));
   }, [open, signalId]);
 
   if (!open) return null;
@@ -160,6 +171,48 @@ export function SignalTrackingSheet({
             </p>
           )}
         </div>
+
+        {/* Courbe PnL mark-to-market (calculée à la volée depuis Binance) */}
+        {pnlCurve.length > 1 && (() => {
+          const W = 400, H = 90, PAD = 4;
+          const pnls = pnlCurve.map(p => p.pnl);
+          const min = Math.min(...pnls, 0), max = Math.max(...pnls, 0);
+          const range = max - min || 1;
+          const x = (i: number) => PAD + (i / (pnlCurve.length - 1)) * (W - 2 * PAD);
+          const y = (v: number) => H - PAD - ((v - min) / range) * (H - 2 * PAD);
+          const active = pnlCurve.filter(p => p.active);
+          const polyline = pnlCurve
+            .map((p, i) => (p.active ? `${x(i)},${y(p.pnl)}` : null))
+            .filter(Boolean)
+            .join(' ');
+          const last = active[active.length - 1];
+          const zeroY = y(0);
+          const color = (last?.pnl ?? 0) >= 0 ? '#34d399' : '#f87171';
+          return (
+            <div className="mb-6 p-4 rounded-xl border border-gray-800 bg-gray-950">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-500">Évolution PnL</p>
+                {last && (
+                  <span className={`text-sm font-bold ${last.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {last.pnl >= 0 ? '+' : ''}{last.pnl.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-24">
+                <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="#374151" strokeDasharray="3 3" strokeWidth="1" />
+                {active.length > 1 && (
+                  <polyline points={polyline} fill="none" stroke={color} strokeWidth="1.5" />
+                )}
+                {last && <circle cx={x(pnlCurve.length - 1)} cy={y(last.pnl)} r="3" fill={color} />}
+              </svg>
+              <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+                <span>{min.toFixed(1)}%</span>
+                <span>{new Date(pnlCurve[0].t).toLocaleDateString('fr-FR')}</span>
+                <span>+{max.toFixed(1)}%</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {loading && <p className="text-sm text-gray-500">Chargement…</p>}
         {error && <p className="text-sm text-red-400">{error}</p>}

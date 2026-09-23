@@ -215,6 +215,12 @@ export class SignalsController {
     return this.executionService.getTimeline(id);
   }
 
+  @Get(':id/pnl-curve')
+  @UseGuards(JwtAuthGuard)
+  async getPnlCurve(@Param('id') id: string) {
+    return this.signalsService.getPnlCurve(id);
+  }
+
   @Post('track/backfill')
   @UseGuards(EngineKeyGuard)
   async backfillTracking() {
