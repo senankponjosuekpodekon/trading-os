@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import os
 import time
 import hashlib
@@ -18,8 +18,18 @@ DATABASE_URL = settings.database_url
 LLM_PROVIDER    = (settings.llm_provider or os.getenv("LLM_PROVIDER", "openai")).lower()   # "openai" | "ollama"
 OPENAI_API_KEY  = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL    = settings.openai_model or os.getenv("OPENAI_MODEL", "gpt-4o")
+# Groq et autres providers OpenAI-compatibles gratuits
+OPENAI_BASE_URL = settings.openai_base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OLLAMA_BASE_URL = settings.ollama_base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = settings.ollama_model or os.getenv("OLLAMA_MODEL", "llama3.2")
+
+# Cloudflare Access — Ollama exposé via Zero Trust (ollama.stiamond.net)
+_OLLAMA_CF_HEADERS: Dict[str, str] = {}
+if settings.ollama_cf_client_id and settings.ollama_cf_client_secret:
+    _OLLAMA_CF_HEADERS = {
+        "CF-Access-Client-Id": settings.ollama_cf_client_id,
+        "CF-Access-Client-Secret": settings.ollama_cf_client_secret,
+    }
 
 # ── Pool DB (lecture system_settings + cache llm_cache) ─────────────
 
@@ -558,7 +568,12 @@ async def _call_llm_with_fallback(
     preferred = cfg.get("preferred", "openai")
 
     async def _try_ollama():
-        client = AsyncOpenAI(base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama", timeout=OLLAMA_TIMEOUT_S)
+        client = AsyncOpenAI(
+            base_url=f"{OLLAMA_BASE_URL}/v1",
+            api_key="ollama",
+            timeout=OLLAMA_TIMEOUT_S,
+            default_headers=_OLLAMA_CF_HEADERS or None,
+        )
         response = await client.chat.completions.create(
             model=OLLAMA_MODEL,
             messages=messages,
@@ -568,7 +583,7 @@ async def _call_llm_with_fallback(
         return response.choices[0].message.content.strip(), "ollama", OLLAMA_MODEL
 
     async def _try_openai():
-        client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=30.0)
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, timeout=30.0)
         response = await client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
@@ -809,7 +824,7 @@ async def llm_health():
         try:
             import httpx
             async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
+                resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags", headers=_OLLAMA_CF_HEADERS or None)
                 if resp.status_code != 200:
                     provider = "mock"
         except Exception:

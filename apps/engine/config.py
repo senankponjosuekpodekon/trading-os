@@ -54,9 +54,12 @@ class Settings(BaseSettings):
     # ── AI / LLM ───────────────────────────────────────────────────
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o", validation_alias="OPENAI_MODEL")
+    openai_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="OPENAI_BASE_URL")
     llm_provider: str = Field(default="openai", validation_alias="LLM_PROVIDER")
     ollama_base_url: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="llama3.2", validation_alias="OLLAMA_MODEL")
+    ollama_cf_client_id: str = Field(default="", validation_alias="OLLAMA_CF_ACCESS_CLIENT_ID")
+    ollama_cf_client_secret: str = Field(default="", validation_alias="OLLAMA_CF_ACCESS_CLIENT_SECRET")
 
     # ── News / Sentiment ────────────────────────────────────────────
     news_api_key: str = Field(default="", validation_alias="NEWS_API_KEY")
