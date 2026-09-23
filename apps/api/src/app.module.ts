@@ -48,6 +48,7 @@ import { AdminModule } from './admin/admin.module';
 import { ReportsModule } from './reports/reports.module';
 import { LoggerModule } from './logger/logger.module';
 import { MailModule } from './mail/mail.module';
+import { WaitlistModule } from './waitlist/waitlist.module';
 
 @Module({
   imports: [
@@ -102,6 +103,7 @@ import { MailModule } from './mail/mail.module';
     ReportsModule,
     LoggerModule,
     MailModule,
+    WaitlistModule,
   ],
   controllers: [AppController],
   providers: [

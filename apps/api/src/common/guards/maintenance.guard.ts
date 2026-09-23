@@ -7,8 +7,9 @@ import { ApplicationException } from '../errors/application.exception';
 import { ErrorCode } from '../errors/error-codes';
 
 // Routes toujours accessibles en maintenance : auth (login), health,
-// admin (pour pouvoir désactiver le mode — protégées par leurs guards)
-const ALLOWED_PATHS = [/^\/api\/auth\//, /^\/api\/health/, /^\/api\/admin\//];
+// admin (pour pouvoir désactiver le mode — protégées par leurs guards),
+// waitlist (formulaire public de la page maintenance)
+const ALLOWED_PATHS = [/^\/api\/auth\//, /^\/api\/health/, /^\/api\/admin\//, /^\/api\/waitlist/];
 
 @Injectable()
 export class MaintenanceGuard implements CanActivate {

@@ -26,6 +26,16 @@ export class MailService {
     }
   }
 
+  async send(to: string, subject: string, text: string, html?: string) {
+    const from = this.config.get<string>('SMTP_FROM') ?? 'noreply@trading-os.local';
+    if (this.transporter) {
+      await this.transporter.sendMail({ from, to, subject, text, html });
+      return { sent: true };
+    }
+    this.logger.warn({ to, subject }, 'Email not sent (SMTP disabled)');
+    return { sent: false, reason: 'SMTP not configured' };
+  }
+
   async sendPasswordReset(email: string, resetUrl: string) {
     const from = this.config.get<string>('SMTP_FROM') ?? 'noreply@trading-os.local';
     const appName = 'Trading OS';

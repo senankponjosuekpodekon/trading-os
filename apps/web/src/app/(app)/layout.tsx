@@ -13,6 +13,7 @@ const TITLES: [string, string][] = [
   ['/admin/users', 'Gestion des utilisateurs'],
   ['/admin/logs', 'Logs système'],
   ['/admin/ops', 'Gestion des crons'],
+  ['/admin/waitlist', 'Waitlist maintenance'],
   ['/admin', 'Admin Dashboard'],
   ['/signals', 'Signaux'],
   ['/scientific-backtest', 'Scientific Backtest'],

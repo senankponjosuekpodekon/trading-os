@@ -816,3 +816,18 @@ model AssetConfig {
   @@index([marketType])
   @@map("asset_config")
 }
+
+model WaitlistEntry {
+  id           String    @id @default(cuid())
+  name         String
+  email        String
+  phone        String?
+  opinion      String?   // ce qu'il pense de la solution
+  contribution String?   // ce qu'il pourrait apporter
+  objectives   String?   // ses objectifs
+  contactedAt  DateTime? @map("contacted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([email])
+  @@map("waitlist_entries")
+}

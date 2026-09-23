@@ -95,6 +95,7 @@ const groups: NavGroup[] = [
       { href: '/admin',                  label: 'Admin',         icon: ShieldAlert, adminOnly: true },
       { href: '/admin/users',            label: 'Utilisateurs',  icon: Users,       adminOnly: true },
       { href: '/admin/ops',              label: 'Ops Système',   icon: Activity,    adminOnly: true },
+      { href: '/admin/waitlist',         label: 'Waitlist',      icon: Users,       adminOnly: true },
       { href: '/channels',               label: 'Canaux',        icon: Radio },
       { href: '/settings/exchanges',     label: 'Exchanges',     icon: Key },
       { href: '/settings/distribution',  label: 'Distribution',  icon: Send },
