@@ -5,6 +5,7 @@ import { CandleRepository, Candle as RepoCandle } from './candle.repository';
 import { resolveIntrabarOrder, Candle, Direction, PriceLevels, TouchType } from './intrabar-resolution';
 import { deriveSignalOutcome, computeMaxAdverseExcursion, SignalExecutionStatus } from './signal-status';
 import { SignalExecutionStatus as PrismaSignalExecutionStatus } from '@prisma/client';
+import { FeatureStoreService } from './feature-store.service';
 
 const DEFAULT_PARTIAL_EXIT_PCT = 33.3;
 
@@ -16,6 +17,7 @@ export class SignalTrackerService {
     private readonly prisma: PrismaService,
     @Inject('CandleRepository') private readonly candles: CandleRepository,
     private readonly executionService: SignalExecutionService,
+    private readonly featureStore: FeatureStoreService,
   ) {}
 
   async processActiveSignals(limit = 200): Promise<void> {
@@ -74,6 +76,7 @@ export class SignalTrackerService {
             data: { signalId, type: 'EXPIRED', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe },
           });
           await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'EXPIRED', lastProcessedCandle: new Date(candle.openTime) } });
+          await this.featureStore.attachOutcome(signalId, 'EXPIRED', null);
           return;
         }
 
@@ -150,5 +153,18 @@ export class SignalTrackerService {
         maxFavorableExcursionPct: mfe,
       },
     });
+
+    // Propage l'outcome vers signal_features pour l'entraînement ML —
+    // le scorer n'apprend que sur WIN_TP1/WIN_TP2/LOSS_SL
+    const types = updated.executionEvents.map((e) => e.type);
+    const label =
+      outcome.status === 'CLOSED_WIN'
+        ? types.some((t) => t === 'TP2_HIT' || t === 'TP3_HIT') ? 'WIN_TP2' : 'WIN_TP1'
+        : outcome.status === 'CLOSED_LOSS' ? 'LOSS_SL'
+        : outcome.status === 'EXPIRED' ? 'EXPIRED'
+        : null;
+    if (label) {
+      await this.featureStore.attachOutcome(signalId, label, outcome.pnlPct);
+    }
   }
 }

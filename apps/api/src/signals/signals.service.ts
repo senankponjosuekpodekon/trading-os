@@ -185,6 +185,16 @@ export class SignalsService {
     });
   }
 
+  // Le modèle de régime vit en cache fichier dans le conteneur engine —
+  // perdu à chaque restart. Re-entraînement quotidien via Binance.
+  @Cron('20 */12 * * *', { timeZone: 'UTC' })
+  async scheduledRegimeTraining() {
+    await this._run('ML_REGIME_TRAINING_ENABLED', async () => {
+      await this.engineHttp.post('/ml/regime/auto-train', {}, { timeout: 60_000 });
+      this.health.recordCronRun('regime-training', 'ok');
+    });
+  }
+
   /**
    * Scan all active assets grouped by strategy analysisTimeframe.
    * Each strategy defines its own analysisTimeframe (e.g. '4h', '1d', '15m').

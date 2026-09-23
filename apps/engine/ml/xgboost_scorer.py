@@ -345,6 +345,12 @@ class XGBoostSignalScorer:
         dataset = []
         for row in records:
             features = row["features_json"]
+            # asyncpg renvoie le jsonb en str — parser avant de filtrer
+            if isinstance(features, str):
+                try:
+                    features = json.loads(features)
+                except (json.JSONDecodeError, TypeError):
+                    continue
             if not isinstance(features, dict):
                 continue
             dataset.append({
