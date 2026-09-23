@@ -12,8 +12,10 @@ interface TrackingSignal {
   entryPrice: string | null;
   stopLoss: string | null;
   takeProfit1: string | null;
+  takeProfit2: string | null;
   executionStatus: string;
   finalPnlPct: string | null;
+  createdAt: string;
   asset: { symbol: string };
   executionEvents: { id: string }[];
 }
@@ -119,6 +121,14 @@ export function SignalTrackingView() {
           signalId={selected.id}
           symbol={selected.asset.symbol}
           signal={selected.signal}
+          createdAt={selected.createdAt}
+          confidence={selected.confidence}
+          entryPrice={selected.entryPrice}
+          stopLoss={selected.stopLoss}
+          takeProfit1={selected.takeProfit1}
+          takeProfit2={selected.takeProfit2}
+          executionStatus={selected.executionStatus}
+          finalPnlPct={selected.finalPnlPct}
           open={!!selected}
           onClose={() => setSelected(null)}
         />

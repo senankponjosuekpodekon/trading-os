@@ -51,7 +51,7 @@ export default function CopilotPage() {
       const sig = latestSignal?.data?.[0];
       if (useContext && sig) {
         payload.asset = sig.asset?.symbol;
-        payload.signal_context = { symbol: sig.asset?.symbol, signal: sig.signal, confidence: sig.confidence, timeframe: sig.timeframe, entry_price: sig.entryPrice, stop_loss: sig.stopLoss, take_profit_1: sig.takeProfit1, risk_reward: sig.riskReward, ...(sig.metadata as any ?? {}) };
+        payload.signal_context = { id: sig.id, symbol: sig.asset?.symbol, signal: sig.signal, confidence: sig.confidence, timeframe: sig.timeframe, entry_price: sig.entryPrice, stop_loss: sig.stopLoss, take_profit_1: sig.takeProfit1, risk_reward: sig.riskReward, ...(sig.metadata as any ?? {}) };
         payload.market_context = (sig.metadata as any)?.marketContext;
       }
       const { data } = await api.post('/ai/chat', payload);

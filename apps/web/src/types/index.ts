@@ -138,6 +138,8 @@ export interface Signal {
   riskReward?: number;
   profileSuitability?: string[];
   status?: string;
+  executionStatus?: string;
+  finalPnlPct?: string | null;
   explanation?: string;
   createdAt: string;
   asset?: { symbol: string; name: string };

@@ -805,6 +805,14 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
         signalId={signal.id}
         symbol={signal.asset?.symbol ?? '—'}
         signal={signal.signal}
+        createdAt={signal.createdAt}
+        confidence={signal.confidence}
+        entryPrice={signal.entryPrice}
+        stopLoss={signal.stopLoss}
+        takeProfit1={signal.takeProfit1}
+        takeProfit2={signal.takeProfit2}
+        executionStatus={signal.executionStatus}
+        finalPnlPct={signal.finalPnlPct}
         open={showTracking}
         onClose={() => setShowTracking(false)}
       />
