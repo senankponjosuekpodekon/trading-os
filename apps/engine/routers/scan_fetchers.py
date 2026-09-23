@@ -183,9 +183,8 @@ async def _deriv_klines_proxy(deriv_sym: str, interval: str, limit: int) -> Opti
 
 
 async def _deriv_klines_ws(deriv_sym: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
-    """WS direct vers Deriv (originale)."""
-    import websockets
-    import json as _json
+    """OHLCV Deriv via la connexion WS partagée (utils.deriv_client)."""
+    from utils.deriv_client import deriv_client
 
     granularity = TF_TO_DERIV_GRANULARITY.get(interval, 3600)
     cache_key   = f"deriv:{deriv_sym}:{granularity}:{limit}"
@@ -195,7 +194,6 @@ async def _deriv_klines_ws(deriv_sym: str, interval: str, limit: int) -> Optiona
         if now - ts < _get_cache_ttl(interval):
             return df
 
-    ws_url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
     payload = {
         "ticks_history": deriv_sym,
         "adjust_start_time": 1,
@@ -205,32 +203,27 @@ async def _deriv_klines_ws(deriv_sym: str, interval: str, limit: int) -> Optiona
         "style": "candles",
     }
 
-    try:
-        async with websockets.connect(ws_url, ping_interval=None) as ws:
-            await ws.send(_json.dumps(payload))
-            raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
-            data = _json.loads(raw)
-
-        if "error" in data or "candles" not in data:
-            return None
-
-        candles_raw = data["candles"]
-        df = pd.DataFrame([
-            {
-                "time":   c["epoch"],
-                "open":   float(c["open"]),
-                "high":   float(c["high"]),
-                "low":    float(c["low"]),
-                "close":  float(c["close"]),
-                "volume": float(c["high"]) - float(c["low"]),
-            }
-            for c in candles_raw
-        ])
-        _klines_cache[cache_key] = (time.monotonic(), df)
-        return df
-    except Exception as exc:
-        logger.warning("deriv_klines_error", symbol=deriv_sym, error=str(exc))
+    data = await deriv_client.request(payload, timeout=8.0)
+    if "error" in data:
+        logger.warning("deriv_klines_error", symbol=deriv_sym, error=data["error"].get("message", "?"))
         return None
+    if "candles" not in data:
+        return None
+
+    candles_raw = data["candles"]
+    df = pd.DataFrame([
+        {
+            "time":   c["epoch"],
+            "open":   float(c["open"]),
+            "high":   float(c["high"]),
+            "low":    float(c["low"]),
+            "close":  float(c["close"]),
+            "volume": float(c["high"]) - float(c["low"]),
+        }
+        for c in candles_raw
+    ])
+    _klines_cache[cache_key] = (time.monotonic(), df)
+    return df
 
 
 @rate_limit(max_concurrent=8, min_delay=0.1)

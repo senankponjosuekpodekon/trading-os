@@ -1,8 +1,8 @@
 /**
  * Deriv candles relay — Cloudflare Worker.
  *
- * Le VPS de Trading OS est bloqué par Deriv (HTTP 520 sur tous les frontaux WS).
- * Ce Worker sort depuis les edge IPs Cloudflare → Deriv accepte.
+ * Les anciens frontaux Deriv (ws.binaryws.com / ws.derivws.com) sont morts (HTTP 520).
+ * Ce Worker sert de relais vers le nouvel endpoint public api.derivws.com.
  *
  * GET /candles?symbol=R_75&granularity=3600&count=300
  *   → { "candles": [{epoch, open, high, low, close}, ...] }
@@ -48,7 +48,7 @@ export default {
 
 async function fetchDerivCandles(symbol, granularity, count) {
   // WebSocket sortant via fetch upgrade (supporté dans Workers)
-  const resp = await fetch('https://ws.derivws.com/websockets/v3?app_id=1089', {
+  const resp = await fetch('https://api.derivws.com/trading/v1/options/ws/public', {
     headers: { Upgrade: 'websocket' },
   });
   const ws = resp.webSocket;

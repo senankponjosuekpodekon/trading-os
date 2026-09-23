@@ -1,7 +1,8 @@
 """
 Deriv Router — Connecteur Deriv API (WebSocket) + stratégie V75 Scalp
 Actif : Volatility 75 Index (V75 / R_75)
-API Deriv : wss://ws.binaryws.com/websockets/v3
+API Deriv : wss://api.derivws.com/trading/v1/options/ws/public
+(les anciens frontaux ws.binaryws.com / ws.derivws.com retournent HTTP 520)
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -10,17 +11,16 @@ import asyncio
 import json
 import os
 import time
-import websockets
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 
 from risk.engine import get_risk_engine
 from risk.discipline_controller import TradeDecision
+from utils.deriv_client import deriv_client
 
 router = APIRouter()
 
-DERIV_WS_URL  = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
 DERIV_TOKEN   = os.getenv("DERIV_API_TOKEN", "")
 V75_SYMBOL    = "R_75"   # Volatility 75 Index
 V75_GRANULARITY = 60     # 1 minute en secondes
@@ -178,16 +178,8 @@ def _v75_scalp_strategy(candles: list) -> dict:
 
 # ── Fonctions API Deriv ──────────────────────────────────────
 async def _deriv_request(payload: dict, timeout: float = 10.0) -> dict:
-    """Envoie une requête à l'API Deriv et retourne la réponse."""
-    try:
-        async with websockets.connect(DERIV_WS_URL, ping_interval=None) as ws:
-            await ws.send(json.dumps(payload))
-            raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
-            return json.loads(raw)
-    except asyncio.TimeoutError:
-        return {"error": {"message": "Timeout API Deriv"}}
-    except Exception as e:
-        return {"error": {"message": str(e)}}
+    """Requête Deriv via la connexion WS partagée (utils.deriv_client)."""
+    return await deriv_client.request(payload, timeout=timeout)
 
 
 # Deriv a renommé certains indices legacy côté API (suffixe "N") sans changer
@@ -198,6 +190,70 @@ _DERIV_WIRE_ALIASES = {"BOOM300": "BOOM300N", "CRASH300": "CRASH300N"}
 
 def _to_wire_symbol(symbol: str) -> str:
     return _DERIV_WIRE_ALIASES.get(symbol, symbol)
+
+
+async def _deriv_trade_buy(buy_params: dict, price: float) -> dict:
+    """
+    Place un trade via le nouveau flux Deriv Options :
+      POST /trading/v1/options/accounts/{accountId}/otp  →  wss .../ws/real?otp=…
+      puis envoi du buy sur la session scopée compte (pas d'authorize requis).
+
+    Requis dans l'env :
+      DERIV_APP_ID      — ID d'app enregistrée (dashboard developers.deriv.com)
+      DERIV_ACCOUNT_ID  — ID du compte Options (ex. DOT90004580, ou VRTC…/CR…)
+      DERIV_API_TOKEN   — Bearer token (PAT/OAuth avec scope trade)
+    """
+    import httpx
+    import websockets
+
+    account = os.getenv("DERIV_ACCOUNT_ID", "")
+    app_id  = os.getenv("DERIV_APP_ID", "")
+    if not account or not app_id:
+        return {"error": {"message": "DERIV_ACCOUNT_ID / DERIV_APP_ID non configurés"}}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                f"https://api.derivws.com/trading/v1/options/accounts/{account}/otp",
+                headers={
+                    "Deriv-App-ID": app_id,
+                    "Authorization": f"Bearer {DERIV_TOKEN}",
+                },
+            )
+            r.raise_for_status()
+            ws_url = (r.json().get("data") or {}).get("url")
+        if not ws_url:
+            return {"error": {"message": "OTP Deriv: aucune URL WS retournée"}}
+    except Exception as e:
+        return {"error": {"message": f"OTP Deriv: {e}"}}
+
+    try:
+        async with websockets.connect(ws_url, ping_interval=None, open_timeout=10) as ws:
+            async def _roundtrip(payload: dict, timeout: float = 15.0) -> dict:
+                await ws.send(json.dumps(payload))
+                return json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
+
+            # 1) proposal — le nouveau schéma utilise `underlying_symbol`
+            prop = await _roundtrip({
+                "proposal":          1,
+                "amount":            price,
+                "basis":             buy_params["basis"],
+                "contract_type":     buy_params["contract_type"],
+                "currency":          buy_params["currency"],
+                "duration":          buy_params["duration"],
+                "duration_unit":     buy_params["duration_unit"],
+                "underlying_symbol": buy_params["symbol"],
+            })
+            if "error" in prop:
+                return prop
+            proposal_id = prop.get("proposal", {}).get("id")
+            if not proposal_id:
+                return {"error": {"message": "Proposal sans id"}}
+
+            # 2) buy par proposal id
+            return await _roundtrip({"buy": proposal_id, "price": price})
+    except Exception as e:
+        return {"error": {"message": str(e)}}
 
 
 async def _fetch_v75_candles(symbol: str = V75_SYMBOL, count: int = 100) -> list:
@@ -326,6 +382,7 @@ async def scalp_v75(req: DerivScalpRequest):
     direction = "BUY" if signal == "CALL" else "SELL"
     entry_price = float(analysis.get("indicators", {}).get("close", 0))
     atr_pct = 0.0
+    atr_val = 0.0
     df_candles = pd.DataFrame(candles, columns=["time", "open", "high", "low", "close"])
     if len(df_candles) >= 15:
         high = df_candles["high"].astype(float)
@@ -377,21 +434,30 @@ async def scalp_v75(req: DerivScalpRequest):
     risk_engine.register_position(req.symbol, direction)
 
     # Mode live : place le trade via API Deriv (avec risk gate)
+    # authorize + buy sur la MÊME session WS — l'auth Deriv est par connexion.
     if DERIV_TOKEN and source == "live":
-        auth_resp = await _deriv_request({"authorize": DERIV_TOKEN})
-        if "error" in auth_resp:
-            risk_engine.unregister_position(req.symbol)
-            return {"action": "AUTH_FAILED", "error": auth_resp["error"]["message"]}
-
-        buy_payload = {
-            "buy": 1,
-            "price": adjusted_stake,
-            "parameters": {
-                **trade_suggestion,
-                "contract_type": signal,
-            },
+        buy_params = {
+            "amount":        adjusted_stake,
+            "basis":         "stake",
+            "contract_type": signal,
+            "currency":      "USD",
+            "duration":      req.duration,
+            "duration_unit": "m",
+            "symbol":        _to_wire_symbol(req.symbol),
         }
-        buy_resp = await _deriv_request(buy_payload, timeout=15)
+        if os.getenv("DERIV_ACCOUNT_ID") and os.getenv("DERIV_APP_ID"):
+            # Nouvelle API Options : OTP REST → session WS scopée compte → buy
+            buy_resp = await _deriv_trade_buy(buy_params, adjusted_stake)
+        else:
+            # Flux legacy (ancien token) — authorize + buy sur la connexion partagée
+            auth_resp = await _deriv_request({"authorize": DERIV_TOKEN})
+            if "error" in auth_resp:
+                risk_engine.unregister_position(req.symbol)
+                return {"action": "AUTH_FAILED", "error": auth_resp["error"]["message"]}
+            buy_resp = await _deriv_request(
+                {"buy": 1, "price": adjusted_stake, "parameters": buy_params},
+                timeout=15,
+            )
         if "error" in buy_resp:
             risk_engine.unregister_position(req.symbol)
             return {"action": "BUY_FAILED", "error": buy_resp["error"]["message"], "analysis": analysis}
@@ -428,11 +494,34 @@ async def scalp_v75(req: DerivScalpRequest):
 
 @router.get("/deriv/tick/{symbol}")
 async def get_latest_tick(symbol: str = V75_SYMBOL):
-    """Dernier tick du symbole."""
-    resp = await _deriv_request({"ticks": _to_wire_symbol(symbol), "subscribe": 0}, timeout=8)
+    """Dernier tick du symbole — lu depuis le cache des subscriptions si dispo."""
+    wire = _to_wire_symbol(symbol)
+    cached = deriv_client.last_ticks.get(wire)
+    if cached and time.time() - cached.get("epoch", 0) < 15:
+        return {
+            "symbol": symbol,
+            "price":  cached.get("quote"),
+            "time":   cached.get("epoch"),
+            "source": "live",
+        }
+
+    resp = await _deriv_request({"ticks": wire}, timeout=8)
     if "error" in resp:
+        # Symbole déjà souscrit sur la connexion partagée → tick dans le cache
+        cached = deriv_client.last_ticks.get(wire)
+        if cached:
+            return {
+                "symbol": symbol,
+                "price":  cached.get("quote"),
+                "time":   cached.get("epoch"),
+                "source": "live",
+            }
         return {"symbol": symbol, "price": None, "source": "mock",
                 "note": "API Deriv inaccessible"}
+    # La nouvelle API souscrit implicitement à chaque appel ticks → libérer.
+    sub_id = resp.get("subscription", {}).get("id")
+    if sub_id:
+        asyncio.create_task(_deriv_request({"forget": sub_id}, timeout=5))
     tick = resp.get("tick", {})
     return {
         "symbol": symbol,
@@ -440,6 +529,28 @@ async def get_latest_tick(symbol: str = V75_SYMBOL):
         "time":   tick.get("epoch"),
         "source": "live",
     }
+
+
+@router.get("/deriv/active-symbols")
+async def active_symbols():
+    """Registre des instruments Deriv exposés par la nouvelle API (89 symboles)."""
+    resp = await _deriv_request({"active_symbols": "brief"}, timeout=15)
+    if "error" in resp:
+        return {"error": resp["error"]["message"], "symbols": []}
+    raw = resp.get("active_symbols", [])
+    symbols = [
+        {
+            "symbol":    s.get("underlying_symbol") or s.get("symbol"),
+            "name":      s.get("underlying_symbol_name") or s.get("display_name"),
+            "type":      s.get("underlying_symbol_type") or s.get("symbol_type"),
+            "market":    s.get("market"),
+            "submarket": s.get("submarket"),
+            "open":      bool(s.get("exchange_is_open")),
+            "suspended": bool(s.get("is_trading_suspended")),
+        }
+        for s in raw
+    ]
+    return {"count": len(symbols), "symbols": symbols}
 
 
 @router.get("/deriv/symbols")

@@ -87,6 +87,8 @@ async def lifespan(app: FastAPI):
                 logger.error("background_task_died", task=task_name, error=str(exc))
         return _cb
 
+    from utils.deriv_client import deriv_client
+    await deriv_client.start()
     price_task = asyncio.create_task(ws.price_broadcaster())
     binance_task = asyncio.create_task(ws.binance_price_listener())
     warmup_task = asyncio.create_task(scan_warmup.warmup_features())
@@ -104,6 +106,11 @@ async def lifespan(app: FastAPI):
     binance_task.cancel()
     warmup_task.cancel()
     cron_task.cancel()
+    try:
+        from utils.deriv_client import deriv_client as _dc
+        await _dc.close()
+    except Exception:
+        pass
     for task in (price_task, binance_task, warmup_task, cron_task):
         try:
             await asyncio.wait_for(task, timeout=5.0)
@@ -229,27 +236,30 @@ app.include_router(poocoin.router, prefix="/poocoin", tags=["PooCoin"])
 # ── Candles endpoint (used by API predictMlRegime) ───────────────────
 
 
-@app.get("/candles/{symbol:path}", tags=["Market Data"])
-async def get_candles(
+@app.get("/candles/{symbol:path}/deriv-history", tags=["Market Data"])
+async def get_deriv_history(
     symbol: str,
     timeframe: str = _Query("1h"),
-    limit: int = _Query(200, ge=50, le=1000),
+    start: int = _Query(..., description="Start timestamp in ms"),
+    end: int = _Query(None, description="End timestamp in ms"),
 ):
-    """Return raw OHLCV candles for a symbol (multi-provider fallback)."""
-    from routers.scan import (
-        fetch_klines_fallback,
-        TF_MAP,
-    )
+    """Return historical OHLCV candles for a Deriv synthetic index."""
+    from routers.scan_fetchers import fetch_deriv_klines
+    import pandas as pd
 
-    tf = TF_MAP.get(timeframe, timeframe)
-    df = await fetch_klines_fallback(symbol, tf, limit=limit, timeout=8.0)
+    df = await fetch_deriv_klines(symbol, timeframe, limit=5000)
     if df is None or df.empty:
         return _JSONResponse(status_code=404, content={"error": f"No data for {symbol}/{timeframe}"})
 
+    # Filter by time range
+    df["time_ms"] = df["time"].astype(int) * 1000
+    df = df[(df["time_ms"] >= start) & (df["time_ms"] <= (end or int(pd.Timestamp.now().timestamp() * 1000)))]
+    df = df.sort_values("time_ms")
+
     candles = []
-    for _, row in df.tail(limit).iterrows():
+    for _, row in df.iterrows():
         candles.append({
-            "time": int(row.get("time", 0)),
+            "time": int(row["time_ms"]),
             "open": float(row["open"]),
             "high": float(row["high"]),
             "low": float(row["low"]),
@@ -295,30 +305,27 @@ async def get_candles_history(
     return {"symbol": symbol, "timeframe": timeframe, "candles": candles}
 
 
-@app.get("/candles/{symbol:path}/deriv-history", tags=["Market Data"])
-async def get_deriv_history(
+@app.get("/candles/{symbol:path}", tags=["Market Data"])
+async def get_candles(
     symbol: str,
     timeframe: str = _Query("1h"),
-    start: int = _Query(..., description="Start timestamp in ms"),
-    end: int = _Query(None, description="End timestamp in ms"),
+    limit: int = _Query(200, ge=50, le=1000),
 ):
-    """Return historical OHLCV candles for a Deriv synthetic index."""
-    from routers.scan_fetchers import fetch_deriv_klines
-    import pandas as pd
+    """Return raw OHLCV candles for a symbol (multi-provider fallback)."""
+    from routers.scan import (
+        fetch_klines_fallback,
+        TF_MAP,
+    )
 
-    df = await fetch_deriv_klines(symbol, timeframe, limit=5000)
+    tf = TF_MAP.get(timeframe, timeframe)
+    df = await fetch_klines_fallback(symbol, tf, limit=limit, timeout=8.0)
     if df is None or df.empty:
         return _JSONResponse(status_code=404, content={"error": f"No data for {symbol}/{timeframe}"})
 
-    # Filter by time range
-    df["time_ms"] = df["time"].astype(int) * 1000
-    df = df[(df["time_ms"] >= start) & (df["time_ms"] <= (end or int(pd.Timestamp.now().timestamp() * 1000)))]
-    df = df.sort_values("time_ms")
-
     candles = []
-    for _, row in df.iterrows():
+    for _, row in df.tail(limit).iterrows():
         candles.append({
-            "time": int(row["time_ms"]),
+            "time": int(row.get("time", 0)),
             "open": float(row["open"]),
             "high": float(row["high"]),
             "low": float(row["low"]),

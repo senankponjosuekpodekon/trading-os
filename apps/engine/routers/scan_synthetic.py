@@ -22,7 +22,8 @@ def _analyze_synthetic_candles(symbol: str, timeframe: str, df: pd.DataFrame, st
     category = "volatility"
     if deriv_sym:
         from routers.synthetic_engine import DERIV_SYMBOLS as _DERIV_CATS
-        category = _DERIV_CATS.get(deriv_sym, "volatility")
+        from utils.deriv_symbols import from_wire_symbol
+        category = _DERIV_CATS.get(from_wire_symbol(deriv_sym), "volatility")
 
     if category == "boom_crash":
         direction = "boom" if "BOOM" in symbol.upper() else "crash"

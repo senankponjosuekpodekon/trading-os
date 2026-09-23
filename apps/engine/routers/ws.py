@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Set
 
 from utils.deriv_symbols import to_wire_symbol
+from utils.deriv_client import deriv_client
 
 from utils.logger import get_logger
 
@@ -45,8 +46,6 @@ DERIV_PRICE_SYMBOLS: dict = {
     "JUMP10/USD": "JD10", "JUMP25/USD": "JD25", "JUMP50/USD": "JD50",
     "JUMP75/USD": "JD75", "JUMP100/USD": "JD100",
 }
-
-DERIV_WS_URL = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
 
 _price_clients:  Set[WebSocket] = set()
 _signal_clients: Set[WebSocket] = set()
@@ -108,40 +107,30 @@ def _fetch_yf_prices_sync() -> dict:
         return {}
 
 
+_deriv_tick_cache: dict = {}   # symbole interne -> dernier quote
+_deriv_subs_started = False
+
+
+async def _ensure_deriv_subscriptions() -> None:
+    """Souscrit une fois au flux de ticks de tous les symboles Deriv sur la
+    connexion partagée — les prix arrivent en push (~2s), plus de polling WS."""
+    global _deriv_subs_started
+    if _deriv_subs_started:
+        return
+    _deriv_subs_started = True
+    await deriv_client.start()
+    for internal, deriv_sym in DERIV_PRICE_SYMBOLS.items():
+        def _cb(tick: dict, _internal=internal):
+            quote = tick.get("quote")
+            if quote is not None:
+                _deriv_tick_cache[_internal] = float(quote)
+        deriv_client.subscribe_ticks(deriv_sym, _cb)
+
+
 async def _fetch_deriv_prices() -> dict:
-    """Snapshot prix Deriv via 1 seule connexion WS — envoie tous les ticks, lit les réponses."""
-    import websockets as _ws
-    prices = {}
-    deriv_syms = list(DERIV_PRICE_SYMBOLS.values())
-    deriv_to_internal = {v: k for k, v in DERIV_PRICE_SYMBOLS.items()}
-    try:
-        async with _ws.connect(DERIV_WS_URL, ping_interval=None) as ws:
-            # Envoyer tous les ticks en une seule rafale
-            for deriv_sym in deriv_syms:
-                await ws.send(json.dumps({"ticks": deriv_sym}))
-            # Lire toutes les réponses avec un seul timeout global
-            deadline = asyncio.get_event_loop().time() + 5.0
-            while asyncio.get_event_loop().time() < deadline:
-                remaining = deadline - asyncio.get_event_loop().time()
-                if remaining <= 0:
-                    break
-                try:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
-                    data = json.loads(raw)
-                    tick = data.get("tick", {})
-                    sym  = tick.get("symbol")
-                    quote = tick.get("quote")
-                    if sym and quote:
-                        internal = deriv_to_internal.get(sym)
-                        if internal:
-                            prices[internal] = float(quote)
-                    if len(prices) >= len(deriv_syms):
-                        break
-                except asyncio.TimeoutError:
-                    break
-    except Exception as e:
-        logger.warning("deriv_prices_failed", error=str(e))
-    return prices
+    """Snapshot des prix Deriv — lu depuis le cache alimenté par les subscriptions."""
+    await _ensure_deriv_subscriptions()
+    return dict(_deriv_tick_cache)
 
 
 async def binance_price_listener():

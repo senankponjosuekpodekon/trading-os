@@ -17,3 +17,9 @@ _DERIV_WIRE_ALIASES: dict[str, str] = {
 def to_wire_symbol(symbol: str) -> str:
     """Translate an internal/display symbol to its Deriv API wire symbol."""
     return _DERIV_WIRE_ALIASES.get(symbol, symbol)
+
+
+def from_wire_symbol(symbol: str) -> str:
+    """Translate a Deriv wire symbol back to the internal/display symbol."""
+    reverse = {v: k for k, v in _DERIV_WIRE_ALIASES.items()}
+    return reverse.get(symbol, symbol)
