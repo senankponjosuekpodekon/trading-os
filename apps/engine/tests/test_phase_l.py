@@ -91,6 +91,73 @@ def test_gem_score_max_100():
     assert score <= 100
 
 
+def test_gem_score_honeypot_capped():
+    from ml.hidden_gems import _compute_gem_score
+    score, _, warnings = _compute_gem_score(
+        liquidity=500_000, volume_24h=2_000_000, price_change_24h=15, age_hours=48,
+        onchain={"available": True, "honeypot": True, "top10_pct": 20,
+                 "holder_count": 5000, "lp_locked_pct": 80},
+    )
+    assert score <= 15
+    assert any("honeypot" in w.lower() for w in warnings)
+
+
+def test_gem_score_whale_concentration_penalty():
+    from ml.hidden_gems import _compute_gem_score
+    concentrated, _, warnings = _compute_gem_score(
+        liquidity=200_000, volume_24h=500_000, price_change_24h=15, age_hours=48,
+        onchain={"available": True, "top10_pct": 75, "holder_count": 3000},
+    )
+    distributed, _, _ = _compute_gem_score(
+        liquidity=200_000, volume_24h=500_000, price_change_24h=15, age_hours=48,
+        onchain={"available": True, "top10_pct": 20, "holder_count": 3000},
+    )
+    assert distributed > concentrated
+    assert any("concentration" in w.lower() for w in warnings)
+
+
+def test_gem_score_buy_flow_bonus():
+    from ml.hidden_gems import _compute_gem_score
+    with_flow, reasons, _ = _compute_gem_score(
+        liquidity=200_000, volume_24h=500_000, price_change_24h=15, age_hours=48,
+        buys_24h=800, sells_24h=400,
+    )
+    without_flow, _, _ = _compute_gem_score(
+        liquidity=200_000, volume_24h=500_000, price_change_24h=15, age_hours=48,
+    )
+    assert with_flow > without_flow
+    assert any("buy" in r.lower() for r in reasons)
+
+
+def test_gem_score_sell_flow_penalty():
+    from ml.hidden_gems import _compute_gem_score
+    score, _, warnings = _compute_gem_score(
+        liquidity=200_000, volume_24h=500_000, price_change_24h=15, age_hours=48,
+        buys_24h=200, sells_24h=800,
+    )
+    assert any("sell" in w.lower() for w in warnings)
+
+
+def test_parse_goplus_evm():
+    from ml.hidden_gems import _parse_goplus_evm
+    sec = {
+        "holder_count": "5000",
+        "holders": [{"percent": "0.20"}, {"percent": "0.10"}],
+        "lp_holders": [{"percent": "0.8", "is_locked": 1}, {"percent": "0.2", "is_locked": 0}],
+        "is_honeypot": "0", "is_mintable": "1", "is_proxy": "1",
+        "is_open_source": "1", "hidden_owner": "0",
+        "buy_tax": "0.03", "sell_tax": "0.03", "creator_percent": "0.02",
+    }
+    out = _parse_goplus_evm(sec)
+    assert out["available"] is True
+    assert out["holder_count"] == 5000
+    assert out["top10_pct"] == 30.0
+    assert out["lp_locked_pct"] == 80.0
+    assert out["mintable"] is True
+    assert out["buy_tax"] == 3.0
+    assert out["honeypot"] is False
+
+
 # ── AI Defense ───────────────────────────────────────────────────────────────
 
 def test_defense_pump_dump_critical():

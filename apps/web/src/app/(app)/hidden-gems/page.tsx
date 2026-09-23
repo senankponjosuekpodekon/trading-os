@@ -127,6 +127,31 @@ export default function HiddenGemsPage() {
                 </div>
               </div>
 
+              {gem.onchain?.available && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mb-3 pb-3 border-b border-gray-800">
+                  {gem.onchain.holder_count > 0 && (
+                    <span className="text-gray-400">
+                      <span className="text-gray-500">Holders:</span> {gem.onchain.holder_count.toLocaleString()}
+                    </span>
+                  )}
+                  {gem.onchain.top10_pct > 0 && (
+                    <span className={gem.onchain.top10_pct > 50 ? 'text-red-400' : 'text-gray-400'}>
+                      <span className="text-gray-500">Top10:</span> {gem.onchain.top10_pct}%
+                    </span>
+                  )}
+                  {gem.onchain.lp_locked_pct > 0 && (
+                    <span className={gem.onchain.lp_locked_pct >= 40 ? 'text-emerald-400' : 'text-orange-400'}>
+                      <span className="text-gray-500">LP:</span> {gem.onchain.lp_locked_pct}% locked
+                    </span>
+                  )}
+                  {gem.onchain.honeypot && (
+                    <span className="px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 font-semibold">
+                      HONEYPOT
+                    </span>
+                  )}
+                </div>
+              )}
+
               {gem.reasons?.length > 0 && (
                 <div className="space-y-1 mb-2">
                   {gem.reasons.slice(0, 3).map((r: string, j: number) => (

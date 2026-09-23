@@ -7,7 +7,9 @@ Sources:
   - DEX Screener: liquidity, volume, age, price change
   - Tokenomics: unlock safety, distribution
   - Social: Reddit/YouTube sentiment buzz
-  - On-chain: holder growth, whale activity (if available)
+  - On-chain asymmetry: buy/sell flow imbalance (DexScreener txns) +
+    contract security via GoPlus (EVM/Solana) & RugCheck — holder
+    concentration, LP lock, honeypot, mintable/freezable, taxes
 """
 from __future__ import annotations
 
@@ -38,6 +40,264 @@ class GemCandidate:
     warnings: List[str]
     social_buzz: float
     tokenomics_safety: float
+    onchain: Dict[str, Any] | None = None
+
+
+# DexScreener chainId → GoPlus chain id (EVM token_security endpoint)
+_GOPLUS_CHAIN_IDS = {
+    "ethereum": "1", "bsc": "56", "polygon": "137", "arbitrum": "42161",
+    "base": "8453", "avalanche": "43114", "optimism": "10", "fantom": "250",
+    "cronos": "25", "linea": "59144", "mantle": "5000", "scroll": "534352",
+    "blast": "81457", "sonic": "146", "zksync": "324", "mode": "34443",
+    "manta": "169", "polygonzkevm": "1101", "core": "1116", "sei": "1329",
+}
+
+
+def _f(v: Any) -> float:
+    """Parse GoPlus string/number fields safely."""
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _parse_goplus_evm(sec: Dict[str, Any]) -> Dict[str, Any]:
+    holders = sec.get("holders") or []
+    top10 = sum(_f(h.get("percent")) for h in holders[:10]) * 100
+    lp = sec.get("lp_holders") or []
+    lp_total = sum(_f(h.get("percent")) for h in lp)
+    lp_locked = sum(_f(h.get("percent")) for h in lp if h.get("is_locked")) * 100 / max(lp_total, 1) if lp_total > 0 else 0.0
+    return {
+        "available": True,
+        "holder_count": int(_f(sec.get("holder_count"))),
+        "top10_pct": round(top10, 1),
+        "lp_locked_pct": round(lp_locked, 1),
+        "honeypot": sec.get("is_honeypot") == "1" or sec.get("cannot_buy") == "1",
+        "mintable": sec.get("is_mintable") == "1",
+        "proxy": sec.get("is_proxy") == "1",
+        "open_source": sec.get("is_open_source") == "1",
+        "hidden_owner": sec.get("hidden_owner") == "1",
+        "freezable": sec.get("transfer_pausable") == "1",
+        "non_transferable": False,
+        "buy_tax": _f(sec.get("buy_tax")) * 100,
+        "sell_tax": _f(sec.get("sell_tax")) * 100,
+        "creator_pct": _f(sec.get("creator_percent")) * 100,
+        "source": "goplus",
+    }
+
+
+def _parse_goplus_solana(sec: Dict[str, Any]) -> Dict[str, Any]:
+    holders = sec.get("holders") or []
+    top10 = sum(_f(h.get("percent")) for h in holders[:10]) * 100
+    mintable = (sec.get("mintable") or {}).get("status") == "1"
+    freezable = (sec.get("freezable") or {}).get("status") == "1"
+    closable = (sec.get("closable") or {}).get("status") == "1"
+    non_transferable = (sec.get("non_transferable") or {}).get("status") == "1"
+    return {
+        "available": True,
+        "holder_count": int(_f(sec.get("holder_count"))),
+        "top10_pct": round(top10, 1),
+        "lp_locked_pct": 0.0,  # pas exposé par GoPlus solana
+        "honeypot": non_transferable or sec.get("default_account_state") == "2",
+        "mintable": mintable,
+        "proxy": False,
+        "open_source": None,
+        "hidden_owner": False,
+        "freezable": freezable or closable,
+        "non_transferable": non_transferable,
+        "buy_tax": _f((sec.get("transfer_fee") or {}).get("current_fee_rate")) * 100,
+        "sell_tax": 0.0,
+        "creator_pct": 0.0,  # creators[] en unités token, pas fiable en %
+        "source": "goplus",
+    }
+
+
+async def _fetch_rugcheck(mint: str) -> Dict[str, Any] | None:
+    """RugCheck.xyz — source primaire Solana (couvre les micro-caps récentes,
+    contrairement à GoPlus qui indexe mal les tokens de quelques heures)."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report")
+            if r.status_code != 200:
+                return None
+            d = r.json()
+        holders = d.get("topHolders") or []
+        top10 = sum(_f(h.get("pct")) for h in holders[:10])
+        markets = d.get("markets") or []
+        lp_locked = max((_f((m.get("lp") or {}).get("lpLockedPct")) for m in markets), default=0.0)
+        risks = " ".join((r_.get("name") or "").lower() for r_ in (d.get("risks") or []))
+        return {
+            "available": True,
+            "holder_count": int(_f(d.get("totalHolders"))),
+            "top10_pct": round(top10, 1),
+            "lp_locked_pct": round(lp_locked, 1),
+            "honeypot": bool(d.get("rugged")) or "honeypot" in risks,
+            "mintable": d.get("mintAuthority") is not None or "mint authority" in risks,
+            "proxy": False,
+            "open_source": None,
+            "hidden_owner": bool(d.get("graphInsidersDetected")),
+            "freezable": d.get("freezeAuthority") is not None or "freez" in risks,
+            "non_transferable": False,
+            "buy_tax": 0.0,
+            "sell_tax": 0.0,
+            "creator_pct": 0.0,
+            "rugcheck_score": d.get("score_normalised", d.get("score")),
+            "source": "rugcheck",
+        }
+    except Exception:
+        return None
+
+
+async def fetch_onchain_security(tokens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """
+    Fetch contract/holder security pour une liste de tokens, batché par chain.
+    Retourne {token_address: normalized_security}. GoPlus (EVM+Solana),
+    fallback RugCheck pour Solana.
+    """
+    import asyncio as _a
+    import httpx
+
+    by_chain: Dict[str, List[Dict[str, Any]]] = {}
+    for t in tokens:
+        chain, addr = (t.get("chain") or "").lower(), t.get("token_address")
+        if addr:
+            by_chain.setdefault(chain, []).append(t)
+
+    out: Dict[str, Dict[str, Any]] = {}
+
+    async def _fetch_chain(chain: str, toks: List[Dict[str, Any]]):
+        addrs = [t["token_address"] for t in toks]
+        # Solana : RugCheck en primaire (meilleure couverture micro-caps),
+        # GoPlus en fallback pour les mints non couverts.
+        if chain == "solana":
+            rcs = await _a.gather(
+                *(_fetch_rugcheck(t["token_address"]) for t in toks[:20]),
+                return_exceptions=True,
+            )
+            for t, rc in zip(toks, rcs):
+                if isinstance(rc, dict):
+                    out[t["token_address"]] = rc
+            toks = [t for t in toks if t["token_address"] not in out]
+            addrs = [t["token_address"] for t in toks]
+            if not addrs:
+                return
+        try:
+            async with httpx.AsyncClient(timeout=12) as client:
+                if chain == "solana":
+                    url = "https://api.gopluslabs.io/api/v1/solana/token_security"
+                else:
+                    gid = _GOPLUS_CHAIN_IDS.get(chain)
+                    if not gid:
+                        return
+                    url = f"https://api.gopluslabs.io/api/v1/token_security/{gid}"
+                r = await client.get(url, params={"contract_addresses": ",".join(addrs)})
+                r.raise_for_status()
+                result = (r.json() or {}).get("result") or {}
+            parse = _parse_goplus_solana if chain == "solana" else _parse_goplus_evm
+            for t in toks:
+                addr = t["token_address"]
+                # GoPlus EVM normalise les clés en minuscules
+                sec = result.get(addr) or result.get(addr.lower())
+                if sec:
+                    out[addr] = parse(sec)
+        except Exception as exc:
+            logger.debug("goplus_fetch_failed", chain=chain, error=str(exc))
+
+    await _a.gather(*(_fetch_chain(c, toks) for c, toks in by_chain.items()))
+    return out
+
+
+def _score_onchain(
+    onchain: Dict[str, Any] | None,
+    buys_24h: float,
+    sells_24h: float,
+    buys_1h: float,
+    sells_1h: float,
+) -> tuple[int, List[str], List[str], bool]:
+    """
+    Composante on-chain asymétrique : +20 max / -35 min.
+    Retourne (points, reasons, warnings, honeypot_flag).
+    """
+    pts = 0
+    reasons: List[str] = []
+    warnings: List[str] = []
+    honeypot = False
+
+    if onchain and onchain.get("available"):
+        if onchain.get("honeypot"):
+            honeypot = True
+            pts -= 30
+            warnings.append("HONEYPOT detected — sells likely blocked")
+        top10 = onchain.get("top10_pct") or 0
+        if top10 > 0:
+            if top10 < 25:
+                pts += 6
+                reasons.append(f"Well-distributed holders (top10 {top10:.0f}%)")
+            elif top10 < 45:
+                pts += 3
+            elif top10 > 70:
+                pts -= 10
+                warnings.append(f"Extreme whale concentration (top10 {top10:.0f}%)")
+            elif top10 > 50:
+                pts -= 6
+                warnings.append(f"High whale concentration (top10 {top10:.0f}%)")
+        lp = onchain.get("lp_locked_pct") or 0
+        if lp >= 70:
+            pts += 6
+            reasons.append(f"LP locked ({lp:.0f}%)")
+        elif lp >= 40:
+            pts += 3
+        elif onchain.get("source") == "goplus" and lp > 0 and lp < 10:
+            pts -= 4
+            warnings.append(f"LP barely locked ({lp:.0f}%) — rug risk")
+        holders = onchain.get("holder_count") or 0
+        if holders >= 5000:
+            pts += 5
+            reasons.append(f"Broad holder base ({holders:,})")
+        elif holders >= 1000:
+            pts += 3
+        elif 0 < holders < 150:
+            pts -= 5
+            warnings.append(f"Thin holder base ({holders}) — easy manipulation")
+        if onchain.get("mintable"):
+            pts -= 4
+            warnings.append("Mintable supply — dilution risk")
+        if onchain.get("hidden_owner"):
+            pts -= 6
+            warnings.append("Hidden owner detected")
+        if onchain.get("freezable"):
+            pts -= 4
+            warnings.append("Contract can freeze transfers")
+        if onchain.get("open_source"):
+            pts += 2
+        max_tax = max(onchain.get("buy_tax") or 0, onchain.get("sell_tax") or 0)
+        if max_tax > 10:
+            pts -= 8
+            warnings.append(f"Very high tax ({max_tax:.0f}%)")
+        elif max_tax > 5:
+            pts -= 4
+            warnings.append(f"High buy/sell tax ({max_tax:.0f}%)")
+        if (onchain.get("creator_pct") or 0) > 10:
+            pts -= 5
+            warnings.append(f"Creator holds {onchain['creator_pct']:.0f}% of supply")
+
+    # Flow asymmetry — buy/sell imbalance (DexScreener txns, données réelles)
+    total_24h = buys_24h + sells_24h
+    if total_24h >= 50:
+        ratio = buys_24h / total_24h
+        if ratio >= 0.62:
+            pts += 6
+            reasons.append(f"Buy-side flow dominance ({ratio*100:.0f}% buys 24h)")
+        elif ratio <= 0.38:
+            pts -= 6
+            warnings.append(f"Sell-side flow dominance ({(1-ratio)*100:.0f}% sells 24h)")
+    total_1h = buys_1h + sells_1h
+    if total_1h >= 10 and buys_1h / total_1h >= 0.70:
+        pts += 3
+        reasons.append("Fresh buy pressure in the last hour")
+
+    return max(-35, min(20, pts)), reasons, warnings, honeypot
 
 
 def _compute_gem_score(
@@ -47,6 +307,11 @@ def _compute_gem_score(
     age_hours: float,
     social_buzz: float = 0.0,
     tokenomics_safety: float = 50.0,
+    onchain: Dict[str, Any] | None = None,
+    buys_24h: float = 0.0,
+    sells_24h: float = 0.0,
+    buys_1h: float = 0.0,
+    sells_1h: float = 0.0,
 ) -> tuple[int, List[str], List[str]]:
     """
     Compute a 0-100 gem score.
@@ -133,7 +398,17 @@ def _compute_gem_score(
         score += 0
         warnings.append("Dangerous tokenomics — large unlock imminent")
 
+    # 7. On-chain asymmetry (-35/+20 pts) — flow buy/sell + sécurité contrat
+    oc_pts, oc_reasons, oc_warnings, honeypot = _score_onchain(
+        onchain, buys_24h, sells_24h, buys_1h, sells_1h,
+    )
+    score += oc_pts
+    reasons.extend(oc_reasons)
+    warnings.extend(oc_warnings)
+
     score = max(0, min(100, score))
+    if honeypot:
+        score = min(score, 15)  # un honeypot n'est pas tradable quelles que soient les métriques
     return score, reasons, warnings
 
 
@@ -189,16 +464,22 @@ async def _fetch_dex_trending() -> List[Dict[str, Any]]:
             meta = meta_by_addr.get(addr, {})
             created = p.get("pairCreatedAt")
             age_hours = (now_ms - created) / 3_600_000 if created else 168.0
+            txns = p.get("txns") or {}
             tokens.append({
                 "symbol": tok.get("symbol", ""),
                 "name": tok.get("name", ""),
                 "chain": p.get("chainId", ""),
                 "pair_address": p.get("pairAddress", ""),
+                "token_address": addr,
                 "price": float(p.get("priceUsd", 0) or 0),
                 "liquidity": entry["liq"],
                 "volume_24h": float(p.get("volume", {}).get("h24", 0) or 0),
                 "price_change_24h": float(p.get("priceChange", {}).get("h24", 0) or 0),
                 "age_hours": age_hours,
+                "buys_24h": float((txns.get("h24") or {}).get("buys", 0) or 0),
+                "sells_24h": float((txns.get("h24") or {}).get("sells", 0) or 0),
+                "buys_1h": float((txns.get("h1") or {}).get("buys", 0) or 0),
+                "sells_1h": float((txns.get("h1") or {}).get("sells", 0) or 0),
                 "url": p.get("url", ""),
                 "socials": meta.get("links", {}),
                 "description": meta.get("description", ""),
@@ -225,6 +506,7 @@ async def _fetch_dex_search(query: str = "trending") -> List[Dict[str, Any]]:
         pairs = data.get("pairs", [])[:20]
         tokens = []
         for p in pairs:
+            txns = p.get("txns") or {}
             tokens.append({
                 "symbol": p.get("baseToken", {}).get("symbol", ""),
                 "name": p.get("baseToken", {}).get("name", ""),
@@ -236,6 +518,11 @@ async def _fetch_dex_search(query: str = "trending") -> List[Dict[str, Any]]:
                 "age_hours": 0,
                 "url": p.get("url", ""),
                 "pair_address": p.get("pairAddress", ""),
+                "token_address": (p.get("baseToken") or {}).get("address", ""),
+                "buys_24h": float((txns.get("h24") or {}).get("buys", 0) or 0),
+                "sells_24h": float((txns.get("h24") or {}).get("sells", 0) or 0),
+                "buys_1h": float((txns.get("h1") or {}).get("buys", 0) or 0),
+                "sells_1h": float((txns.get("h1") or {}).get("sells", 0) or 0),
             })
         return tokens
     except Exception as exc:
@@ -277,7 +564,7 @@ async def discover_hidden_gems(
     if not filtered:
         filtered = tokens  # Don't return empty if we have tokens
 
-    # Enrich with social sentiment + tokenomics data
+    # Enrich with social sentiment + tokenomics + on-chain security
     import asyncio as _asyncio
     from routers.social_sentiment import fetch_social_metrics
     from routers.tokenomics import fetch_tokenomics
@@ -301,6 +588,16 @@ async def discover_hidden_gems(
 
     filtered = await _asyncio.gather(*[_enrich_token(t) for t in filtered[:50]], return_exceptions=False)
 
+    # On-chain security batché par chain (GoPlus + RugCheck fallback)
+    try:
+        security = await _asyncio.wait_for(
+            fetch_onchain_security(filtered[:50]), timeout=20.0
+        )
+    except Exception:
+        security = {}
+    for t in filtered:
+        t["onchain"] = security.get(t.get("token_address", "")) or {}
+
     # Score each token
     candidates: List[GemCandidate] = []
     for t in filtered:
@@ -311,6 +608,11 @@ async def discover_hidden_gems(
             age_hours=t.get("age_hours", 168),  # Default to 1 week if unknown
             social_buzz=t.get("social_buzz", 0),
             tokenomics_safety=t.get("tokenomics_safety", 50),
+            onchain=t.get("onchain"),
+            buys_24h=t.get("buys_24h", 0),
+            sells_24h=t.get("sells_24h", 0),
+            buys_1h=t.get("buys_1h", 0),
+            sells_1h=t.get("sells_1h", 0),
         )
 
         candidates.append(GemCandidate(
@@ -327,6 +629,7 @@ async def discover_hidden_gems(
             warnings=warnings,
             social_buzz=t.get("social_buzz", 0),
             tokenomics_safety=t.get("tokenomics_safety", 50),
+            onchain=t.get("onchain") or {},
         ))
 
     # Sort by gem_score descending
@@ -347,6 +650,7 @@ async def discover_hidden_gems(
                 "gem_score": c.gem_score,
                 "social_buzz": c.social_buzz,
                 "tokenomics_safety": c.tokenomics_safety,
+                "onchain": c.onchain,
                 "reasons": c.reasons,
                 "warnings": c.warnings,
                 "url": next((t.get("url", "") for t in filtered if t.get("symbol") == c.symbol), ""),
