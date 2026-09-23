@@ -246,3 +246,34 @@ def test_cron_intervals():
     assert DAILY_PULSE_INTERVAL == 3600
     assert HIDDEN_GEMS_INTERVAL == 1800
     assert REBALANCE_INTERVAL == 3600 * 6
+
+
+def test_market_interpretation_overheated_longs():
+    from routers.onchain import _build_interpretation
+    r = _build_interpretation(
+        funding_pct=0.08, basis_pct=0.2, dominance=61.0, dominance_chg=0.5,
+        mempool_count=120_000, fee_sat_vb=15, gas_gwei=60,
+    )
+    assert r["regime"] == "SQUEEZE_RISK"
+    assert r["score"] <= -30
+    assert any(s["metric"] == "funding" and s["impact"] == "bearish" for s in r["signals"])
+
+
+def test_market_interpretation_alt_favorable():
+    from routers.onchain import _build_interpretation
+    r = _build_interpretation(
+        funding_pct=-0.02, basis_pct=-0.1, dominance=58.0, dominance_chg=-0.5,
+        mempool_count=20_000, fee_sat_vb=1, gas_gwei=50,
+    )
+    assert r["regime"] in ("RISK_ON_ALTS", "RISK_ON")
+    assert r["score"] > 0
+
+
+def test_market_interpretation_neutral():
+    from routers.onchain import _build_interpretation
+    r = _build_interpretation(
+        funding_pct=0.005, basis_pct=0.02, dominance=60.0, dominance_chg=0.1,
+        mempool_count=10_000, fee_sat_vb=2, gas_gwei=20,
+    )
+    assert r["regime"] == "NEUTRAL"
+    assert -10 < r["score"] < 10

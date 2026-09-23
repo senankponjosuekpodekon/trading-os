@@ -128,7 +128,7 @@ async def spot_perp_basis(symbol: str):
 
 @router.get("/btc-dominance")
 async def btc_dominance():
-    """BTC dominance from CoinGecko."""
+    """BTC dominance from CoinGecko (+ proxy de variation 24h)."""
     cache_key = "btc_dominance"
     cached = _get(cache_key)
     if cached:
@@ -138,10 +138,27 @@ async def btc_dominance():
             async with httpx.AsyncClient(timeout=8) as client:
                 r = await client.get(COINGECKO_GLOBAL)
                 r.raise_for_status()
-                return r.json()
-        data = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
-        btc = data.get("data", {}).get("market_cap_percentage", {}).get("btc", 0)
-        result = {"btc_dominance": round(float(btc), 2)}
+                glob = r.json()
+                # Variation BTC vs marché total → proxy de la variation de dominance
+                r2 = await client.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": "bitcoin", "vs_currencies": "usd",
+                            "include_24hr_change": "true"},
+                )
+                btc_chg = r2.json().get("bitcoin", {}).get("usd_24h_change", 0) if r2.status_code == 200 else 0
+                return glob, float(btc_chg or 0)
+        (data, btc_chg) = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
+        gdata = data.get("data", {})
+        btc = float(gdata.get("market_cap_percentage", {}).get("btc", 0))
+        total_chg = float(gdata.get("market_cap_change_percentage_24h_usd", 0) or 0)
+        # Si BTC monte plus vite que le marché → dominance monte (approximation)
+        dom_chg = btc_chg - total_chg
+        result = {
+            "btc_dominance": round(btc, 2),
+            "dominance_pct": round(btc, 2),
+            "change_24h_pct": round(dom_chg, 2),
+            "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        }
         _set(cache_key, result)
         return result
     except Exception as e:
@@ -197,6 +214,174 @@ def onchain_bonus(
 
     bonus = max(-25, min(25, bonus))
     return bonus, reasons
+
+
+def _build_interpretation(
+    funding_pct: Optional[float],
+    basis_pct: Optional[float],
+    dominance: Optional[float],
+    dominance_chg: Optional[float],
+    mempool_count: Optional[int],
+    fee_sat_vb: Optional[float],
+    gas_gwei: Optional[float],
+) -> dict:
+    """
+    Synthèse interprétative du contexte marché crypto.
+    score -100 (risk-off / squeeze baissier probable) → +100 (risk-on alts).
+    """
+    score = 0
+    signals: list[dict] = []
+
+    # Funding — surcharge de longs/shorts (le signal le plus actionnable)
+    if funding_pct is not None:
+        if funding_pct > 0.05:
+            score -= 25
+            signals.append({"metric": "funding", "value": funding_pct, "impact": "bearish",
+                            "read": f"Funding {funding_pct:+.3f}% — longs surpeuplés, risque de squeeze baissier"})
+        elif funding_pct > 0.01:
+            score -= 10
+            signals.append({"metric": "funding", "value": funding_pct, "impact": "mild_bearish",
+                            "read": f"Funding {funding_pct:+.3f}% — biais long marqué"})
+        elif funding_pct < -0.01:
+            score += 20
+            signals.append({"metric": "funding", "value": funding_pct, "impact": "bullish",
+                            "read": f"Funding {funding_pct:+.3f}% — shorts surpeuplés, fuel haussier"})
+        else:
+            signals.append({"metric": "funding", "value": funding_pct, "impact": "neutral",
+                            "read": f"Funding {funding_pct:+.3f}% — positionnement équilibré"})
+
+    # Basis — premium perp = spéculation levier
+    if basis_pct is not None:
+        if basis_pct > 0.15:
+            score -= 10
+            signals.append({"metric": "basis", "value": basis_pct, "impact": "bearish",
+                            "read": f"Perp premium {basis_pct:+.2f}% — levier spéculatif excessif"})
+        elif basis_pct < -0.05:
+            score += 8
+            signals.append({"metric": "basis", "value": basis_pct, "impact": "bullish",
+                            "read": f"Perp discount {basis_pct:+.2f}% — peur ou accumulation spot"})
+        else:
+            signals.append({"metric": "basis", "value": basis_pct, "impact": "neutral",
+                            "read": f"Basis {basis_pct:+.2f}% — perp aligné spot"})
+
+    # BTC dominance — rotation BTC vs alts
+    if dominance_chg is not None:
+        if dominance_chg <= -0.3:
+            score += 15
+            signals.append({"metric": "dominance", "value": dominance_chg, "impact": "alt_favorable",
+                            "read": f"Dominance BTC {dominance_chg:+.2f}%/24h — rotation vers les alts"})
+        elif dominance_chg >= 0.3:
+            score -= 15
+            signals.append({"metric": "dominance", "value": dominance_chg, "impact": "btc_favorable",
+                            "read": f"Dominance BTC {dominance_chg:+.2f}%/24h — fuite vers BTC, alts sous pression"})
+        else:
+            signals.append({"metric": "dominance", "value": dominance or 0, "impact": "neutral",
+                            "read": f"Dominance BTC {dominance or 0:.1f}% stable"})
+
+    # Mempool BTC — congestion = demande de settlement, volatilité possible
+    if mempool_count is not None and mempool_count > 80_000:
+        signals.append({"metric": "mempool", "value": mempool_count, "impact": "info",
+                        "read": f"Mempool chargée ({mempool_count:,} tx) — forte demande, volatilité possible"})
+    elif fee_sat_vb is not None and fee_sat_vb <= 2:
+        signals.append({"metric": "mempool", "value": fee_sat_vb, "impact": "info",
+                        "read": f"Réseau calme (fee {fee_sat_vb:.0f} sat/vB)"})
+
+    # Gas ETH — activité on-chain réelle
+    if gas_gwei is not None and gas_gwei > 40:
+        score += 5
+        signals.append({"metric": "gas", "value": gas_gwei, "impact": "bullish",
+                        "read": f"Gas ETH {gas_gwei:.0f} gwei — forte activité on-chain"})
+
+    score = max(-100, min(100, score))
+    if score >= 30:
+        regime, advice = "RISK_ON_ALTS", "Contexte favorable aux altcoins et à la prise de risque — fenêtre adaptée à l'exploration hidden gems."
+    elif score >= 10:
+        regime, advice = "RISK_ON", "Contexte légèrement favorable — signaux BUY du scanner plus fiables."
+    elif score <= -30:
+        regime, advice = "SQUEEZE_RISK", "Marché déséquilibré (surcharge détectée) — réduire la taille, méfiance sur les LONGS."
+    elif score <= -10:
+        regime, advice = "RISK_OFF", "Contexte défavorable aux alts — privilégier BTC/majors, prudence sur les gems."
+    else:
+        regime, advice = "NEUTRAL", "Pas de biais dominant — laisser les signaux techniques guider."
+
+    return {"score": score, "regime": regime, "signals": signals, "advice": advice}
+
+
+async def _mempool_stats() -> dict:
+    """Congestion BTC via mempool.space (gratuit, sans clé)."""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get("https://mempool.space/api/mempool")
+            mp = r.json() if r.status_code == 200 else {}
+            r2 = await client.get("https://mempool.space/api/v1/fees/recommended")
+            fees = r2.json() if r2.status_code == 200 else {}
+        return {
+            "mempool_count": mp.get("count"),
+            "fee_fastest": fees.get("fastestFee"),
+        }
+    except Exception:
+        return {"mempool_count": None, "fee_fastest": None}
+
+
+async def _eth_gas_gwei() -> Optional[float]:
+    """Gas ETH médian via BlockCypher (gratuit, sans clé)."""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get("https://api.blockcypher.com/v1/eth/main")
+            if r.status_code == 200:
+                wei = float(r.json().get("medium_gas_price", 0))
+                return round(wei / 1e9, 1) if wei else None
+    except Exception:
+        pass
+    return None
+
+
+@router.get("/market-interpretation")
+async def market_interpretation(symbol: str = "BTC/USDT"):
+    """
+    GET /onchain/market-interpretation — Synthèse lisible du contexte marché :
+    funding, basis, dominance BTC, mempool, gas ETH → régime + score + conseil.
+    """
+    cache_key = f"interpretation:{symbol}"
+    cached = _get(cache_key)
+    if cached:
+        return cached
+
+    funding, basis, dom, mempool, gas = await asyncio.gather(
+        funding_rate(symbol),
+        spot_perp_basis(symbol),
+        btc_dominance(),
+        _mempool_stats(),
+        _eth_gas_gwei(),
+        return_exceptions=True,
+    )
+
+    def _v(res, key):
+        return res.get(key) if isinstance(res, dict) else None
+
+    interp = _build_interpretation(
+        funding_pct=_v(funding, "funding_rate"),
+        basis_pct=_v(basis, "basis_pct"),
+        dominance=_v(dom, "dominance_pct"),
+        dominance_chg=_v(dom, "change_24h_pct"),
+        mempool_count=_v(mempool, "mempool_count"),
+        fee_sat_vb=_v(mempool, "fee_fastest"),
+        gas_gwei=gas if isinstance(gas, float) else None,
+    )
+
+    result = {
+        "symbol": symbol,
+        **interp,
+        "components": {
+            "funding_rate": funding if isinstance(funding, dict) else None,
+            "basis": basis if isinstance(basis, dict) else None,
+            "btc_dominance": dom if isinstance(dom, dict) else None,
+            "mempool": mempool,
+            "gas_gwei": gas if isinstance(gas, float) else None,
+        },
+    }
+    _set(cache_key, result)
+    return result
 
 
 @router.get("/context/{symbol}")

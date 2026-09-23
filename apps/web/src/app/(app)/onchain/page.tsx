@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PageSkeleton } from '@/components/ui/PageSkeleton';
-import { Bitcoin, Cpu, Gauge, Wallet, TrendingUp, Database, Percent, Layers, Search } from 'lucide-react';
+import { Bitcoin, Cpu, Gauge, Wallet, TrendingUp, Database, Percent, Layers, Search, BookOpen, ChevronDown, Activity } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface BtcData {
@@ -35,8 +35,25 @@ function Metric({ label, value, sub, icon: Icon, color }: { label: string; value
   );
 }
 
+const regimeStyle = (regime: string) => {
+  switch (regime) {
+    case 'RISK_ON_ALTS': return 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300';
+    case 'RISK_ON': return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+    case 'SQUEEZE_RISK': return 'border-red-500/50 bg-red-500/10 text-red-300';
+    case 'RISK_OFF': return 'border-orange-500/50 bg-orange-500/10 text-orange-300';
+    default: return 'border-gray-600 bg-gray-800 text-gray-300';
+  }
+};
+
+const impactColor = (impact: string) => {
+  if (impact === 'bullish' || impact === 'alt_favorable') return 'text-emerald-400';
+  if (impact === 'bearish' || impact === 'mild_bearish' || impact === 'btc_favorable') return 'text-red-400';
+  return 'text-gray-400';
+};
+
 export default function OnChainPage() {
   const [symbol, setSymbol] = useState('BTC/USDT');
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const { data: btc, isLoading: btcLoading } = useQuery<BtcData | null>({
     queryKey: ['on-chain-btc'],
@@ -67,6 +84,12 @@ export default function OnChainPage() {
     staleTime: 120_000,
   });
 
+  const { data: interp } = useQuery({
+    queryKey: ['onchain-interpretation', symbol],
+    queryFn: async () => (await api.get(`/onchain/market-interpretation?symbol=${encodeURIComponent(symbol)}`)).data,
+    staleTime: 120_000,
+  });
+
   if (btcLoading || ethLoading) {
     return (
       <>
@@ -85,6 +108,29 @@ export default function OnChainPage() {
           </h2>
           <p className="text-gray-500 text-sm mt-0.5">Indicateurs blockchain BTC et ETH en temps réel.</p>
         </div>
+
+        {/* Lecture du marché — interprétation automatique */}
+        {interp && (
+          <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-400" /> Lecture du marché
+              </h3>
+              <span className={`px-3 py-1 rounded-md text-sm font-bold border ${regimeStyle(interp.regime)}`}>
+                {interp.regime} · {interp.score > 0 ? '+' : ''}{interp.score}
+              </span>
+            </div>
+            <p className="text-sm text-gray-300 mb-3">{interp.advice}</p>
+            <div className="space-y-1.5">
+              {(interp.signals ?? []).map((s: any, i: number) => (
+                <div key={i} className={`text-xs flex items-start gap-2 ${impactColor(s.impact)}`}>
+                  <span className="mt-0.5 w-16 shrink-0 text-gray-500 uppercase text-[10px]">{s.metric}</span>
+                  {s.read}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section>
           <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
@@ -165,13 +211,55 @@ export default function OnChainPage() {
           </div>
         </section>
 
-        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-white mb-3">Interprétation rapide</h3>
-          <ul className="space-y-2 text-xs text-gray-400">
-            <li><span className="text-emerald-400">Mempool faible + fee bas</span> = faible congestion, frais entrants limités.</li>
-            <li><span className="text-yellow-400">Mempool haut / fee élevé</span> = forte demande de settlement, possible volatilité à court terme.</li>
-            <li><span className="text-indigo-400">Gas ETH médian élevé</span> = forte activité on-chain, soutien prix si corrélé à l&apos;utilisation réelle.</li>
-          </ul>
+        {/* Guide d'exploitation — notice */}
+        <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setGuideOpen(!guideOpen)}
+            className="w-full flex items-center justify-between px-5 py-4 text-sm font-semibold text-white hover:bg-gray-800/50 transition"
+          >
+            <span className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-blue-400" />
+              Guide d&apos;exploitation — comment lire ces données et décider
+            </span>
+            <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${guideOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {guideOpen && (
+            <div className="px-5 pb-5 space-y-4 text-xs text-gray-400">
+              <div>
+                <p className="text-white font-medium mb-1">Funding rate (le plus actionnable)</p>
+                <ul className="space-y-1 ml-3 list-disc">
+                  <li><span className="text-red-400">&gt; +0.05%</span> → les longs paient les shorts : marché surchargé de longs → risque de squeeze baissier, méfiance sur les BUY.</li>
+                  <li><span className="text-emerald-400">&lt; −0.01%</span> → shorts surpeuplés → carburant pour un squeeze haussier, BUY plus sûrs.</li>
+                  <li>≈ 0% → positionnement équilibré, neutre.</li>
+                </ul>
+              </div>
+              <div>
+                <p className="text-white font-medium mb-1">Spot-Perp Basis</p>
+                <ul className="space-y-1 ml-3 list-disc">
+                  <li>Perp nettement <span className="text-red-400">au-dessus</span> du spot (&gt;0.15%) → spéculation levier excessive → fragile.</li>
+                  <li>Perp <span className="text-emerald-400">sous</span> le spot → peur ou accumulation spot — plus sain.</li>
+                </ul>
+              </div>
+              <div>
+                <p className="text-white font-medium mb-1">BTC Dominance — le timing altcoins</p>
+                <ul className="space-y-1 ml-3 list-disc">
+                  <li>Dominance <span className="text-emerald-400">qui baisse</span> → rotation vers les alts → fenêtre favorable pour hidden gems / moonshots.</li>
+                  <li>Dominance <span className="text-red-400">qui monte</span> → fuite vers BTC → les alts souffrent, prudence.</li>
+                </ul>
+              </div>
+              <div>
+                <p className="text-white font-medium mb-1">Mempool BTC & Gas ETH</p>
+                <ul className="space-y-1 ml-3 list-disc">
+                  <li>Mempool qui gonfle + fees élevées → congestion, demande de settlement → volatilité probable à court terme.</li>
+                  <li>Gas ETH élevé (&gt;40 gwei) → activité on-chain réelle — soutien fondamental, pas juste spéculatif.</li>
+                </ul>
+              </div>
+              <div className="pt-2 border-t border-gray-800">
+                <p className="text-white font-medium mb-1">Règle de décision combinée</p>
+                <p>Dominance BTC en baisse + funding neutre/négatif + gas ETH élevé = <span className="text-emerald-400">contexte risk-on alts</span>. Funding &gt;+0.05% + basis fort = <span className="text-red-400">marché surchargé de longs</span>, réduire la taille des positions. La carte « Lecture du marché » en haut synthétise tout ça automatiquement.</p>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </>

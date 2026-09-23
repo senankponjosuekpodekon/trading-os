@@ -295,6 +295,11 @@ export class EngineProxyController {
     return this.engine.get(`/onchain/spot-perp-basis/${symbol}`);
   }
 
+  @Get('onchain/market-interpretation')
+  onchainMarketInterpretation(@Query('symbol') symbol = 'BTC/USDT') {
+    return this.engine.get(`/onchain/market-interpretation`, { params: { symbol } });
+  }
+
   @Get('dex/new-pools')
   dexNewPools() {
     return this.engine.get('/dex/new-pools');
