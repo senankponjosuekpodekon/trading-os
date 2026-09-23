@@ -138,6 +138,60 @@ def test_gem_score_sell_flow_penalty():
     assert any("sell" in w.lower() for w in warnings)
 
 
+def _snap(ts, price=1.0, liquidity=100_000, volume=50_000, holders=1000,
+          top10=30.0, buys=600, sells=400):
+    return {"ts": ts, "price": price, "liquidity": liquidity,
+            "volume_24h": volume, "holders": holders, "top10_pct": top10,
+            "buys": buys, "sells": sells}
+
+
+def test_trajectory_insufficient_history():
+    from ml.hidden_gems import _compute_trajectory
+    assert _compute_trajectory([])["snapshots"] == 0
+    assert _compute_trajectory([_snap(1000)])["tracked_hours"] == 0.0
+
+
+def test_trajectory_growth_detection():
+    from ml.hidden_gems import _compute_trajectory
+    import time
+    now = int(time.time())
+    history = [
+        _snap(now, holders=3000, liquidity=200_000, buys=700, sells=300),
+        _snap(now - 43200, holders=2000, liquidity=150_000, buys=650, sells=350),
+        _snap(now - 86400, holders=1000, liquidity=100_000, buys=600, sells=400),
+    ]
+    traj = _compute_trajectory(history)
+    assert traj["snapshots"] == 3
+    assert traj["tracked_hours"] == 24.0
+    assert traj["holder_growth_pct"] == 200.0  # 1000 → 3000 sur ~24h
+    assert traj["buy_ratio_avg"] == 0.65  # moyenne de 0.7, 0.65, 0.6
+    assert traj["liquidity_growth_pct"] == 100.0
+
+
+def test_score_trajectory_moonshot():
+    from ml.hidden_gems import _score_trajectory
+    pts, reasons, warnings, moonshot = _score_trajectory({
+        "snapshots": 20, "tracked_hours": 12.0,
+        "holder_growth_pct": 120.0, "liquidity_growth_pct": 60.0,
+        "buy_ratio_avg": 0.62, "price_change_pct": 80.0, "top10_trend": -8.0,
+    })
+    assert moonshot is True
+    assert pts > 10
+    assert any("holder" in r.lower() for r in reasons)
+
+
+def test_score_trajectory_declining():
+    from ml.hidden_gems import _score_trajectory
+    pts, _, warnings, moonshot = _score_trajectory({
+        "snapshots": 10, "tracked_hours": 48.0,
+        "holder_growth_pct": -60.0, "buy_ratio_avg": 0.35,
+        "price_change_pct": -70.0,
+    })
+    assert moonshot is False
+    assert pts < 0
+    assert any("shrinking" in w.lower() or "bleeding" in w.lower() for w in warnings)
+
+
 def test_parse_goplus_evm():
     from ml.hidden_gems import _parse_goplus_evm
     sec = {

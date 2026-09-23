@@ -43,6 +43,8 @@ class GemCandidate:
     onchain: Dict[str, Any] | None = None
     narrative: str | None = None
     narrative_momentum: float | None = None
+    trajectory: Dict[str, Any] | None = None
+    moonshot: bool = False
 
 
 # Narratives — taxonomie des thèmes de marché crypto.
@@ -116,6 +118,166 @@ async def _fetch_narrative_momentum() -> Dict[str, float]:
     except Exception as exc:
         logger.debug("narrative_momentum_failed", error=str(exc))
         return {}
+
+
+# ── Tracking longitudinal (détection moonshot) ────────────────────────────────
+# Chaque cycle (cron 30min + appels API) snapshot les métriques par token dans
+# Redis → permet de mesurer la TRAJECTOIRE : croissance holders, liquidité,
+# persistance du buy-flow, survie. C'est ce qui distingue un moonshot naissant
+# d'un pump éphémère — un snapshot seul ne dit rien.
+_GEM_SNAPSHOT_TTL = 14 * 86400  # 14 jours de rétention
+_GEM_SNAPSHOT_MAX = 400
+
+
+def _gem_snapshot_key(chain: str, addr: str) -> str:
+    return f"gem_snapshots:{(chain or '').lower()}:{addr}"
+
+
+async def _record_gem_snapshot(t: Dict[str, Any]) -> None:
+    """Enregistre un snapshot des métriques du token dans Redis."""
+    import json
+    import time
+
+    addr = t.get("token_address")
+    if not addr:
+        return
+    try:
+        from utils.cache import cache
+        oc = t.get("onchain") or {}
+        snap = {
+            "ts": int(time.time()),
+            "price": t.get("price", 0),
+            "liquidity": t.get("liquidity", 0),
+            "volume_24h": t.get("volume_24h", 0),
+            "holders": oc.get("holder_count", 0),
+            "top10_pct": oc.get("top10_pct", 0),
+            "buys": t.get("buys_24h", 0),
+            "sells": t.get("sells_24h", 0),
+        }
+        r = await cache.client()
+        key = _gem_snapshot_key(t.get("chain", ""), addr)
+        await r.lpush(key, json.dumps(snap))
+        await r.ltrim(key, 0, _GEM_SNAPSHOT_MAX - 1)
+        await r.expire(key, _GEM_SNAPSHOT_TTL)
+    except Exception as exc:
+        logger.debug("gem_snapshot_failed", error=str(exc))
+
+
+async def _load_gem_history(chain: str, addr: str) -> List[Dict[str, Any]]:
+    """Historique des snapshots du token, du plus récent au plus ancien."""
+    import json
+
+    if not addr:
+        return []
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        raw = await r.lrange(_gem_snapshot_key(chain, addr), 0, _GEM_SNAPSHOT_MAX - 1)
+        return [json.loads(x) for x in raw]
+    except Exception:
+        return []
+
+
+def _compute_trajectory(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Trajectoire mesurée depuis le premier snapshot du token.
+    """
+    if len(history) < 2:
+        return {"snapshots": len(history), "tracked_hours": 0.0}
+
+    newest, oldest = history[0], history[-1]
+    span_h = max((newest["ts"] - oldest["ts"]) / 3600, 0.01)
+
+    def _growth_24h(field: str) -> float | None:
+        """Croissance vs le snapshot le plus proche d'il y a ~24h."""
+        cutoff = newest["ts"] - 86400
+        base = next((s for s in history if s["ts"] <= cutoff), oldest)
+        old, new = base.get(field) or 0, newest.get(field) or 0
+        return (new - old) / old * 100 if old > 0 else None
+
+    buy_ratios = [
+        s["buys"] / (s["buys"] + s["sells"])
+        for s in history
+        if (s.get("buys") or 0) + (s.get("sells") or 0) >= 20
+    ]
+
+    t10_new, t10_old = newest.get("top10_pct") or 0, oldest.get("top10_pct") or 0
+    old_price, new_price = oldest.get("price") or 0, newest.get("price") or 0
+    return {
+        "snapshots": len(history),
+        "tracked_hours": round(span_h, 1),
+        "holder_growth_pct": _growth_24h("holders"),
+        "liquidity_growth_pct": _growth_24h("liquidity"),
+        "volume_growth_pct": _growth_24h("volume_24h"),
+        "price_change_pct": round((new_price - old_price) / old_price * 100, 1) if old_price > 0 else None,
+        "buy_ratio_avg": round(sum(buy_ratios) / len(buy_ratios), 3) if buy_ratios else None,
+        "top10_trend": round(t10_new - t10_old, 1) if t10_new and t10_old else None,
+    }
+
+
+def _score_trajectory(traj: Dict[str, Any]) -> tuple[int, List[str], List[str], bool]:
+    """
+    Composante trajectoire -15/+15 pts.
+    Retourne (points, reasons, warnings, moonshot_flag).
+    Moonshot = croissance holders explosive + buy-flow dominant persistant
+    + survie ≥6h de tracking.
+    """
+    pts = 0
+    reasons: List[str] = []
+    warnings: List[str] = []
+
+    if (traj.get("snapshots") or 0) < 3:
+        return 0, reasons, warnings, False
+
+    hg = traj.get("holder_growth_pct")
+    if hg is not None:
+        if hg >= 100:
+            pts += 8
+            reasons.append(f"Holder count exploding (+{hg:.0f}% / 24h)")
+        elif hg >= 30:
+            pts += 5
+            reasons.append(f"Strong holder growth (+{hg:.0f}% / 24h)")
+        elif hg <= -50:
+            pts -= 6
+            warnings.append(f"Holder base shrinking ({hg:.0f}% / 24h)")
+
+    lg = traj.get("liquidity_growth_pct")
+    if lg is not None and lg >= 50:
+        pts += 4
+        reasons.append(f"Liquidity growing fast (+{lg:.0f}% / 24h)")
+
+    bra = traj.get("buy_ratio_avg")
+    if bra is not None:
+        if bra >= 0.55:
+            pts += 3
+            reasons.append(f"Persistent buy pressure ({bra*100:.0f}% avg buys)")
+        elif bra <= 0.40:
+            pts -= 4
+            warnings.append(f"Persistent sell pressure ({(1-bra)*100:.0f}% avg sells)")
+
+    tracked = traj.get("tracked_hours") or 0
+    if tracked >= 72:
+        pts += 3
+        reasons.append(f"Survived {tracked/24:.0f}d of tracking — not a flash pump")
+    elif tracked >= 24:
+        pts += 1
+
+    pc = traj.get("price_change_pct")
+    if pc is not None and pc <= -60:
+        pts -= 5
+        warnings.append(f"Price bleeding since detection ({pc:.0f}%)")
+
+    t10 = traj.get("top10_trend")
+    if t10 is not None and t10 < -5:
+        pts += 2
+        reasons.append("Holder concentration decreasing — healthier distribution")
+
+    moonshot = bool(
+        hg is not None and hg >= 50
+        and bra is not None and bra >= 0.55
+        and tracked >= 6
+    )
+    return max(-15, min(15, pts)), reasons, warnings, moonshot
 
 
 # DexScreener chainId → GoPlus chain id (EVM token_security endpoint)
@@ -389,6 +551,7 @@ def _compute_gem_score(
     sells_1h: float = 0.0,
     narrative: str | None = None,
     narrative_momentum: float | None = None,
+    trajectory: Dict[str, Any] | None = None,
 ) -> tuple[int, List[str], List[str]]:
     """
     Compute a 0-100 gem score.
@@ -493,6 +656,12 @@ def _compute_gem_score(
         elif narrative_momentum <= -10:
             score -= 3
             warnings.append(f"Narrative cooling off: {narrative} {narrative_momentum:+.1f}% 24h")
+
+    # 9. Trajectory (-15/+15 pts) — croissance mesurée dans le temps, pas un snapshot
+    tr_pts, tr_reasons, tr_warnings, _ = _score_trajectory(trajectory or {})
+    score += tr_pts
+    reasons.extend(tr_reasons)
+    warnings.extend(tr_warnings)
 
     score = max(0, min(100, score))
     if honeypot:
@@ -696,6 +865,19 @@ async def discover_hidden_gems(
         t["narrative"] = n
         t["narrative_momentum"] = momentum.get(n) if n else None
 
+    # Trajectoire longitudinale : on snapshot PUIS on charge l'historique
+    # (le snapshot courant entre dans la série).
+    await _asyncio.gather(
+        *(_record_gem_snapshot(t) for t in filtered), return_exceptions=True
+    )
+    histories = await _asyncio.gather(
+        *(_load_gem_history(t.get("chain", ""), t.get("token_address", ""))
+          for t in filtered),
+        return_exceptions=True,
+    )
+    for t, h in zip(filtered, histories):
+        t["trajectory"] = _compute_trajectory(h) if isinstance(h, list) else {}
+
     # Score each token
     candidates: List[GemCandidate] = []
     for t in filtered:
@@ -713,7 +895,13 @@ async def discover_hidden_gems(
             sells_1h=t.get("sells_1h", 0),
             narrative=t.get("narrative"),
             narrative_momentum=t.get("narrative_momentum"),
+            trajectory=t.get("trajectory"),
         )
+
+        traj = t.get("trajectory") or {}
+        oc = t.get("onchain") or {}
+        _, _, _, moonshot = _score_trajectory(traj)
+        moonshot = moonshot and not oc.get("honeypot")
 
         candidates.append(GemCandidate(
             symbol=t.get("symbol", ""),
@@ -732,12 +920,15 @@ async def discover_hidden_gems(
             onchain=t.get("onchain") or {},
             narrative=t.get("narrative"),
             narrative_momentum=t.get("narrative_momentum"),
+            trajectory=traj,
+            moonshot=moonshot,
         ))
 
     # Sort by gem_score descending
     candidates.sort(key=lambda c: c.gem_score, reverse=True)
 
     top_gems = candidates[:limit]
+    moonshots = sum(1 for c in candidates if c.moonshot)
 
     return {
         "gems": [
@@ -755,13 +946,18 @@ async def discover_hidden_gems(
                 "onchain": c.onchain,
                 "narrative": c.narrative,
                 "narrative_momentum": c.narrative_momentum,
+                "trajectory": c.trajectory,
+                "moonshot": c.moonshot,
                 "reasons": c.reasons,
                 "warnings": c.warnings,
                 "url": next((t.get("url", "") for t in filtered if t.get("symbol") == c.symbol), ""),
             }
             for c in top_gems
         ],
-        "summary": f"{len(top_gems)} hidden gems discovered (scanned {len(tokens)} tokens)",
+        "summary": (
+            f"{len(top_gems)} hidden gems discovered (scanned {len(tokens)} tokens)"
+            + (f" — {moonshots} moonshot trajectory" if moonshots else "")
+        ),
         "scanned_count": len(tokens),
         "fetched_at": _now_iso(),
     }

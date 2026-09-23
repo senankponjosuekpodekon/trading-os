@@ -107,6 +107,11 @@ export default function HiddenGemsPage() {
                         {gem.narrative}
                       </span>
                     )}
+                    {gem.moonshot && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-yellow-500/50 bg-yellow-500/10 text-yellow-300 font-semibold">
+                        🚀 MOONSHOT
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">{gem.name}</p>
                 </div>
@@ -152,6 +157,27 @@ export default function HiddenGemsPage() {
                   {gem.onchain.honeypot && (
                     <span className="px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 font-semibold">
                       HONEYPOT
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {gem.trajectory?.snapshots >= 3 && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mb-3 pb-3 border-b border-gray-800">
+                  <span className="text-gray-500">Trajectoire {gem.trajectory.tracked_hours}h:</span>
+                  {gem.trajectory.holder_growth_pct != null && (
+                    <span className={gem.trajectory.holder_growth_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      holders {gem.trajectory.holder_growth_pct >= 0 ? '+' : ''}{gem.trajectory.holder_growth_pct.toFixed(0)}%
+                    </span>
+                  )}
+                  {gem.trajectory.liquidity_growth_pct != null && (
+                    <span className={gem.trajectory.liquidity_growth_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      liq {gem.trajectory.liquidity_growth_pct >= 0 ? '+' : ''}{gem.trajectory.liquidity_growth_pct.toFixed(0)}%
+                    </span>
+                  )}
+                  {gem.trajectory.buy_ratio_avg != null && (
+                    <span className="text-gray-400">
+                      buys {(gem.trajectory.buy_ratio_avg * 100).toFixed(0)}%
                     </span>
                   )}
                 </div>
