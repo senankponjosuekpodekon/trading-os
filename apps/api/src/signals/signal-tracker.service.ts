@@ -8,6 +8,10 @@ import { SignalExecutionStatus as PrismaSignalExecutionStatus } from '@prisma/cl
 import { FeatureStoreService } from './feature-store.service';
 
 const DEFAULT_PARTIAL_EXIT_PCT = 33.3;
+// Zone d'entrée : le prix manque l'entrée de 0.37% en médiane (47% < 0.3%)
+// → buffer asymétrique 0.5% dans le sens adverse (fill légèrement moins bon,
+// mais convertit ~la moitié des EXPIRED en vrais trades)
+const ENTRY_ZONE_BUFFER_PCT = 0.005;
 
 @Injectable()
 export class SignalTrackerService {
@@ -64,8 +68,9 @@ export class SignalTrackerService {
       .map(Number);
     let worstPrice = signal.worstExcursionPrice != null ? Number(signal.worstExcursionPrice) : null;
 
-    const entryLow = signal.entryPrice ? Number(signal.entryPrice) : 0;
-    const entryHigh = signal.entryPrice ? Number(signal.entryPrice) : 0;
+    const entryBase = signal.entryPrice ? Number(signal.entryPrice) : 0;
+    const entryLow = direction === 'SHORT' ? entryBase * (1 - ENTRY_ZONE_BUFFER_PCT) : entryBase;
+    const entryHigh = direction === 'LONG' ? entryBase * (1 + ENTRY_ZONE_BUFFER_PCT) : entryBase;
 
     for (const raw of newCandles) {
       const candle: Candle = { openTime: raw.openTime, open: raw.open, high: raw.high, low: raw.low, close: raw.close };

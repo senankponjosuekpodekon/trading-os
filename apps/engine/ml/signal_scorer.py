@@ -25,6 +25,7 @@ class ModelState:
     means: List[float]
     stds: List[float]
     accuracy: float
+    val_accuracy: float
     sample_count: int
     trained_market: Optional[str]
     trained_timeframe: Optional[str]
@@ -139,6 +140,7 @@ class SignalScorer:
                 means=model["means"].tolist(),
                 stds=model["stds"].tolist(),
                 accuracy=float(model["accuracy"]),
+                val_accuracy=float(model["val_accuracy"]),
                 sample_count=sample_count,
                 trained_market=market,
                 trained_timeframe=timeframe,
@@ -151,6 +153,7 @@ class SignalScorer:
                 samples=sample_count,
                 features=len(feature_names),
                 accuracy=model["accuracy"],
+                val_accuracy=model["val_accuracy"],
                 market=market,
                 timeframe=timeframe,
             )
@@ -162,6 +165,7 @@ class SignalScorer:
                 "samples": sample_count,
                 "features": len(feature_names),
                 "accuracy": round(model["accuracy"], 4),
+                "val_accuracy": round(model["val_accuracy"], 4),
                 "market": market,
                 "timeframe": timeframe,
                 "topFeatures": sorted(importance.items(), key=lambda kv: kv[1], reverse=True)[:10],
@@ -198,6 +202,7 @@ class SignalScorer:
             "trained": True,
             "samples": state.sample_count,
             "accuracy": round(state.accuracy, 4),
+            "val_accuracy": round(state.val_accuracy, 4),
             "featureCount": len(state.feature_names),
             "market": state.trained_market,
             "timeframe": state.trained_timeframe,
@@ -317,33 +322,52 @@ class SignalScorer:
         return matrix, np.array(labels, dtype=np.float32), feature_names
 
     def _fit_logistic(self, matrix: np.ndarray, labels: np.ndarray) -> Dict[str, Any]:
-        means = matrix.mean(axis=0)
-        stds = matrix.std(axis=0)
+        # Split train/val 80/20 — l'accuracy train seule est trompeuse
+        # (surfit sur petits datasets). La métrique rapportée est la val.
+        n = matrix.shape[0]
+        rng = np.random.default_rng(42)
+        perm = rng.permutation(n)
+        cut = max(1, int(n * 0.8))
+        tr_idx, va_idx = perm[:cut], perm[cut:]
+        has_val = len(va_idx) > 0
+
+        Xtr_raw, ytr = matrix[tr_idx], labels[tr_idx]
+        means = Xtr_raw.mean(axis=0)
+        stds = Xtr_raw.std(axis=0)
         stds = np.where(stds == 0, 1.0, stds)
-        X = (matrix - means) / stds
+        X = (Xtr_raw - means) / stds
         n_samples, n_features = X.shape
         weights = np.zeros(n_features, dtype=np.float32)
         bias = 0.0
         lr = 0.05
+        l2 = 0.01  # régularisation L2 — réduit la mémorisation
         epochs = max(200, min(800, n_samples * 2))
 
         for _ in range(epochs):
             z = X.dot(weights) + bias
             preds = 1 / (1 + np.exp(-z))
-            errors = preds - labels
-            grad_w = X.T.dot(errors) / n_samples
+            errors = preds - ytr
+            grad_w = X.T.dot(errors) / n_samples + l2 * weights
             grad_b = errors.mean()
             weights -= lr * grad_w
             bias -= lr * grad_b
 
         final_preds = 1 / (1 + np.exp(-(X.dot(weights) + bias)))
-        accuracy = float(((final_preds >= 0.5) == labels).mean())
+        accuracy = float(((final_preds >= 0.5) == ytr).mean())
+
+        val_accuracy = accuracy
+        if has_val:
+            Xva = (matrix[va_idx] - means) / stds
+            va_preds = 1 / (1 + np.exp(-(Xva.dot(weights) + bias)))
+            val_accuracy = float(((va_preds >= 0.5) == labels[va_idx]).mean())
+
         return {
             "weights": weights,
             "bias": bias,
             "means": means,
             "stds": stds,
             "accuracy": accuracy,
+            "val_accuracy": val_accuracy,
         }
 
     def _compute_importance(self, weights: np.ndarray, feature_names: List[str]) -> Dict[str, float]:
@@ -386,6 +410,7 @@ class SignalScorer:
                     means=payload.get("means", []),
                     stds=payload.get("stds", []),
                     accuracy=payload.get("accuracy", 0.0),
+                    val_accuracy=payload.get("val_accuracy", 0.0),
                     sample_count=payload.get("sample_count", 0),
                     trained_market=payload.get("trained_market"),
                     trained_timeframe=payload.get("trained_timeframe"),
@@ -406,6 +431,7 @@ class SignalScorer:
             "means": self._state.means,
             "stds": self._state.stds,
             "accuracy": self._state.accuracy,
+            "val_accuracy": self._state.val_accuracy,
             "sample_count": self._state.sample_count,
             "trained_market": self._state.trained_market,
             "trained_timeframe": self._state.trained_timeframe,

@@ -7,11 +7,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ml.regime_classifier import RegimeClassifier, RegimeModel, STATE_LABELS
+from utils.db_pool import get_shared_pool
 
 router = APIRouter()
 classifier = RegimeClassifier()
 
 _MODEL_CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", ".cache", "regime_model.json")
+_DB_MODEL_NAME = "regime_classifier"
 
 
 def _save_model():
@@ -51,6 +53,60 @@ def _load_model():
 _load_model()
 
 
+def _apply_model(data: dict) -> None:
+    classifier.model = RegimeModel(
+        means=data["means"],
+        variances=data["variances"],
+        transition=data["transition"],
+        priors=data["priors"],
+    )
+
+
+async def _persist_model_db():
+    """Persiste le modèle dans signal_models — survit aux restarts ET rebuilds."""
+    if not classifier.model:
+        return
+    try:
+        pool = await get_shared_pool()
+        payload = json.dumps({
+            "means": classifier.model.means,
+            "variances": classifier.model.variances,
+            "transition": classifier.model.transition,
+            "priors": classifier.model.priors,
+        })
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO signal_models(name, model_json)
+                VALUES($1, $2::jsonb)
+                ON CONFLICT (name) DO UPDATE
+                SET model_json = EXCLUDED.model_json, updated_at = now()
+                """,
+                _DB_MODEL_NAME, payload,
+            )
+    except Exception:
+        pass
+
+
+async def _ensure_model():
+    """Charge le modèle depuis la DB si absent de la mémoire/fichier."""
+    if classifier.model:
+        return
+    try:
+        pool = await get_shared_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT model_json FROM signal_models WHERE name = $1", _DB_MODEL_NAME
+            )
+        if row and row.get("model_json"):
+            data = row["model_json"]
+            if isinstance(data, str):
+                data = json.loads(data)
+            _apply_model(data)
+    except Exception:
+        pass
+
+
 class TrainRequest(BaseModel):
     prices: List[float] = Field(..., min_length=20, description="List of closing prices")
 
@@ -78,6 +134,7 @@ async def train_regime_model(body: TrainRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _save_model()
+    await _persist_model_db()
     regimes = classifier.predict(body.prices)
     return TrainResponse(
         states=regimes,
@@ -108,6 +165,7 @@ async def auto_train_regime():
             raise HTTPException(status_code=500, detail="Not enough price data from Binance")
         model = classifier.train(prices)
         _save_model()
+        await _persist_model_db()
         regimes = classifier.predict(prices)
         return {
             "trained": True,
@@ -124,6 +182,7 @@ async def auto_train_regime():
 
 @router.post("/ml/regime/predict", response_model=PredictResponse)
 async def predict_regime(body: PredictRequest):
+    await _ensure_model()
     try:
         regimes = classifier.predict(body.prices)
     except ValueError as exc:
@@ -133,6 +192,7 @@ async def predict_regime(body: PredictRequest):
 
 @router.get("/ml/regime/status")
 async def regime_status():
+    await _ensure_model()
     if not classifier.model:
         return {"trained": False}
     model: RegimeModel = classifier.model
