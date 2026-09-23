@@ -138,31 +138,70 @@ def _compute_gem_score(
 
 
 async def _fetch_dex_trending() -> List[Dict[str, Any]]:
-    """Fetch trending tokens from DexScreener."""
+    """Fetch trending tokens from DexScreener.
+
+    /token-boosts/top/v1 retourne des TOKENS (chainId + tokenAddress), pas des
+    pairs — liquidity/volume/priceChange n'existent pas dans ce payload.
+    On résout ensuite les pairs en batch via /latest/dex/tokens/{addresses}
+    (≤30 par appel) et on garde la pair la plus liquide par token.
+    """
     import httpx
+    import time
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # DexScreener trending endpoint
             r = await client.get("https://api.dexscreener.com/token-boosts/top/v1")
             r.raise_for_status()
-            data = r.json()
+            boosts = r.json()
 
+        boosted = [i for i in boosts[:30] if i.get("tokenAddress")]
+        if not boosted:
+            return []
+        addr_set = {i["tokenAddress"] for i in boosted}
+        meta_by_addr = {i["tokenAddress"]: i for i in boosted}
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://api.dexscreener.com/latest/dex/tokens/"
+                + ",".join(addr_set)
+            )
+            r.raise_for_status()
+            pairs = r.json().get("pairs") or []
+
+        # Meilleure pair par adresse de token boosté (base ou quote), par liquidité
+        best: Dict[str, Dict[str, Any]] = {}
+        for p in pairs:
+            liq = float(p.get("liquidity", {}).get("usd", 0) or 0)
+            for side in ("baseToken", "quoteToken"):
+                tok = p.get(side) or {}
+                addr = tok.get("address")
+                if addr not in addr_set:
+                    continue
+                cur = best.get(addr)
+                if cur is None or liq > cur["liq"]:
+                    best[addr] = {"liq": liq, "pair": p, "tok": tok}
+
+        now_ms = time.time() * 1000
         tokens = []
-        for item in data[:30]:  # Top 30 boosted tokens
+        for addr, entry in best.items():
+            p = entry["pair"]
+            tok = entry["tok"]
+            meta = meta_by_addr.get(addr, {})
+            created = p.get("pairCreatedAt")
+            age_hours = (now_ms - created) / 3_600_000 if created else 168.0
             tokens.append({
-                "symbol": item.get("symbol", ""),
-                "name": item.get("name", ""),
-                "chain": item.get("chainId", ""),
-                "pair_address": item.get("pairAddress", ""),
-                "price": float(item.get("priceNative", 0) or 0),
-                "liquidity": float(item.get("liquidity", {}).get("usd", 0) or 0),
-                "volume_24h": float(item.get("volume", {}).get("h24", 0) or 0),
-                "price_change_24h": float(item.get("priceChange", {}).get("h24", 0) or 0),
-                "age_hours": 0,  # Not directly available
-                "url": item.get("url", ""),
-                "socials": item.get("links", {}),
-                "description": item.get("description", ""),
+                "symbol": tok.get("symbol", ""),
+                "name": tok.get("name", ""),
+                "chain": p.get("chainId", ""),
+                "pair_address": p.get("pairAddress", ""),
+                "price": float(p.get("priceUsd", 0) or 0),
+                "liquidity": entry["liq"],
+                "volume_24h": float(p.get("volume", {}).get("h24", 0) or 0),
+                "price_change_24h": float(p.get("priceChange", {}).get("h24", 0) or 0),
+                "age_hours": age_hours,
+                "url": p.get("url", ""),
+                "socials": meta.get("links", {}),
+                "description": meta.get("description", ""),
             })
         return tokens
     except Exception as exc:
