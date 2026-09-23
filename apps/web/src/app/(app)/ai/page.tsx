@@ -219,7 +219,7 @@ export default function AiPage() {
               <h2 className="text-white font-semibold">Enrichir la base RAG</h2>
             </div>
             <p className="text-gray-500 text-sm mb-4">
-              Ajoute un document à la base de connaissances — le Copilot le cite dans ses réponses. L'embedding est calculé automatiquement.
+              Ajoute un document à la base de connaissances — le Copilot le cite dans ses réponses. L&apos;embedding est calculé automatiquement.
             </p>
             <div className="space-y-3 mb-4">
               <div className="grid grid-cols-2 gap-3">
