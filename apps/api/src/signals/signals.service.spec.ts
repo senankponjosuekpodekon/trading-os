@@ -25,6 +25,10 @@ describe('SignalsService', () => {
     asset: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      create: jest.fn(),
+    },
+    market: {
+      upsert: jest.fn(),
     },
     strategy: {
       findFirst: jest.fn(),
@@ -516,6 +520,51 @@ describe('SignalsService', () => {
       jest.spyOn(service as any, 'saveSignals').mockRejectedValue(new Error('db'));
       const result = await service.ingestSignal({ signal: 'BUY', confidence: 80, symbol: 'BTC/USDT' });
       expect(result).toBeNull();
+    });
+
+    it('auto-creates the asset (and market) when the symbol is not seeded', async () => {
+      mockPrisma.asset.findUnique.mockResolvedValue(null);
+      mockPrisma.market.upsert.mockResolvedValue({ id: 'm-idx', name: 'Indices' });
+      mockPrisma.asset.create.mockResolvedValue({ id: 'a-new', symbol: 'NASDAQ/USD', market: { name: 'Indices' } });
+      mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.signal.create.mockResolvedValue({ id: 'sig-new' });
+
+      const saved = await service.ingestSignal({
+        symbol: 'NASDAQ/USD', signal: 'BUY', confidence: 75, timeframe: '4h',
+        asset_type: 'US_STOCK', entry_price: 20000, stop_loss: 19800,
+        take_profit_1: 20600, risk_reward: 3, indicators: {},
+      });
+
+      expect(mockPrisma.market.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: { name: 'Indices' },
+        create: { name: 'Indices', type: 'INDICES' },
+      }));
+      expect(mockPrisma.asset.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ symbol: 'NASDAQ/USD', marketId: 'm-idx' }),
+      }));
+      expect(mockPrisma.signal.create).toHaveBeenCalled();
+      expect(saved?.id).toBe('sig-new');
+    });
+
+    it('falls back to symbol heuristics when asset_type is absent', async () => {
+      mockPrisma.asset.findUnique.mockResolvedValue(null);
+      mockPrisma.market.upsert.mockResolvedValue({ id: 'm-syn', name: 'Synthetic' });
+      mockPrisma.asset.create.mockResolvedValue({ id: 'a-v75', symbol: 'V75', market: { name: 'Synthetic' } });
+      mockPrisma.strategy.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.signal.create.mockResolvedValue({ id: 'sig-v75' });
+
+      const saved = await service.ingestSignal({
+        symbol: 'V75', signal: 'SELL', confidence: 72, timeframe: '1h',
+        entry_price: 47.3, stop_loss: 47.8, take_profit_1: 46.3, risk_reward: 2, indicators: {},
+      });
+
+      expect(mockPrisma.market.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        where: { name: 'Synthetic' },
+      }));
+      expect(mockPrisma.asset.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ symbol: 'V75', name: 'Volatility 75 Index' }),
+      }));
+      expect(saved?.id).toBe('sig-v75');
     });
   });
 });

@@ -22,6 +22,16 @@ import { SystemHealthService } from '../system-health/system-health.service';
 export class SignalsService {
   private readonly logger = new Logger(SignalsService.name);
 
+  // engine asset_type → marché BDD (name + MarketType pour upsert)
+  private static readonly ASSET_TYPE_TO_MARKET: Record<string, { name: string; type: string }> = {
+    CRYPTO: { name: 'Crypto', type: 'CRYPTO' },
+    FOREX: { name: 'Forex', type: 'FOREX' },
+    SYNTHETIC: { name: 'Synthetic', type: 'SYNTHETIC' },
+    COMMODITY: { name: 'Commodities', type: 'COMMODITIES' },
+    US_STOCK: { name: 'Indices', type: 'INDICES' },
+    BRVM: { name: 'BRVM', type: 'STOCKS' },
+  };
+
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
@@ -437,6 +447,56 @@ export class SignalsService {
     return Math.min(1, base + rrBonus);
   }
 
+  // Fallback heuristique quand asset_type est absent — miroir de get_asset_type() côté engine
+  private _inferMarket(symbol: string, assetType?: string | null) {
+    const t = assetType?.toUpperCase();
+    if (t && SignalsService.ASSET_TYPE_TO_MARKET[t]) return SignalsService.ASSET_TYPE_TO_MARKET[t];
+    if (symbol.endsWith('/USDT')) return SignalsService.ASSET_TYPE_TO_MARKET.CRYPTO;
+    if (/^(VIX|JUMP|BOOM|CRASH|V\d+|STPRNG|STEP|RB\d+)/i.test(symbol)) return SignalsService.ASSET_TYPE_TO_MARKET.SYNTHETIC;
+    if (['XAU/USD', 'XAG/USD', 'WTI/USD', 'BRENT/USD'].includes(symbol)) return SignalsService.ASSET_TYPE_TO_MARKET.COMMODITY;
+    if (symbol.includes('/')) return SignalsService.ASSET_TYPE_TO_MARKET.FOREX;
+    return SignalsService.ASSET_TYPE_TO_MARKET.BRVM;
+  }
+
+  private _assetDisplayName(symbol: string): string {
+    const m = symbol.match(/^(V|VIX|JUMP|BOOM|CRASH)(\d+)$/i);
+    if (m) {
+      const label = { V: 'Volatility', VIX: 'Volatility', JUMP: 'Jump', BOOM: 'Boom', CRASH: 'Crash' }[m[1].toUpperCase()];
+      return `${label} ${m[2]} Index`;
+    }
+    return symbol;
+  }
+
+  // Crée l'Asset (et le Market si absent) pour les symboles scannés non seedés —
+  // sinon les signaux ≥70% de ces symboles n'étaient jamais persistés.
+  private async _ensureAsset(r: any) {
+    const mkt = this._inferMarket(r.symbol, r.asset_type);
+    if (!mkt) return null;
+    try {
+      const market = await this.prisma.market.upsert({
+        where: { name: mkt.name },
+        create: { name: mkt.name, type: mkt.type as any },
+        update: {},
+      });
+      return await this.prisma.asset.create({
+        data: {
+          symbol: r.symbol,
+          name: this._assetDisplayName(r.symbol),
+          marketId: market.id,
+          baseCurrency: r.symbol.includes('/') ? r.symbol.split('/')[1] : 'USD',
+          metadata: { auto_created: true, asset_type: r.asset_type ?? null },
+        },
+        include: { market: { select: { name: true } } },
+      });
+    } catch {
+      // Course concurrente entre ingests — l'asset existe déjà
+      return this.prisma.asset.findUnique({
+        where: { symbol: r.symbol },
+        include: { market: { select: { name: true } } },
+      });
+    }
+  }
+
   private async saveSignals(
     results: any[],
     alertUserId = '*',
@@ -476,10 +536,14 @@ export class SignalsService {
       // signal_pending from hysteresis is now persisted with PENDING status
       // so it appears as a SignalCard and can be tracked through confirmation
 
-      const asset = await this.prisma.asset.findUnique({
+      let asset = await this.prisma.asset.findUnique({
         where: { symbol: r.symbol },
         include: { market: { select: { name: true } } },
       });
+      if (!asset) {
+        asset = await this._ensureAsset(r);
+        if (asset) this.logger.log(`auto-created asset ${r.symbol} (market=${asset.market?.name})`);
+      }
       if (!asset) continue;
 
       let strategy: any = null;
