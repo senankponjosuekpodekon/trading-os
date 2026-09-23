@@ -335,9 +335,13 @@ function ScannerPageInner() {
   }, [scanHistoryData, minConf]);
 
   const liveHighQualitySignals = useMemo<Signal[]>(() => {
+    // Dédupliquer sur TOUTES les entrées fetchées (pas le top-20 du feed) :
+    // sinon une rafale de nouveaux scans éjecte la source de la carte et
+    // elle disparaît au poll suivant.
+    const entries = scanHistoryData?.entries ?? scanHistoryData ?? [];
     const latestByKey = new Map<string, any>();
-    for (const e of liveEntries) {
-      if ((e.confidence ?? 0) >= 70) {
+    for (const e of entries) {
+      if ((e.signal === 'BUY' || e.signal === 'SELL') && (e.confidence ?? 0) >= QUALITY_THRESHOLD) {
         const key = `${e.symbol}-${e.timeframe}-${e.signal}`;
         const existing = latestByKey.get(key);
         if (!existing || new Date(e.scanned_at || 0).getTime() > new Date(existing.scanned_at || 0).getTime()) {
@@ -362,7 +366,7 @@ function ScannerPageInner() {
       status: 'ACTIVE',
       explanation: e.explanation,
     }));
-  }, [liveEntries]);
+  }, [scanHistoryData]);
 
   const scan = useMutation({
     mutationFn: async () => (await api.post('/signals/scan', {

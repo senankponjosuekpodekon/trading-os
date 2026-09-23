@@ -26,12 +26,13 @@ export function usePushNotifications() {
       .catch(() => {});
   }, []);
 
-  const subscribe = async () => {
-    if (!publicKey || !supported) return;
+  const subscribe = async (key?: string) => {
+    const appKey = key ?? publicKey;
+    if (!appKey || !supported) return;
     const registration = await navigator.serviceWorker.ready;
     const sub = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
+      applicationServerKey: urlBase64ToUint8Array(appKey),
     });
     await api.post('/notifications/push-subscribe', { subscription: sub.toJSON() });
     setSubscribed(true);
@@ -49,7 +50,15 @@ export function usePushNotifications() {
   const requestPermission = async () => {
     const perm = await Notification.requestPermission();
     setPermission(perm);
-    if (perm === 'granted') await subscribe();
+    if (perm !== 'granted') return;
+    // La clé publique arrive en async — la re-fetcher si pas encore chargée
+    let key = publicKey;
+    if (!key) {
+      const res = await api.get('/notifications/push-public-key').catch(() => null);
+      key = res?.data?.enabled ? res.data.publicKey : null;
+      if (key) setPublicKey(key);
+    }
+    await subscribe(key ?? undefined);
   };
 
   return { supported, permission, subscribed, publicKey, requestPermission, unsubscribe };

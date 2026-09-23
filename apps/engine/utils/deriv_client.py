@@ -28,13 +28,13 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-DERIV_WS_URL = os.getenv(
-    "DERIV_WS_URL",
-    "wss://api.derivws.com/trading/v1/options/ws/public",
+DERIV_WS_URL = (
+    os.getenv("DERIV_WS_URL")
+    or "wss://api.derivws.com/trading/v1/options/ws/public"
 )
 
 # Budget de requêtes/minute côté client — marge sous la limite Deriv (~220/min).
-DERIV_MAX_RPM = int(os.getenv("DERIV_MAX_RPM", "180"))
+DERIV_MAX_RPM = int(os.getenv("DERIV_MAX_RPM") or "180")
 
 _PING_INTERVAL = 25.0      # secondes entre les pings keepalive
 _CONNECT_TIMEOUT = 10.0
