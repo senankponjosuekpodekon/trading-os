@@ -17,6 +17,11 @@ services:
       REDIS_URL: redis://host.docker.internal:6379
       ENGINE_API_KEY: ${ENGINE_API_KEY:?ENGINE_API_KEY is required}
       API_URL: http://api:3001
+      DERIV_API_TOKEN: ${DERIV_API_TOKEN:-}
+      DERIV_WS_URL: ${DERIV_WS_URL:-}
+      DERIV_MAX_RPM: ${DERIV_MAX_RPM:-180}
+      DERIV_APP_ID: ${DERIV_APP_ID:-}
+      DERIV_ACCOUNT_ID: ${DERIV_ACCOUNT_ID:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
