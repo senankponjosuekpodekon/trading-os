@@ -201,11 +201,13 @@ export class SignalsController {
     @Query('limit') limit?: string,
     @Query('strategy') strategy?: string,
     @Query('signal') signal?: string,
+    @Query('min_confidence') minConfidence?: string,
   ) {
     const lim = limit ? Math.min(200, Math.max(1, parseInt(limit, 10))) : 50;
     const params: Record<string, any> = { limit: lim };
     if (strategy) params.strategy = strategy;
     if (signal) params.signal = signal;
+    if (minConfidence) params.min_confidence = minConfidence;
     return this.engine.get('/scan/history', { params });
   }
 

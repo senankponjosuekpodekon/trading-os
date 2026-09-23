@@ -32,6 +32,11 @@ const ALL_SYMBOLS = SCAN_SYMBOLS_GROUPS.flatMap(g => g.symbols);
 const LS_SYMBOLS = 'scanner_selected_symbols';
 const LS_TF = 'scanner_timeframe';
 
+const QUALITY_THRESHOLD = 70;
+// Fenêtre d'absence : > cycle warmup max (10 min + jitter). Un signal qui
+// réapparaît après cette durée est considéré comme une nouvelle occurrence.
+const SIGNAL_ABSENCE_MS = 20 * 60 * 1000;
+
 function inferMarket(symbol?: string): string {
   if (!symbol) return 'UNKNOWN';
   if (symbol.endsWith('/USDT')) return 'CRYPTO';
@@ -180,9 +185,17 @@ function ScannerPageInner() {
   const scanPollingInterval = pollingConfig?.scanPollingInterval ?? 5_000;
 
   // ── Real-time scan history (from engine warmup loops) ───────
+  // Filtré côté serveur (BUY/SELL + min conf) pour couvrir toute la liste
+  // Redis (500 entrées) sans être éjecté par le bruit NEUTRAL.
   const { data: scanHistoryData, isFetching: scanHistoryLoading } = useQuery({
-    queryKey: ['scan-history-scanner'],
-    queryFn: async () => (await api.get('/signals/scan-history', { params: { limit: 100 } })).data,
+    queryKey: ['scan-history-scanner', minConf],
+    queryFn: async () => (await api.get('/signals/scan-history', {
+      params: {
+        limit: 200,
+        signal: 'BUY,SELL',
+        min_confidence: Math.min(minConf, QUALITY_THRESHOLD),
+      },
+    })).data,
     refetchInterval: autoRefresh ? scanPollingInterval : false,
     staleTime: 3_000,
   });
@@ -208,36 +221,52 @@ function ScannerPageInner() {
 
   // ── Detect new quality signals from scan-history ────────────
   const prevScanIds = useRef<Set<string>>(new Set());
-  const QUALITY_THRESHOLD = 70;
+  // Dernière occurrence vue par signal logique (symbol-timeframe-signal).
+  // Un signal qui refire à chaque cycle warmup = une seule occurrence :
+  // on ne re-notifie que s'il a disparu plus de SIGNAL_ABSENCE_MS.
+  const signalLastSeen = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const entries = scanHistoryData?.entries ?? scanHistoryData ?? [];
     if (!entries || entries.length === 0) return;
 
+    const isQuality = (e: any) =>
+      (e.signal === 'BUY' || e.signal === 'SELL') && (e.confidence ?? 0) >= QUALITY_THRESHOLD;
+    const keyOf = (e: any) => `${e.symbol}-${e.timeframe}-${e.signal}`;
+
     const currentIds = new Set<string>(entries.map((e: any) => `${e.symbol}-${e.timeframe}-${e.scanned_at}`));
-    const freshEntries = entries.filter((e: any) => {
-      const id = `${e.symbol}-${e.timeframe}-${e.scanned_at}`;
-      return !prevScanIds.current.has(id);
-    });
+    const isFirstPoll = prevScanIds.current.size === 0;
+    const freshEntries = entries.filter((e: any) =>
+      !prevScanIds.current.has(`${e.symbol}-${e.timeframe}-${e.scanned_at}`)
+    );
+    prevScanIds.current = currentIds;
 
-    if (prevScanIds.current.size > 0 && freshEntries.length > 0) {
-      const qualityNew = freshEntries.filter((e: any) =>
-        (e.signal === 'BUY' || e.signal === 'SELL') && (e.confidence ?? 0) >= QUALITY_THRESHOLD
-      );
-
-      if (qualityNew.length > 0 && notifyEnabled) {
-        qualityNew.slice(0, 3).forEach((e: any) => {
-          const icon = e.signal === 'BUY' ? '🟢' : '🔴';
-          toast(`${icon} ${e.symbol} ${e.signal} ${e.confidence}% — ${e.timeframe}`, {
-            title: 'Nouveau signal détecté',
-            type: e.signal === 'BUY' ? 'success' : 'error',
-          });
-        });
-        setNewCount(c => c + qualityNew.length);
+    const now = Date.now();
+    // Une notification par signal logique (l'entrée la plus récente en tête de liste).
+    const newOccurrences = new Map<string, any>();
+    for (const e of freshEntries) {
+      if (!isQuality(e)) continue;
+      const key = keyOf(e);
+      const lastSeen = signalLastSeen.current.get(key);
+      if ((lastSeen === undefined || now - lastSeen > SIGNAL_ABSENCE_MS) && !newOccurrences.has(key)) {
+        newOccurrences.set(key, e);
       }
     }
+    // Rafraîchir la présence de tous les signaux qualité visibles.
+    for (const e of entries) {
+      if (isQuality(e)) signalLastSeen.current.set(keyOf(e), now);
+    }
 
-    prevScanIds.current = currentIds;
+    if (!isFirstPoll && newOccurrences.size > 0 && notifyEnabled) {
+      Array.from(newOccurrences.values()).slice(0, 3).forEach((e: any) => {
+        const icon = e.signal === 'BUY' ? '🟢' : '🔴';
+        toast(`${icon} ${e.symbol} ${e.signal} ${e.confidence}% — ${e.timeframe}`, {
+          title: 'Nouveau signal détecté',
+          type: e.signal === 'BUY' ? 'success' : 'error',
+        });
+      });
+      setNewCount(c => c + newOccurrences.size);
+    }
   }, [scanHistoryData, notifyEnabled, toast]);
 
   // ── Also sync store signals ─────────────────────────────────

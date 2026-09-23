@@ -689,11 +689,18 @@ async def scan_multi(req: ScanRequest):
 
 
 @router.get("/history")
-async def scan_history(limit: int = 50, strategy: str | None = None, signal: str | None = None):
-    """Retourne les derniers scans depuis Redis (temps réel, TTL 1h)."""
+async def scan_history(limit: int = 50, strategy: str | None = None,
+                       signal: str | None = None, min_confidence: float | None = None):
+    """Retourne les derniers scans depuis Redis (temps réel, TTL 1h).
+    `signal` accepte plusieurs valeurs séparées par des virgules (ex: "BUY,SELL").
+    `min_confidence` filtre côté serveur pour couvrir toute la liste même si
+    les entrées récentes sont dominées par du NEUTRAL.
+    """
     try:
         r = await cache.client()
-        raw_entries = await r.lrange("scan_history:recent", 0, min(limit * 4, 499))
+        depth = 499 if (strategy or signal or min_confidence is not None) else min(limit * 4, 499)
+        raw_entries = await r.lrange("scan_history:recent", 0, depth)
+        allowed_signals = {s.strip().upper() for s in signal.split(",")} if signal else None
         entries = []
         for raw in raw_entries:
             try:
@@ -702,7 +709,9 @@ async def scan_history(limit: int = 50, strategy: str | None = None, signal: str
                 continue
             if strategy and entry.get("strategy_name") != strategy:
                 continue
-            if signal and entry.get("signal") != signal:
+            if allowed_signals and entry.get("signal") not in allowed_signals:
+                continue
+            if min_confidence is not None and (entry.get("confidence") or 0) < min_confidence:
                 continue
             entries.append(entry)
             if len(entries) >= limit:
