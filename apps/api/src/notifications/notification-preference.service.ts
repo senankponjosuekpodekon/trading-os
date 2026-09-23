@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateNotificationPreferenceDto } from './dto/notification-preference.dto';
 
@@ -19,6 +20,13 @@ export class NotificationPreferenceService {
       this.logger.log(`Notification preferences created for user ${userId}`);
     }
     return pref;
+  }
+
+  async findPushSubscribed() {
+    return this.prisma.notificationPreference.findMany({
+      where: { pushEnabled: true, pushSubscription: { not: Prisma.DbNull } },
+      select: { userId: true, pushSubscription: true, minConfidence: true },
+    });
   }
 
   async update(userId: string, dto: UpdateNotificationPreferenceDto) {

@@ -1,3 +1,4 @@
+import * as webPush from 'web-push';
 import { AlertService, SignalAlertInput } from './alert.service';
 import { NotificationsService } from './notifications.service';
 import { NotificationPreferenceService } from './notification-preference.service';
@@ -139,6 +140,25 @@ describe('AlertService', () => {
       alertService.sendSignal('u1', baseSignal);
       await new Promise(r => setTimeout(r, 50));
       expect(spy).toHaveBeenCalledWith('u1', baseSignal);
+    });
+
+    it('broadcasts to every push subscriber when userId is *', async () => {
+      process.env.VAPID_PUBLIC_KEY = 'pub';
+      process.env.VAPID_PRIVATE_KEY = 'priv';
+      process.env.VAPID_SUBJECT = 'mailto:test@test.com';
+      prefService.findPushSubscribed = jest.fn().mockResolvedValue([
+        { userId: 'u1', pushSubscription: { endpoint: 'https://push.test/1', keys: { p256dh: 'a', auth: 'b' } }, minConfidence: 60 },
+        { userId: 'u2', pushSubscription: { endpoint: 'https://push.test/2', keys: { p256dh: 'c', auth: 'd' } }, minConfidence: 90 },
+      ]);
+      alertService = new AlertService(notificationsService, prefService as NotificationPreferenceService);
+      (webPush.sendNotification as jest.Mock).mockClear();
+
+      alertService.sendSignal('*', baseSignal); // score 70 → u1 (min 60) reçoit, u2 (min 90) filtré
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(prefService.findPushSubscribed).toHaveBeenCalled();
+      expect(webPush.sendNotification).toHaveBeenCalledTimes(1);
+      expect((webPush.sendNotification as jest.Mock).mock.calls[0][0].endpoint).toBe('https://push.test/1');
     });
   });
 });

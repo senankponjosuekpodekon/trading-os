@@ -116,10 +116,28 @@ export class AlertService {
   private async sendPushAlert(userId: string, input: SignalAlertInput) {
     if (!this.webPushConfigured) return;
 
+    // '*' = signal global (warmup auto-ingest) → broadcast à tous les abonnés push
+    if (userId === '*') {
+      let subs: Awaited<ReturnType<NotificationPreferenceService['findPushSubscribed']>> = [];
+      try {
+        subs = await this.prefService.findPushSubscribed();
+      } catch {}
+      const scorePct = Math.round((input.opportunityScore ?? input.confidence / 100) * 100);
+      await Promise.allSettled(
+        subs
+          .filter(p => scorePct >= (p.minConfidence ?? 0))
+          .map(p => this._deliverPush(p.userId, p.pushSubscription, input)),
+      );
+      return;
+    }
+
     const pref = await this.prefService.getOrCreate(userId);
     if (!pref.pushEnabled || !pref.pushSubscription) return;
+    await this._deliverPush(userId, pref.pushSubscription, input);
+  }
 
-    const sub = pref.pushSubscription as unknown as { endpoint: string; keys: { p256dh: string; auth: string } };
+  private async _deliverPush(userId: string, subscription: unknown, input: SignalAlertInput) {
+    const sub = subscription as { endpoint: string; keys: { p256dh: string; auth: string } };
     const title = `Signal ${input.signal} — ${input.symbol}`;
     const body = `Confiance ${Math.round((input.opportunityScore ?? input.confidence / 100) * 100)}%${input.timeframe ? ` · ${input.timeframe}` : ''}`;
     const payload = JSON.stringify({
