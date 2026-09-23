@@ -80,6 +80,59 @@ def _flatten_features(data: Any, prefix: str = "") -> Dict[str, float]:
     return flat
 
 
+def fit_logistic(matrix: np.ndarray, labels: np.ndarray) -> Dict[str, Any]:
+    """Régression logistique numpy avec split train/val 80/20 + L2.
+
+    Partagée entre SignalScorer et XGBoostSignalScorer (fallback) — la
+    val_accuracy reflète la généralisation, pas la mémorisation.
+    """
+    n = matrix.shape[0]
+    rng = np.random.default_rng(42)
+    perm = rng.permutation(n)
+    cut = max(1, int(n * 0.8))
+    tr_idx, va_idx = perm[:cut], perm[cut:]
+    has_val = len(va_idx) > 0
+
+    Xtr_raw, ytr = matrix[tr_idx], labels[tr_idx]
+    means = Xtr_raw.mean(axis=0)
+    stds = Xtr_raw.std(axis=0)
+    stds = np.where(stds == 0, 1.0, stds)
+    X = (Xtr_raw - means) / stds
+    n_samples, n_features = X.shape
+    weights = np.zeros(n_features, dtype=np.float32)
+    bias = 0.0
+    lr = 0.05
+    l2 = 0.01  # régularisation L2 — réduit la mémorisation
+    epochs = max(200, min(800, n_samples * 2))
+
+    for _ in range(epochs):
+        z = X.dot(weights) + bias
+        preds = 1 / (1 + np.exp(-z))
+        errors = preds - ytr
+        grad_w = X.T.dot(errors) / n_samples + l2 * weights
+        grad_b = errors.mean()
+        weights -= lr * grad_w
+        bias -= lr * grad_b
+
+    final_preds = 1 / (1 + np.exp(-(X.dot(weights) + bias)))
+    accuracy = float(((final_preds >= 0.5) == ytr).mean())
+
+    val_accuracy = accuracy
+    if has_val:
+        Xva = (matrix[va_idx] - means) / stds
+        va_preds = 1 / (1 + np.exp(-(Xva.dot(weights) + bias)))
+        val_accuracy = float(((va_preds >= 0.5) == labels[va_idx]).mean())
+
+    return {
+        "weights": weights,
+        "bias": bias,
+        "means": means,
+        "stds": stds,
+        "accuracy": accuracy,
+        "val_accuracy": val_accuracy,
+    }
+
+
 class SignalScorer:
     """Trainable logistic model leveraging the signal feature store."""
 
@@ -130,7 +183,7 @@ class SignalScorer:
                     "samples": sample_count,
                 }
 
-            model = self._fit_logistic(matrix, labels)
+            model = fit_logistic(matrix, labels)
             importance = self._compute_importance(model["weights"], feature_names)
 
             self._state = ModelState(
@@ -320,55 +373,6 @@ class SignalScorer:
                 if value is not None:
                     matrix[i, j] = value
         return matrix, np.array(labels, dtype=np.float32), feature_names
-
-    def _fit_logistic(self, matrix: np.ndarray, labels: np.ndarray) -> Dict[str, Any]:
-        # Split train/val 80/20 — l'accuracy train seule est trompeuse
-        # (surfit sur petits datasets). La métrique rapportée est la val.
-        n = matrix.shape[0]
-        rng = np.random.default_rng(42)
-        perm = rng.permutation(n)
-        cut = max(1, int(n * 0.8))
-        tr_idx, va_idx = perm[:cut], perm[cut:]
-        has_val = len(va_idx) > 0
-
-        Xtr_raw, ytr = matrix[tr_idx], labels[tr_idx]
-        means = Xtr_raw.mean(axis=0)
-        stds = Xtr_raw.std(axis=0)
-        stds = np.where(stds == 0, 1.0, stds)
-        X = (Xtr_raw - means) / stds
-        n_samples, n_features = X.shape
-        weights = np.zeros(n_features, dtype=np.float32)
-        bias = 0.0
-        lr = 0.05
-        l2 = 0.01  # régularisation L2 — réduit la mémorisation
-        epochs = max(200, min(800, n_samples * 2))
-
-        for _ in range(epochs):
-            z = X.dot(weights) + bias
-            preds = 1 / (1 + np.exp(-z))
-            errors = preds - ytr
-            grad_w = X.T.dot(errors) / n_samples + l2 * weights
-            grad_b = errors.mean()
-            weights -= lr * grad_w
-            bias -= lr * grad_b
-
-        final_preds = 1 / (1 + np.exp(-(X.dot(weights) + bias)))
-        accuracy = float(((final_preds >= 0.5) == ytr).mean())
-
-        val_accuracy = accuracy
-        if has_val:
-            Xva = (matrix[va_idx] - means) / stds
-            va_preds = 1 / (1 + np.exp(-(Xva.dot(weights) + bias)))
-            val_accuracy = float(((va_preds >= 0.5) == labels[va_idx]).mean())
-
-        return {
-            "weights": weights,
-            "bias": bias,
-            "means": means,
-            "stds": stds,
-            "accuracy": accuracy,
-            "val_accuracy": val_accuracy,
-        }
 
     def _compute_importance(self, weights: np.ndarray, feature_names: List[str]) -> Dict[str, float]:
         abs_weights = np.abs(weights)

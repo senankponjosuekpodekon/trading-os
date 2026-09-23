@@ -37,7 +37,8 @@ async def test_signal_scorer_trains_and_predicts():
 
     prediction = await scorer.predict(dataset[0]["features"])
     assert 0 <= prediction["probability"] <= 1
-    assert math.isclose(prediction["confidence_ml"], prediction["probability"] * 100, rel_tol=1e-5)
+    # confidence_ml = probability*100 arrondi à 2 décimales → tolérance absolue
+    assert math.isclose(prediction["confidence_ml"], prediction["probability"] * 100, abs_tol=0.01)
 
 
 @pytest.mark.asyncio

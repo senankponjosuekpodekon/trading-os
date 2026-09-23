@@ -19,7 +19,7 @@ import numpy as np
 
 from utils.logger import get_logger
 from utils.db_pool import get_shared_pool as _get_pool
-from ml.signal_scorer import _flatten_features
+from ml.signal_scorer import _flatten_features, fit_logistic
 
 logger = get_logger(__name__)
 
@@ -41,6 +41,7 @@ class XGBModelState:
     means: List[float]
     stds: List[float]
     accuracy: float
+    val_accuracy: float
     sample_count: int
     trained_market: Optional[str]
     trained_timeframe: Optional[str]
@@ -103,7 +104,7 @@ class XGBoostSignalScorer:
             if _XGB_AVAILABLE and sample_count >= 50:
                 result = self._fit_xgboost(matrix, labels, feature_names)
             else:
-                result = self._fit_logistic(matrix, labels)
+                result = fit_logistic(matrix, labels)
                 result["model_type"] = "logistic"
 
             importance = self._compute_importance(result, feature_names)
@@ -116,6 +117,7 @@ class XGBoostSignalScorer:
                 means=result.get("means", []).tolist() if isinstance(result.get("means"), np.ndarray) else result.get("means", []),
                 stds=result.get("stds", []).tolist() if isinstance(result.get("stds"), np.ndarray) else result.get("stds", []),
                 accuracy=float(result["accuracy"]),
+                val_accuracy=float(result.get("val_accuracy", result["accuracy"])),
                 sample_count=sample_count,
                 trained_market=market,
                 trained_timeframe=timeframe,
@@ -147,6 +149,7 @@ class XGBoostSignalScorer:
                 "samples": sample_count,
                 "features": len(feature_names),
                 "accuracy": round(result["accuracy"], 4),
+                "val_accuracy": round(result.get("val_accuracy", result["accuracy"]), 4),
                 "market": market,
                 "timeframe": timeframe,
                 "topFeatures": sorted(importance.items(), key=lambda kv: kv[1], reverse=True)[:10],
@@ -188,6 +191,7 @@ class XGBoostSignalScorer:
             "xgboost_available": _XGB_AVAILABLE,
             "samples": self._state.sample_count,
             "accuracy": round(self._state.accuracy, 4),
+            "val_accuracy": round(self._state.val_accuracy, 4),
             "featureCount": len(self._state.feature_names),
             "market": self._state.trained_market,
             "timeframe": self._state.trained_timeframe,
@@ -238,37 +242,6 @@ class XGBoostSignalScorer:
             "stds": stds,
             "accuracy": accuracy,
             "model_type": "xgboost",
-        }
-
-    def _fit_logistic(self, matrix: np.ndarray, labels: np.ndarray) -> Dict[str, Any]:
-        means = matrix.mean(axis=0)
-        stds = matrix.std(axis=0)
-        stds = np.where(stds == 0, 1.0, stds)
-        X = (matrix - means) / stds
-        n_samples, n_features = X.shape
-        weights = np.zeros(n_features, dtype=np.float32)
-        bias = 0.0
-        lr = 0.05
-        epochs = max(200, min(800, n_samples * 2))
-
-        for _ in range(epochs):
-            z = X.dot(weights) + bias
-            preds = 1 / (1 + np.exp(-z))
-            errors = preds - labels
-            grad_w = X.T.dot(errors) / n_samples
-            grad_b = errors.mean()
-            weights -= lr * grad_w
-            bias -= lr * grad_b
-
-        final_preds = 1 / (1 + np.exp(-(X.dot(weights) + bias)))
-        accuracy = float(((final_preds >= 0.5) == labels).mean())
-        return {
-            "weights": weights,
-            "bias": bias,
-            "means": means,
-            "stds": stds,
-            "accuracy": accuracy,
-            "model_type": "logistic",
         }
 
     def _compute_importance(self, result: Dict, feature_names: List[str]) -> Dict[str, float]:
@@ -397,6 +370,7 @@ class XGBoostSignalScorer:
                     means=payload.get("means", []),
                     stds=payload.get("stds", []),
                     accuracy=payload.get("accuracy", 0.0),
+                    val_accuracy=payload.get("val_accuracy", 0.0),
                     sample_count=payload.get("sample_count", 0),
                     trained_market=payload.get("trained_market"),
                     trained_timeframe=payload.get("trained_timeframe"),
@@ -423,6 +397,7 @@ class XGBoostSignalScorer:
             "means": self._state.means,
             "stds": self._state.stds,
             "accuracy": self._state.accuracy,
+            "val_accuracy": self._state.val_accuracy,
             "sample_count": self._state.sample_count,
             "trained_market": self._state.trained_market,
             "trained_timeframe": self._state.trained_timeframe,
