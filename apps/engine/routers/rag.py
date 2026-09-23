@@ -207,6 +207,33 @@ async def add_document(doc: DocumentIn):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+async def retrieve_documents(question: str, top_k: int = 3, category: Optional[str] = None) -> list:
+    """Recherche vectorielle réutilisable (copilot chat, etc.)."""
+    q_emb     = _embed(question)
+    q_emb_str = "[" + ",".join(str(x) for x in q_emb) + "]"
+
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        where  = "WHERE category = $3" if category else ""
+        params = [q_emb_str, top_k]
+        if category:
+            params.append(category)
+        rows = await conn.fetch(
+            f"""SELECT id, title, content, category,
+                       1 - (embedding <=> $1::vector) AS score
+                FROM rag_documents
+                {where}
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2""",
+            *params
+        )
+    return [
+        {"id": r["id"], "title": r["title"], "content": r["content"],
+         "category": r["category"], "score": round(float(r["score"]), 4)}
+        for r in rows
+    ]
+
+
 @router.post("/rag/query")
 async def query_rag(req: QueryIn):
     """

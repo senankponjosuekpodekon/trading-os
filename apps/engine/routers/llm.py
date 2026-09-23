@@ -764,6 +764,19 @@ def _build_chat_system_prompt(req: ChatRequest) -> str:
 @router.post("/llm/chat")
 async def chat(req: ChatRequest):
     system = _build_chat_system_prompt(req)
+
+    # RAG : injecter les docs pertinents de la base de connaissances
+    try:
+        from routers.rag import retrieve_documents
+        docs = await retrieve_documents(req.message, top_k=2)
+        relevant = [d for d in docs if d["score"] >= 0.35]
+        if relevant:
+            system += "\n\nDocuments de référence (base de connaissances) :"
+            for d in relevant:
+                system += f"\n- {d['title']} : {d['content']}"
+    except Exception:
+        pass  # RAG indisponible → le chat fonctionne sans
+
     messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
 
     reply, provider, model = await _call_llm_with_fallback(messages=messages, max_tokens=500)
