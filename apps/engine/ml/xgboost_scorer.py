@@ -143,6 +143,7 @@ class XGBoostSignalScorer:
             return {
                 "trained": True,
                 "model_type": self._state.model_type,
+                "xgboost_available": _XGB_AVAILABLE,
                 "samples": sample_count,
                 "features": len(feature_names),
                 "accuracy": round(result["accuracy"], 4),
@@ -152,6 +153,7 @@ class XGBoostSignalScorer:
             }
 
     async def predict(self, features: Dict[str, Any]) -> Dict[str, Any]:
+        await self._ensure_state()
         if not self._state:
             raise ValueError("model_not_trained")
         vector = self._build_vector(features, self._state.feature_names)
@@ -177,11 +179,13 @@ class XGBoostSignalScorer:
         }
 
     async def status(self) -> Dict[str, Any]:
+        await self._ensure_state()
         if not self._state:
-            return {"trained": False, "message": "model not trained yet"}
+            return {"trained": False, "message": "model not trained yet", "xgboost_available": _XGB_AVAILABLE}
         return {
             "trained": True,
             "model_type": self._state.model_type,
+            "xgboost_available": _XGB_AVAILABLE,
             "samples": self._state.sample_count,
             "accuracy": round(self._state.accuracy, 4),
             "featureCount": len(self._state.feature_names),
