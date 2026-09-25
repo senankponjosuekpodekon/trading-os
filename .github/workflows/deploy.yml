@@ -23,6 +23,8 @@ jobs:
           GHCR_USER: ${{ secrets.GHCR_USERNAME || github.actor }}
           GHCR_PASS: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
+          TAG="sha-$(echo "${SHA}" | cut -c1-7)"
+          echo "Deploying tag: ${TAG}"
           mkdir -p ~/.ssh
           echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
@@ -30,11 +32,11 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
             "cd /root/projects/trading-os && \
              docker login ghcr.io -u '${GHCR_USER}' -p '${GHCR_PASS}' && \
-             docker pull ghcr.io/${IMAGE_PREFIX}-api:${SHA} && \
-             docker pull ghcr.io/${IMAGE_PREFIX}-web:${SHA} && \
-             docker pull ghcr.io/${IMAGE_PREFIX}-engine:${SHA} && \
-             docker tag ghcr.io/${IMAGE_PREFIX}-api:${SHA} trading-os-api:latest && \
-             docker tag ghcr.io/${IMAGE_PREFIX}-web:${SHA} trading-os-web:latest && \
-             docker tag ghcr.io/${IMAGE_PREFIX}-engine:${SHA} trading-os-engine:latest && \
+             docker pull ghcr.io/${IMAGE_PREFIX}-api:${TAG} && \
+             docker pull ghcr.io/${IMAGE_PREFIX}-web:${TAG} && \
+             docker pull ghcr.io/${IMAGE_PREFIX}-engine:${TAG} && \
+             docker tag ghcr.io/${IMAGE_PREFIX}-api:${TAG} trading-os-api:latest && \
+             docker tag ghcr.io/${IMAGE_PREFIX}-web:${TAG} trading-os-web:latest && \
+             docker tag ghcr.io/${IMAGE_PREFIX}-engine:${TAG} trading-os-engine:latest && \
              docker compose -f docker-compose.prod.yml up -d && \
              echo 'Deployment complete'"
