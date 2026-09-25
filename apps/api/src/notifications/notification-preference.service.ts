@@ -29,6 +29,11 @@ export class NotificationPreferenceService {
     });
   }
 
+  async findAllUserIds(): Promise<string[]> {
+    const users = await this.prisma.user.findMany({ select: { id: true } });
+    return users.map((u) => u.id);
+  }
+
   async update(userId: string, dto: UpdateNotificationPreferenceDto) {
     if (dto.telegramEnabled && !dto.telegramChatId) {
       const existing = await this.prisma.notificationPreference.findUnique({ where: { userId } });

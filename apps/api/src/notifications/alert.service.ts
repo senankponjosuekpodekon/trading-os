@@ -139,19 +139,28 @@ export class AlertService {
   /**
    * Broadcast générique — utilisé par les modules engine (moonshot,
    * changement de régime onchain, early-alpha) via /notifications/internal/broadcast.
-   * Envoie à tous les abonnés push + notification in-app globale.
+   * Envoie à tous les abonnés push + notification in-app persistée par user
+   * (survit au restart API, visible dans l'historique cloche).
    */
   async broadcastPush(title: string, body: string, data?: Record<string, unknown>) {
-    const sent = { push: 0, inApp: false };
+    const sent = { push: 0, inApp: 0 };
 
-    // Notification in-app (cloche) pour tous les users
-    Promise.resolve(this.notifications.push({
-      userId: '*',
-      type: 'ALERT',
-      title,
-      message: body,
-      data: (data ?? {}) as any,
-    })).then(() => { sent.inApp = true; }).catch(() => {});
+    // Notification in-app persistée pour chaque user ; fallback global si DB indisponible
+    try {
+      const allUsers = await this.prefService.findAllUserIds();
+      for (const uid of allUsers) {
+        this.notifications.push({
+          userId: uid,
+          type: 'ALERT',
+          title,
+          message: body,
+          data: (data ?? {}) as any,
+        });
+        sent.inApp += 1;
+      }
+    } catch {
+      this.notifications.push({ userId: '*', type: 'ALERT', title, message: body, data: (data ?? {}) as any });
+    }
 
     if (!this.webPushConfigured) return sent;
     let subs: Awaited<ReturnType<NotificationPreferenceService['findPushSubscribed']>> = [];

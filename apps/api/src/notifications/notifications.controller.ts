@@ -57,7 +57,7 @@ export class NotificationsController {
   @UseGuards(JwtAuthGuard)
   @Get()
   getRecent(@Request() req: any) {
-    return this.notificationsService.getRecent(req.user.id);
+    return this.notificationsService.getRecentPersisted(req.user.id);
   }
 
   @UseGuards(JwtAuthGuard)
