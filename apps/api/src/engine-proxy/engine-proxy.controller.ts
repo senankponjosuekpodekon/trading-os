@@ -305,6 +305,16 @@ export class EngineProxyController {
     return this.engine.get(`/onchain/undervalued`, { params: { limit } });
   }
 
+  @Get('onchain/majors-trajectory')
+  onchainMajorsTrajectory(@Query('limit') limit?: string) {
+    return this.engine.get(`/ml/majors/trajectory`, { params: { limit } });
+  }
+
+  @Get('ml/hidden-gems/backtest')
+  hiddenGemsBacktest() {
+    return this.engine.get(`/ml/hidden-gems/backtest`);
+  }
+
   @Get('dex/new-pools')
   dexNewPools() {
     return this.engine.get('/dex/new-pools');

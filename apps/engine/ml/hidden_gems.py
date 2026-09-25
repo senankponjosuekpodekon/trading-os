@@ -130,6 +130,7 @@ async def _fetch_narrative_momentum() -> Dict[str, float]:
 # d'un pump éphémère — un snapshot seul ne dit rien.
 _GEM_SNAPSHOT_TTL = 14 * 86400  # 14 jours de rétention
 _GEM_SNAPSHOT_MAX = 400
+_GEM_TRACKED_SET = "gem_tracked"  # index Redis des tokens suivis (backtest)
 
 
 def _gem_snapshot_key(chain: str, addr: str) -> str:
@@ -162,8 +163,27 @@ async def _record_gem_snapshot(t: Dict[str, Any]) -> None:
         await r.lpush(key, json.dumps(snap))
         await r.ltrim(key, 0, _GEM_SNAPSHOT_MAX - 1)
         await r.expire(key, _GEM_SNAPSHOT_TTL)
+        await r.sadd(_GEM_TRACKED_SET, f"{t.get('chain', '').lower()}:{addr}")
     except Exception as exc:
         logger.debug("gem_snapshot_failed", error=str(exc))
+
+
+async def _stamp_gem_score(chain: str, addr: str, score: int) -> None:
+    """Injecte le gem_score dans le snapshot le plus récent (index 0) —
+    nécessaire pour le backtest score → performance ultérieure."""
+    import json
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        key = _gem_snapshot_key(chain, addr)
+        raw = await r.lindex(key, 0)
+        if not raw:
+            return
+        snap = json.loads(raw)
+        snap["score"] = score
+        await r.lset(key, 0, json.dumps(snap))
+    except Exception:
+        pass
 
 
 async def _load_gem_history(chain: str, addr: str) -> List[Dict[str, Any]]:
@@ -292,6 +312,13 @@ _GOPLUS_CHAIN_IDS = {
     "manta": "169", "polygonzkevm": "1101", "core": "1116", "sei": "1329",
 }
 
+# Chaînes non-EVM couvertes par des endpoints GoPlus dédiés
+# (même contrat /token_security, path différent).
+_GOPLUS_SPECIAL_ENDPOINTS = {
+    "tron": "https://api.gopluslabs.io/api/v1/tron/token_security",
+    "sui": "https://api.gopluslabs.io/api/v1/sui/token_security",
+}
+
 
 def _f(v: Any) -> float:
     """Parse GoPlus string/number fields safely."""
@@ -405,6 +432,34 @@ async def _fetch_rugcheck(mint: str) -> Dict[str, Any] | None:
         return None
 
 
+def _parse_goplus_generic(sec: Dict[str, Any]) -> Dict[str, Any]:
+    """Parser tolérant pour les endpoints GoPlus non-EVM (tron, sui) — les
+    shapes varient selon la chaîne ; on lit les champs partagés et on laisse
+    les autres en défaut plutôt que de fabriquer des faux indicateurs."""
+    holders = sec.get("holders") or []
+    top10 = sum(_f(h.get("percent") or h.get("pct")) for h in holders[:10]) * 100
+    return {
+        "available": True,
+        "holder_count": int(_f(sec.get("holder_count"))),
+        "top10_pct": round(top10, 1),
+        "lp_locked_pct": 0.0,
+        "honeypot": sec.get("is_honeypot") in ("1", 1, True)
+            or sec.get("cannot_sell_all") in ("1", 1, True)
+            or (sec.get("sell_tax") is not None and _f(sec.get("sell_tax")) > 0.5),
+        "mintable": sec.get("is_mintable") in ("1", 1, True),
+        "proxy": False,
+        "open_source": sec.get("is_open_source") in ("1", 1, True),
+        "hidden_owner": sec.get("hidden_owner") in ("1", 1, True),
+        "freezable": sec.get("transfer_pausable") in ("1", 1, True)
+            or sec.get("freezeable") in ("1", 1, True),
+        "non_transferable": sec.get("cannot_transfer") in ("1", 1, True),
+        "buy_tax": _f(sec.get("buy_tax")) * 100,
+        "sell_tax": _f(sec.get("sell_tax")) * 100,
+        "creator_pct": _f(sec.get("creator_percent")) * 100,
+        "source": "goplus",
+    }
+
+
 async def fetch_onchain_security(tokens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """
     Fetch contract/holder security pour une liste de tokens, batché par chain.
@@ -442,6 +497,8 @@ async def fetch_onchain_security(tokens: List[Dict[str, Any]]) -> Dict[str, Dict
             async with httpx.AsyncClient(timeout=12) as client:
                 if chain == "solana":
                     url = "https://api.gopluslabs.io/api/v1/solana/token_security"
+                elif chain in _GOPLUS_SPECIAL_ENDPOINTS:
+                    url = _GOPLUS_SPECIAL_ENDPOINTS[chain]
                 else:
                     gid = _GOPLUS_CHAIN_IDS.get(chain)
                     if not gid:
@@ -450,7 +507,12 @@ async def fetch_onchain_security(tokens: List[Dict[str, Any]]) -> Dict[str, Dict
                 r = await client.get(url, params={"contract_addresses": ",".join(addrs)})
                 r.raise_for_status()
                 result = (r.json() or {}).get("result") or {}
-            parse = _parse_goplus_solana if chain == "solana" else _parse_goplus_evm
+            if chain == "solana":
+                parse = _parse_goplus_solana
+            elif chain in _GOPLUS_SPECIAL_ENDPOINTS:
+                parse = _parse_goplus_generic
+            else:
+                parse = _parse_goplus_evm
             for t in toks:
                 addr = t["token_address"]
                 # GoPlus EVM normalise les clés en minuscules
@@ -1060,6 +1122,12 @@ async def discover_hidden_gems(
     top_gems = candidates[:limit]
     moonshots = sum(1 for c in candidates if c.moonshot)
 
+    # Score dans le snapshot le plus récent → calibration future (backtest)
+    await _asyncio.gather(*(
+        _stamp_gem_score(c.chain, c.token_address, c.gem_score)
+        for c in candidates if c.token_address
+    ), return_exceptions=True)
+
     # Push broadcast quand un flag moonshot se déclenche — dédupliqué 48h
     # (la trajectoire peut persister sur plusieurs cycles sans re-notifier).
     from utils.push_notify import broadcast_once
@@ -1077,6 +1145,25 @@ async def discover_hidden_gems(
             cooldown_seconds=48 * 3600,
         )
         for c in top_gems if c.moonshot
+    ), return_exceptions=True)
+
+    # Brief analyste LLM par gem shortlistée (cache 6h/token) — le commentaire
+    # qualitatif qu'un coach écrirait, généré sur les données mesurées.
+    from ml.gem_analyst import gem_llm_comment
+    _raw_by_addr = {t.get("token_address"): t for t in filtered}
+    llm_comments = await _asyncio.gather(*(
+        gem_llm_comment({
+            "symbol": c.symbol, "name": c.name, "chain": c.chain,
+            "token_address": c.token_address, "gem_score": c.gem_score,
+            "liquidity": c.liquidity, "volume_24h": c.volume_24h,
+            "price_change_24h": c.price_change_24h, "onchain": c.onchain,
+            "trajectory": c.trajectory, "manipulation": c.manipulation,
+            "narrative": c.narrative, "social_buzz": c.social_buzz,
+            "buys_24h": (_raw_by_addr.get(c.token_address) or {}).get("buys_24h", 0),
+            "sells_24h": (_raw_by_addr.get(c.token_address) or {}).get("sells_24h", 0),
+            "description": (_raw_by_addr.get(c.token_address) or {}).get("description", ""),
+        })
+        for c in top_gems
     ), return_exceptions=True)
 
     return {
@@ -1099,11 +1186,13 @@ async def discover_hidden_gems(
                 "moonshot": c.moonshot,
                 "under_the_radar": c.under_the_radar,
                 "manipulation": c.manipulation,
+                "llm_comment": c_llm if isinstance(c_llm, str) else None,
+                "token_address": c.token_address,
                 "reasons": c.reasons,
                 "warnings": c.warnings,
                 "url": next((t.get("url", "") for t in filtered if t.get("symbol") == c.symbol), ""),
             }
-            for c in top_gems
+            for c, c_llm in zip(top_gems, llm_comments)
         ],
         "summary": (
             f"{len(top_gems)} hidden gems discovered (scanned {len(tokens)} tokens)"
@@ -1117,3 +1206,72 @@ async def discover_hidden_gems(
 def _now_iso() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
+
+
+async def gems_backtest(min_hours: float = 24) -> Dict[str, Any]:
+    """
+    Calibration du gem_score sur données réelles : pour chaque token tracké,
+    compare le score enregistré au snapshot le plus ancien vs la performance
+    prix mesurée depuis la détection. Buckets par tranche de score.
+
+    C'est ce qui transforme le score d'heuristique en métrique calibrée —
+    dès que l'historique ≥24h existe, on sait si le score prédit quoi que ce soit.
+    """
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        tracked = await r.smembers(_GEM_TRACKED_SET)
+    except Exception:
+        return {"status": "unavailable", "buckets": [], "tokens": []}
+
+    rows = []
+    for key in tracked:
+        chain, addr = key.split(":", 1)
+        hist = await _load_gem_history(chain, addr)
+        if len(hist) < 4:
+            continue
+        newest, oldest = hist[0], hist[-1]
+        span_h = (newest["ts"] - oldest["ts"]) / 3600
+        if span_h < min_hours:
+            continue
+        entry, exit_ = oldest.get("price"), newest.get("price")
+        if not entry or not exit_:
+            continue
+        # Score au moment le plus ancien disponible (proxy du "score à détection")
+        score0 = next(
+            (s.get("score") for s in reversed(hist) if s.get("score") is not None),
+            None,
+        )
+        rows.append({
+            "chain": chain, "address": addr[:12] + "…" if len(addr) > 14 else addr,
+            "score": score0, "tracked_hours": round(span_h, 1),
+            "perf_pct": round((exit_ - entry) / entry * 100, 1),
+        })
+
+    buckets = []
+    for lo, hi, label in [(80, 101, "80+"), (60, 80, "60-79"), (0, 60, "<60")]:
+        sel = [x for x in rows if x["score"] is not None and lo <= x["score"] < hi]
+        if not sel:
+            continue
+        perfs = [x["perf_pct"] for x in sel]
+        buckets.append({
+            "bucket": label, "count": len(sel),
+            "avg_perf_pct": round(sum(perfs) / len(perfs), 1),
+            "win_rate_pct": round(sum(1 for p in perfs if p > 0) / len(perfs) * 100, 1),
+            "best": round(max(perfs), 1), "worst": round(min(perfs), 1),
+        })
+
+    scored = [x for x in rows if x["score"] is not None]
+    return {
+        "status": "ok" if len(scored) >= 5 else "collecting",
+        "note": None if len(scored) >= 5 else (
+            "Calibration en cours — le score n'est horodaté dans les snapshots "
+            "que depuis le déploiement du tracking ; les buckets se remplissent "
+            "à mesure que l'historique ≥24h s'accumule."
+        ),
+        "tracked_tokens": len(rows),
+        "scored_snapshots": len(scored),
+        "buckets": buckets,
+        "tokens": sorted(rows, key=lambda x: x["perf_pct"], reverse=True)[:20],
+        "fetched_at": _now_iso(),
+    }

@@ -119,6 +119,11 @@ export default function HiddenGemsPage() {
                     )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">{gem.name}</p>
+                  {gem.llm_comment && (
+                    <p className="text-[11px] text-gray-300 italic mt-1 leading-snug border-l-2 border-cyan-500/40 pl-2">
+                      {gem.llm_comment}
+                    </p>
+                  )}
                 </div>
                 <div className={`px-2 py-1 rounded-md text-sm font-bold border ${scoreColor(gem.gem_score)}`}>
                   {gem.gem_score}

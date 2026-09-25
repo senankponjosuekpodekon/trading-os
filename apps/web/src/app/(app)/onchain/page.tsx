@@ -90,6 +90,18 @@ export default function OnChainPage() {
     staleTime: 120_000,
   });
 
+  const { data: undervalued } = useQuery({
+    queryKey: ['onchain-undervalued'],
+    queryFn: async () => (await api.get('/onchain/undervalued?limit=10')).data,
+    staleTime: 600_000,
+  });
+
+  const { data: majors } = useQuery({
+    queryKey: ['onchain-majors-trajectory'],
+    queryFn: async () => (await api.get('/onchain/majors-trajectory?limit=10')).data,
+    staleTime: 300_000,
+  });
+
   if (btcLoading || ethLoading) {
     return (
       <>
@@ -210,6 +222,91 @@ export default function OnChainPage() {
             ) : <div className="bg-gray-950 rounded-lg p-4 text-sm text-gray-500">Basis data unavailable</div>}
           </div>
         </section>
+
+        {/* Protocoles sous-évalués — analyse auto façon coach (mcap/tvl, vol/mcap, 7j) */}
+        {undervalued?.undervalued?.length > 0 && (
+          <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-emerald-400" /> Protocoles sous-évalués
+            </h3>
+            <p className="text-[11px] text-gray-500 mb-3">
+              Score combinant mcap/tvl + volume/mcap + tendance 7j + dynamique TVL — {undervalued.scanned_count} protocoles DefiLlama scannés. Screening pour due diligence, pas un signal d&apos;achat.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-800">
+                    <th className="pb-2 pr-3">Protocole</th>
+                    <th className="pb-2 pr-3">Score</th>
+                    <th className="pb-2 pr-3">mcap/tvl</th>
+                    <th className="pb-2 pr-3">vol/mcap</th>
+                    <th className="pb-2 pr-3">7j</th>
+                    <th className="pb-2">Lecture</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {undervalued.undervalued.map((p: any, i: number) => (
+                    <tr key={i} className="border-b border-gray-800/50 align-top">
+                      <td className="py-2 pr-3">
+                        <span className="text-white font-medium">{p.symbol || p.name}</span>
+                        <span className="text-gray-500 ml-1.5">{p.category}</span>
+                      </td>
+                      <td className={`py-2 pr-3 font-bold ${p.undervalued_score >= 70 ? 'text-emerald-400' : p.undervalued_score >= 50 ? 'text-yellow-400' : 'text-gray-400'}`}>
+                        {p.undervalued_score}
+                      </td>
+                      <td className="py-2 pr-3 text-gray-300">{p.mcap_tvl}x</td>
+                      <td className="py-2 pr-3 text-gray-300">{p.vol_mcap != null ? `${(p.vol_mcap * 100).toFixed(0)}%` : '—'}</td>
+                      <td className={`py-2 pr-3 ${p.trend_7d_pct != null ? (p.trend_7d_pct >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-gray-500'}`}>
+                        {p.trend_7d_pct != null ? `${p.trend_7d_pct > 0 ? '+' : ''}${p.trend_7d_pct}%` : '—'}
+                      </td>
+                      <td className="py-2 text-gray-400 max-w-md">{p.comment}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* Trajectoires majors — suivi longitudinal automatique */}
+        {majors?.majors?.length > 0 && (
+          <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-purple-400" /> Trajectoires majors
+            </h3>
+            <p className="text-[11px] text-gray-500 mb-3">
+              Snapshots toutes les 30 min — croissance prix/volume/mcap mesurée sur la série, pas juste la variation 24h. {majors.tracked_count} actifs suivis.
+            </p>
+            <div className="space-y-2">
+              {majors.majors.map((m: any, i: number) => (
+                <div key={i} className="flex items-start justify-between gap-3 text-xs bg-gray-950 rounded-lg p-3">
+                  <div className="min-w-0">
+                    <span className="text-white font-medium">{m.symbol}</span>
+                    <span className="text-gray-500 ml-1.5">{m.name}</span>
+                    <p className="text-gray-400 mt-0.5">{m.comment}</p>
+                  </div>
+                  <div className="text-right shrink-0 space-y-0.5">
+                    {m.trajectory?.price_change_pct != null && (
+                      <p className={m.trajectory.price_change_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                        {m.trajectory.price_change_pct >= 0 ? '+' : ''}{m.trajectory.price_change_pct}% suivi
+                      </p>
+                    )}
+                    {m.trajectory?.volume_trend_pct != null && (
+                      <p className={m.trajectory.volume_trend_pct >= 0 ? 'text-cyan-400' : 'text-orange-400'}>
+                        vol {m.trajectory.volume_trend_pct >= 0 ? '+' : ''}{m.trajectory.volume_trend_pct}%
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {majors?.status === 'collecting' && (
+          <section className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-sm text-gray-400">
+            {majors.note}
+          </section>
+        )}
 
         {/* Guide d'exploitation — notice */}
         <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">

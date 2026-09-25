@@ -53,6 +53,20 @@ async def cron_hidden_gems():
         await asyncio.sleep(HIDDEN_GEMS_INTERVAL)
 
 
+async def cron_majors_tracker():
+    """Snapshot les top-30 majors CoinGecko toutes les 30 min — alimente
+    la trajectoire longitudinale (volume trend, croissance prix/mcap)."""
+    while True:
+        try:
+            from ml.majors_tracker import snapshot_majors
+            n = await snapshot_majors()
+            logger.info("cron_majors_tracker_done", count=n)
+        except Exception as exc:
+            logger.warning("cron_majors_tracker_failed", error=str(exc))
+
+        await asyncio.sleep(HIDDEN_GEMS_INTERVAL)
+
+
 async def cron_portfolio_rebalance():
     """
     Periodically compute portfolio rebalancing suggestions.
@@ -77,6 +91,7 @@ async def run_all_crons():
     await asyncio.gather(
         cron_daily_pulse(),
         cron_hidden_gems(),
+        cron_majors_tracker(),
         cron_portfolio_rebalance(),
         return_exceptions=True,
     )

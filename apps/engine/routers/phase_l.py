@@ -63,6 +63,25 @@ async def hidden_gems(
         raise HTTPException(status_code=503, detail=f"Hidden gems unavailable: {exc}") from exc
 
 
+@router.get("/ml/hidden-gems/backtest")
+async def hidden_gems_backtest(min_hours: float = Query(24, ge=1)):
+    """GET /ml/hidden-gems/backtest — calibration du gem_score :
+    score enregistré au snapshot vs performance prix mesurée depuis."""
+    from ml.hidden_gems import gems_backtest
+    return await gems_backtest(min_hours=min_hours)
+
+
+@router.get("/ml/majors/trajectory")
+async def majors_trajectory_endpoint(
+    limit: int = Query(15, ge=1, le=30),
+    refresh: bool = Query(False),
+):
+    """GET /ml/majors/trajectory — trajectoires longitudinales des majors
+    (prix/volume/mcap sur la série de snapshots, commentaire auto par actif)."""
+    from ml.majors_tracker import majors_trajectory
+    return await majors_trajectory(limit=limit, refresh=refresh)
+
+
 # ── AI Defense ───────────────────────────────────────────────────────────────
 
 class DefenseRequest(BaseModel):

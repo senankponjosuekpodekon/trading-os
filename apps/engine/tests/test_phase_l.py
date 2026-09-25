@@ -404,3 +404,39 @@ def test_under_the_radar_flag():
         {"honeypot": False}, social_buzz=0.05,
         trajectory={}, score=60,
     ) is False
+
+
+# ── Majors tracker & non-EVM GoPlus ─────────────────────────────────────────
+
+def test_major_trajectory_growth():
+    from ml.majors_tracker import _major_trajectory
+    import time
+    now = int(time.time())
+    hist = [{"ts": now - i * 1800, "price": 100 - i, "mcap": 1e9,
+             "volume": 1e8 if i < 12 else 5e7} for i in range(24)]
+    traj = _major_trajectory(hist)
+    assert traj["snapshots"] == 24
+    assert traj["price_change_pct"] > 0  # prix monte dans le temps
+    assert traj["volume_trend_pct"] == 100.0  # 1e8 vs 5e7
+
+
+def test_major_comment_accumulation():
+    from ml.majors_tracker import _major_comment
+    c = _major_comment("Bitcoin", {
+        "price_change_pct": 3.0, "volume_trend_pct": 45.0, "tracked_hours": 72,
+    })
+    assert "accumulation" in c or "volume" in c
+
+
+def test_goplus_generic_parser_tron():
+    from ml.hidden_gems import _parse_goplus_generic
+    sec = _parse_goplus_generic({
+        "holder_count": "5000",
+        "holders": [{"percent": "0.30"}, {"percent": "0.20"}],
+        "is_honeypot": "0", "is_mintable": "0", "buy_tax": "0.02",
+        "sell_tax": "0.60",  # 60% de sell tax → honeypot de fait
+    })
+    assert sec["available"] is True
+    assert sec["holder_count"] == 5000
+    assert sec["honeypot"] is True
+    assert sec["top10_pct"] == 50.0
