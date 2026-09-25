@@ -117,6 +117,11 @@ export default function HiddenGemsPage() {
                         ◉ SOUS LE RADAR
                       </span>
                     )}
+                    {gem.upside && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/50 bg-emerald-500/10 text-emerald-300 font-semibold" title={`Plafond théorique : mcap du leader ${gem.upside.benchmark} ($${(gem.upside.benchmark_mcap / 1e9).toFixed(1)}B) ÷ FDV du token — pas une prédiction`}>
+                        Potentiel {gem.upside.bucket}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">{gem.name}</p>
                   {gem.llm_comment && (

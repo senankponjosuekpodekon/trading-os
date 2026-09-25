@@ -544,6 +544,18 @@ async def undervalued_protocols(limit: int = 15):
 
     rows.sort(key=lambda x: x["mcap_tvl"])
 
+    # Plafond théorique par catégorie : mcap du leader DefiLlama de la même
+    # catégorie / mcap du protocole. Honnête : "si X atteint le leadership de
+    # sa catégorie" — jamais une promesse de performance.
+    cat_leader: dict = {}
+    for p in protocols:
+        cat, mc = p.get("category"), float(p.get("mcap") or 0)
+        if cat and mc > cat_leader.get(cat, 0):
+            cat_leader[cat] = mc
+    for r in rows:
+        leader = cat_leader.get(r["category"] or "", 0)
+        r["upside_x"] = round(leader / r["mcap"], 1) if leader > r["mcap"] else None
+
     # Enrichissement CoinGecko : volume/mcap + tendance 7j pour les meilleurs
     # candidats (ceux qu'on va retourner), via gecko_id DefiLlama → CoinGecko.
     top = rows[: max(limit, 30)]
@@ -572,7 +584,8 @@ async def undervalued_protocols(limit: int = 15):
         "scanned_count": len(protocols),
         "note": (
             "undervalued_score combine mcap/tvl, volume/mcap, tendance 7j et "
-            "dynamique TVL. Heuristique de screening pour due diligence — "
+            "dynamique TVL ; upside_x = plafond théorique vs leader de catégorie. "
+            "Heuristique de screening pour due diligence — "
             "un ratio bas peut aussi refléter un protocole en déclin, pas un signal d'achat."
         ),
         "fetched_at": __import__("datetime").datetime.now(

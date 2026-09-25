@@ -241,6 +241,7 @@ export default function OnChainPage() {
                     <th className="pb-2 pr-3">mcap/tvl</th>
                     <th className="pb-2 pr-3">vol/mcap</th>
                     <th className="pb-2 pr-3">7j</th>
+                    <th className="pb-2 pr-3" title="Mcap du leader de la catégorie ÷ mcap du protocole — plafond théorique, pas une prédiction">Plafond</th>
                     <th className="pb-2">Lecture</th>
                   </tr>
                 </thead>
@@ -258,6 +259,9 @@ export default function OnChainPage() {
                       <td className="py-2 pr-3 text-gray-300">{p.vol_mcap != null ? `${(p.vol_mcap * 100).toFixed(0)}%` : '—'}</td>
                       <td className={`py-2 pr-3 ${p.trend_7d_pct != null ? (p.trend_7d_pct >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-gray-500'}`}>
                         {p.trend_7d_pct != null ? `${p.trend_7d_pct > 0 ? '+' : ''}${p.trend_7d_pct}%` : '—'}
+                      </td>
+                      <td className={`py-2 pr-3 font-medium ${p.upside_x != null && p.upside_x >= 10 ? 'text-emerald-400' : 'text-gray-400'}`}>
+                        {p.upside_x != null ? `~${p.upside_x}x` : '—'}
                       </td>
                       <td className="py-2 text-gray-400 max-w-md">{p.comment}</td>
                     </tr>

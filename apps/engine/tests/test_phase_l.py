@@ -440,3 +440,24 @@ def test_goplus_generic_parser_tron():
     assert sec["holder_count"] == 5000
     assert sec["honeypot"] is True
     assert sec["top10_pct"] == 50.0
+
+
+class TestUpsideEstimate:
+    def test_multiple_and_bucket(self):
+        from ml.hidden_gems import _estimate_upside
+        u = _estimate_upside(5_000_000, "Meme", {"dogecoin": 30_000_000_000})
+        assert u["multiple"] == 6000.0 and u["bucket"] == "1000x+"
+        assert u["benchmark"] == "dogecoin"
+
+    def test_buckets(self):
+        from ml.hidden_gems import _estimate_upside
+        assert _estimate_upside(1e9, "DeFi", {"uniswap": 8e9})["bucket"] == "~10x"
+        assert _estimate_upside(1e9, "DeFi", {"uniswap": 60e9})["bucket"] == "~50x"
+        assert _estimate_upside(1e9, "DeFi", {"uniswap": 300e9})["bucket"] == "~250x"
+
+    def test_no_upside_when_too_close_or_unknown(self):
+        from ml.hidden_gems import _estimate_upside
+        assert _estimate_upside(1e9, "DeFi", {"uniswap": 4e9}) is None  # <5x
+        assert _estimate_upside(0, "DeFi", {"uniswap": 8e9}) is None   # fdv inconnu
+        assert _estimate_upside(1e9, None, {"uniswap": 8e9}) is None   # pas de narrative
+        assert _estimate_upside(1e9, "Stablecoin", {}) is None         # pas de leader

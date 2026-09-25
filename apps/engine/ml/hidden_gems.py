@@ -48,6 +48,7 @@ class GemCandidate:
     under_the_radar: bool = False
     manipulation: Dict[str, Any] | None = None
     token_address: str | None = None
+    upside: Dict[str, Any] | None = None
 
 
 # Narratives — taxonomie des thèmes de marché crypto.
@@ -84,6 +85,76 @@ _NARRATIVE_CG_KEYWORDS: Dict[str, List[str]] = {
     "Stablecoin": ["stablecoin"],
     "Solana Eco": ["solana ecosystem"],
 }
+
+# Narrative → id CoinGecko du leader de catégorie (plafond théorique)
+_CATEGORY_LEADER_IDS: Dict[str, str] = {
+    "AI": "bittensor",
+    "AI Agents": "virtuals-protocol",
+    "Meme": "dogecoin",
+    "DePIN": "render-token",
+    "RWA": "chainlink",
+    "DeFi": "uniswap",
+    "Gaming": "immutable-x",
+    "L2/Infra": "arbitrum",
+    "Privacy": "monero",
+    "SocialFi": "chiliz",
+    "Prediction": "gnosis",
+    "Solana Eco": "solana",
+}
+_LEADER_MCACHE: Dict[str, Any] = {"ts": 0.0, "caps": {}}
+
+
+async def _fetch_leader_mcaps() -> Dict[str, float]:
+    """Mcap des leaders de catégorie — 1 requête CoinGecko, cache 24h."""
+    import time
+    import httpx
+    now = time.time()
+    if now - _LEADER_MCACHE["ts"] < 86_400 and _LEADER_MCACHE["caps"]:
+        return _LEADER_MCACHE["caps"]
+    ids = ",".join(sorted(set(_CATEGORY_LEADER_IDS.values())))
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.coingecko.com/api/v3/coins/markets",
+                params={"vs_currency": "usd", "ids": ids},
+            )
+            r.raise_for_status()
+            caps = {c["id"]: float(c.get("market_cap") or 0) for c in r.json()}
+    except Exception as exc:
+        logger.warning("leader_mcaps_failed", error=str(exc))
+        return _LEADER_MCACHE["caps"]
+    _LEADER_MCACHE.update(ts=now, caps=caps)
+    return caps
+
+
+def _estimate_upside(fdv: float, narrative: str | None,
+                     leader_caps: Dict[str, float]) -> Dict[str, Any] | None:
+    """
+    Plafond théorique = mcap du leader de la catégorie / fdv du token.
+    Ce n'est PAS une prédiction : c'est le multiple maximal observable si le
+    token atteignait la capitalisation du leader de sa narrative. Labellisé
+    honnêtement en 'plafond' — la probabilité dépend du score/trajectoire.
+    """
+    leader_id = _CATEGORY_LEADER_IDS.get(narrative or "")
+    leader_cap = leader_caps.get(leader_id or "", 0)
+    if not fdv or fdv <= 0 or not leader_cap:
+        return None
+    multiple = leader_cap / fdv
+    if multiple < 5:
+        return None
+    for cap, label in ((15, "~10x"), (40, "~25x"), (75, "~50x"),
+                       (150, "~100x"), (400, "~250x"), (700, "~500x")):
+        if multiple < cap:
+            bucket = label
+            break
+    else:
+        bucket = "1000x+"
+    return {
+        "multiple": round(multiple, 1),
+        "bucket": bucket,
+        "benchmark": leader_id,
+        "benchmark_mcap": round(leader_cap),
+    }
 
 
 def _classify_narrative(symbol: str, name: str, description: str = "") -> str | None:
@@ -924,6 +995,7 @@ async def _fetch_dex_trending() -> List[Dict[str, Any]]:
                 "url": p.get("url", ""),
                 "socials": meta.get("links", {}),
                 "description": meta.get("description", ""),
+                "fdv": float(p.get("fdv") or p.get("marketCap") or 0),
             })
         return tokens
     except Exception as exc:
@@ -964,6 +1036,7 @@ async def _fetch_dex_search(query: str = "trending") -> List[Dict[str, Any]]:
                 "sells_24h": float((txns.get("h24") or {}).get("sells", 0) or 0),
                 "buys_1h": float((txns.get("h1") or {}).get("buys", 0) or 0),
                 "sells_1h": float((txns.get("h1") or {}).get("sells", 0) or 0),
+                "fdv": float(p.get("fdv") or p.get("marketCap") or 0),
             })
         return tokens
     except Exception as exc:
@@ -1062,6 +1135,9 @@ async def discover_hidden_gems(
     for t, h in zip(filtered, histories):
         t["trajectory"] = _compute_trajectory(h) if isinstance(h, list) else {}
 
+    # Plafonds théoriques : mcap des leaders de catégorie (CoinGecko, 24h cache)
+    leader_caps = await _fetch_leader_mcaps()
+
     # Score each token
     candidates: List[GemCandidate] = []
     for t in filtered:
@@ -1114,6 +1190,7 @@ async def discover_hidden_gems(
             under_the_radar=under_radar,
             manipulation=manipulation,
             token_address=t.get("token_address"),
+            upside=_estimate_upside(t.get("fdv", 0), t.get("narrative"), leader_caps),
         ))
 
     # Sort by gem_score descending
@@ -1186,6 +1263,7 @@ async def discover_hidden_gems(
                 "moonshot": c.moonshot,
                 "under_the_radar": c.under_the_radar,
                 "manipulation": c.manipulation,
+                "upside": c.upside,
                 "llm_comment": c_llm if isinstance(c_llm, str) else None,
                 "token_address": c.token_address,
                 "reasons": c.reasons,
