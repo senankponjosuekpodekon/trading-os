@@ -831,3 +831,31 @@ model WaitlistEntry {
   @@index([email])
   @@map("waitlist_entries")
 }
+
+// Track-record : chaque call annoncé (engine ou source externe) est mesuré
+// en continu — entry → last/peak/trough → perf. Ce sont ces KPIs qui
+// prouvent la valeur du système (hit rate, multiple réalisé, par source).
+model TrackedCall {
+  id           String    @id @default(cuid())
+  symbol       String
+  source       String    // "engine:moonshot" | "engine:early-alpha" | "engine:gem" | "manual:<name>"
+  chain        String?
+  tokenAddress String?   @map("token_address")
+  coingeckoId  String?   @map("coingecko_id")
+  entryPrice   Float     @map("entry_price")
+  entryAt      DateTime  @default(now()) @map("entry_at")
+  lastPrice    Float?    @map("last_price")
+  peakPrice    Float?    @map("peak_price")
+  peakAt       DateTime? @map("peak_at")
+  troughPrice  Float?    @map("trough_price")
+  lastCheckAt  DateTime? @map("last_check_at")
+  notes        String?
+  closedAt     DateTime? @map("closed_at")
+  createdBy    String?   @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([source, entryAt(sort: Desc)])
+  @@index([symbol])
+  @@map("tracked_calls")
+}

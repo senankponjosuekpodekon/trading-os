@@ -3,8 +3,10 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { AlertService } from './alert.service';
 import { NotificationPreferenceService } from './notification-preference.service';
+import { TrackRecordModule } from '../track-record/track-record.module';
 
 @Module({
+  imports:      [TrackRecordModule],
   controllers: [NotificationsController],
   providers:   [NotificationsService, AlertService, NotificationPreferenceService],
   exports:     [NotificationsService, AlertService, NotificationPreferenceService],

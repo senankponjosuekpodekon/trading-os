@@ -49,8 +49,9 @@ export class NotificationsService {
     arr.unshift(n);
     if (arr.length > 50) arr.splice(50);
 
-    // Persistance DB (fire-and-forget) — '*' n'a pas de user_id en DB, skip
-    if (n.userId !== '*' && this.prisma) {
+    // Persistance DB (fire-and-forget) — '*' n'a pas de user_id en DB, skip.
+    // Optional chaining : les mocks Prisma partiels ne cassent pas le push.
+    if (n.userId !== '*' && this.prisma?.notification) {
       void Promise.resolve(
         this.prisma.notification.create({
           data: {

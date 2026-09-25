@@ -1217,6 +1217,8 @@ async def discover_hidden_gems(
             + (f", holders {c.trajectory.get('holder_growth_pct'):+.0f}%/24h"
                if c.trajectory and c.trajectory.get("holder_growth_pct") is not None else ""),
             {"type": "moonshot", "symbol": c.symbol, "chain": c.chain,
+             "track": True, "price": c.price,
+             "token_address": c.token_address,
              "gem_score": c.gem_score, "url": next(
                  (t.get("url") for t in filtered if t.get("token_address") == c.token_address), None)},
             cooldown_seconds=48 * 3600,

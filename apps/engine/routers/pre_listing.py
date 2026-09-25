@@ -378,6 +378,8 @@ async def _fetch_dex_new_pairs() -> List[Dict[str, Any]]:
                 "liquidity": float(p.get("liquidity", {}).get("usd", 0) or 0),
                 "volume_24h": float(p.get("volume", {}).get("h24", 0) or 0),
                 "price_change_24h": float(p.get("priceChange", {}).get("h24", 0) or 0),
+                "price": float(p.get("priceUsd", 0) or 0),
+                "token_address": base.get("address", ""),
                 "created_at": p.get("pairCreatedAt", ""),
                 "url": p.get("url", ""),
                 "source": "dex_screener",
@@ -960,6 +962,8 @@ async def discover_pre_listing(
             f"Score asymétrique {p['asymmetric_score']}/100"
             + (f" — {p['opportunity_flags'][0]}" if p.get("opportunity_flags") else ""),
             {"type": "early_alpha", "name": p.get("name"), "symbol": p.get("symbol"),
+             "track": bool(p.get("price")), "price": p.get("price"),
+             "token_address": p.get("token_address"),
              "score": p["asymmetric_score"], "risks": p.get("risk_flags", [])},
             cooldown_seconds=72 * 3600,
         )

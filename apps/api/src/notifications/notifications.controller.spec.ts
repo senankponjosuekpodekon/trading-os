@@ -9,6 +9,7 @@ import { AlertService } from './alert.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { TrackRecordService } from '../track-record/track-record.service';
 
 const fakeGuard: CanActivate = {
   canActivate: (context: ExecutionContext) => {
@@ -46,6 +47,7 @@ describe('NotificationsController', () => {
         AlertService,
         NotificationPreferenceService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: TrackRecordService, useValue: { record: jest.fn().mockResolvedValue({}) } },
       ],
     })
       .overrideGuard(JwtAuthGuard)

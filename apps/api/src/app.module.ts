@@ -49,6 +49,7 @@ import { ReportsModule } from './reports/reports.module';
 import { LoggerModule } from './logger/logger.module';
 import { MailModule } from './mail/mail.module';
 import { WaitlistModule } from './waitlist/waitlist.module';
+import { TrackRecordModule } from './track-record/track-record.module';
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { WaitlistModule } from './waitlist/waitlist.module';
     LoggerModule,
     MailModule,
     WaitlistModule,
+    TrackRecordModule,
   ],
   controllers: [AppController],
   providers: [

@@ -68,6 +68,7 @@ const groups: NavGroup[] = [
       { href: '/sentiment',    label: 'Sentiment',     icon: Youtube },
       { href: '/hidden-gems',  label: 'Hidden Gems',   icon: Gem },
       { href: '/pre-listing',  label: 'Pre-Listing',   icon: Rocket },
+      { href: '/track-record', label: 'Track Record',  icon: Trophy },
       { href: '/ai-defense',   label: 'AI Defense',    icon: ShieldAlert },
       { href: '/rebalancing',  label: 'Rebalancing',   icon: Scale },
       { href: '/copilot',      label: 'Copilot',       icon: MessageSquare },

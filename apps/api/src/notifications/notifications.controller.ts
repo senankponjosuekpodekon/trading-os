@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Query, Headers, Sse, UseGuards, Request, MessageEvent, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Query, Headers, Sse, UseGuards, Request, MessageEvent, UnauthorizedException, BadRequestException, Logger } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -6,16 +6,20 @@ import { NotificationsService } from './notifications.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { AlertService } from './alert.service';
 import { UpdateNotificationPreferenceDto } from './dto/notification-preference.dto';
+import { TrackRecordService } from '../track-record/track-record.service';
 import { Observable } from 'rxjs';
 import * as jwt from 'jsonwebtoken';
 
 @Controller('notifications')
 export class NotificationsController {
+  private readonly logger = new Logger(NotificationsController.name);
+
   constructor(
     private notificationsService: NotificationsService,
     private prefService: NotificationPreferenceService,
     private config: ConfigService,
     private alertService: AlertService,
+    private trackRecord: TrackRecordService,
   ) {}
 
   /**
@@ -149,6 +153,21 @@ export class NotificationsController {
       String(body.message).slice(0, 500),
       body.data ?? {},
     );
+
+    // Chaque call annoncé est tracké — les résultats prouvent la valeur.
+    // data.track === true → on enregistre le pick avec son prix d'entrée.
+    const d = body.data ?? {};
+    if (d.track === true && d.symbol) {
+      this.trackRecord.record({
+        symbol: String(d.symbol),
+        source: `engine:${d.type ?? 'event'}`,
+        entryPrice: d.price != null ? Number(d.price) : null,
+        chain: d.chain ?? null,
+        tokenAddress: d.token_address ?? null,
+        notes: String(body.message).slice(0, 500),
+        createdBy: 'engine',
+      }).catch((err) => this.logger.warn(`track-record failed: ${err?.message}`));
+    }
     return { ok: true, sent };
   }
 }
