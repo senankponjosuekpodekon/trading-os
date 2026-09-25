@@ -45,6 +45,9 @@ class GemCandidate:
     narrative_momentum: float | None = None
     trajectory: Dict[str, Any] | None = None
     moonshot: bool = False
+    under_the_radar: bool = False
+    manipulation: Dict[str, Any] | None = None
+    token_address: str | None = None
 
 
 # Narratives — taxonomie des thèmes de marché crypto.
@@ -364,6 +367,21 @@ async def _fetch_rugcheck(mint: str) -> Dict[str, Any] | None:
         markets = d.get("markets") or []
         lp_locked = max((_f((m.get("lp") or {}).get("lpLockedPct")) for m in markets), default=0.0)
         risks = " ".join((r_.get("name") or "").lower() for r_ in (d.get("risks") or []))
+        # Lockers RugCheck : durée restante du lock le plus proche.
+        # "LP locked 100%" mais qui expire demain = faux sentiment de sécurité.
+        import time as _t
+        _now = _t.time()
+        _days = []
+        for lk in (d.get("lockers") or {}).values():
+            ud = lk.get("unlockDate") or lk.get("unlock_date")
+            if not ud:
+                continue
+            ts = _f(ud)
+            if ts > 1e12:
+                ts /= 1000
+            if ts > 0:
+                _days.append(max((ts - _now) / 86400, 0.0))
+        lp_min_unlock_days = round(min(_days), 1) if _days else None
         return {
             "available": True,
             "holder_count": int(_f(d.get("totalHolders"))),
@@ -379,6 +397,7 @@ async def _fetch_rugcheck(mint: str) -> Dict[str, Any] | None:
             "buy_tax": 0.0,
             "sell_tax": 0.0,
             "creator_pct": 0.0,
+            "lp_min_unlock_days": lp_min_unlock_days,
             "rugcheck_score": d.get("score_normalised", d.get("score")),
             "source": "rugcheck",
         }
@@ -537,6 +556,99 @@ def _score_onchain(
     return max(-35, min(20, pts)), reasons, warnings, honeypot
 
 
+def _detect_manipulation(
+    liquidity: float,
+    volume_24h: float,
+    buys_24h: float,
+    sells_24h: float,
+    onchain: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    Détection de fabrication de marché — le paradoxe transparence/manipulation :
+    toute la donnée est publique, mais le buy-flow qui fait monter le score peut
+    être entièrement fabriqué (bots, wash trading, churn coordonné).
+
+    Retourne {penalty, flags, txns_per_holder, price_impact_1k_pct, ...}.
+    """
+    penalty = 0
+    flags: List[str] = []
+    oc = onchain or {}
+
+    # Wash trading : volume >> liquidité. Le volume "transite" entre wallets
+    # du même opérateur sans demande réelle. >15x est très rare en flux organique.
+    vol_liq = volume_24h / max(liquidity, 1)
+    if vol_liq > 15:
+        penalty -= 8
+        flags.append(f"Volume/LP extreme ({vol_liq:.0f}x) — wash trading probable")
+
+    # Bot churn : beaucoup de transactions rapportées à une base de holders
+    # réduite = les mêmes wallets tournent. Flux organique ~5-15 txns/holder/j.
+    holders = oc.get("holder_count") or 0
+    total_txns = buys_24h + sells_24h
+    txns_per_holder = total_txns / holders if holders > 0 else None
+    if txns_per_holder is not None and txns_per_holder > 25:
+        penalty -= 6
+        flags.append(f"{txns_per_holder:.0f} txns/holder — activité bot probable")
+
+    # Churn équilibré : buys≈sells avec gros volume = carnet fabriqué pour
+    # simuler de l'activité sans déplacer le prix.
+    if total_txns >= 400:
+        ratio = buys_24h / total_txns
+        if 0.47 <= ratio <= 0.53:
+            penalty -= 5
+            flags.append("Buy/sell quasi équilibré sur gros volume — churn suspect")
+
+    # LP "lockée" mais qui expire bientôt — la fenêtre de rug reste ouverte.
+    lp_days = oc.get("lp_min_unlock_days")
+    if lp_days is not None and (oc.get("lp_locked_pct") or 0) >= 40:
+        if lp_days < 7:
+            penalty -= 10
+            flags.append(f"LP unlock dans {lp_days:.0f}j — fenêtre de rug imminente")
+        elif lp_days < 30:
+            penalty -= 5
+            flags.append(f"LP lock expire dans {lp_days:.0f}j")
+
+    # Liquidité illusoire : impact réel d'une sortie de $1k (pool AMM 50/50).
+    impact_1k = 1000 / max(liquidity, 1) * 100
+    if impact_1k > 5:
+        flags.append(f"Sortie de $1k ≈ {impact_1k:.0f}% d'impact — liquidité illusoire")
+
+    return {
+        "penalty": penalty,
+        "flags": flags,
+        "vol_liq_ratio": round(vol_liq, 2),
+        "txns_per_holder": round(txns_per_holder, 1) if txns_per_holder is not None else None,
+        "price_impact_1k_pct": round(impact_1k, 2),
+        "lp_min_unlock_days": lp_days,
+    }
+
+
+def _is_under_the_radar(
+    onchain: Dict[str, Any] | None,
+    social_buzz: float,
+    trajectory: Dict[str, Any] | None,
+    score: int,
+) -> bool:
+    """
+    "Undervalued" = métriques/trajectoire fortes MAIS attention sociale quasi
+    nulle — le marché n'a pas encore pricé l'intérêt. C'est la divergence
+    fondamentaux/attention qui définit le sous-évalué, pas le score seul.
+    """
+    traj = trajectory or {}
+    if (onchain or {}).get("honeypot") or score < 45:
+        return False
+    if social_buzz >= 0.15:
+        return False
+    return bool(
+        (traj.get("holder_growth_pct") or 0) >= 20
+        or (traj.get("liquidity_growth_pct") or 0) >= 25
+        or (
+            (traj.get("buy_ratio_avg") or 0) >= 0.55
+            and (traj.get("tracked_hours") or 0) >= 24
+        )
+    )
+
+
 def _compute_gem_score(
     liquidity: float,
     volume_24h: float,
@@ -663,7 +775,17 @@ def _compute_gem_score(
     reasons.extend(tr_reasons)
     warnings.extend(tr_warnings)
 
+    # 10. Manipulation detection (pénalités) — wash trading, bots, LP expirante
+    manip = _detect_manipulation(liquidity, volume_24h, buys_24h, sells_24h, onchain)
+    score += manip["penalty"]
+    warnings.extend(manip["flags"])
+
     score = max(0, min(100, score))
+
+    # 11. Under-the-radar bonus (+5) — fondamentaux forts, attention quasi nulle
+    if _is_under_the_radar(onchain, social_buzz, trajectory, score):
+        score = min(100, score + 5)
+        reasons.append("Under the radar — métriques fortes, attention sociale quasi nulle")
     if honeypot:
         score = min(score, 15)  # un honeypot n'est pas tradable quelles que soient les métriques
     return score, reasons, warnings
@@ -902,6 +1024,11 @@ async def discover_hidden_gems(
         oc = t.get("onchain") or {}
         _, _, _, moonshot = _score_trajectory(traj)
         moonshot = moonshot and not oc.get("honeypot")
+        under_radar = _is_under_the_radar(oc, t.get("social_buzz", 0), traj, score)
+        manipulation = _detect_manipulation(
+            t.get("liquidity", 0), t.get("volume_24h", 0),
+            t.get("buys_24h", 0), t.get("sells_24h", 0), oc,
+        )
 
         candidates.append(GemCandidate(
             symbol=t.get("symbol", ""),
@@ -922,6 +1049,9 @@ async def discover_hidden_gems(
             narrative_momentum=t.get("narrative_momentum"),
             trajectory=traj,
             moonshot=moonshot,
+            under_the_radar=under_radar,
+            manipulation=manipulation,
+            token_address=t.get("token_address"),
         ))
 
     # Sort by gem_score descending
@@ -929,6 +1059,25 @@ async def discover_hidden_gems(
 
     top_gems = candidates[:limit]
     moonshots = sum(1 for c in candidates if c.moonshot)
+
+    # Push broadcast quand un flag moonshot se déclenche — dédupliqué 48h
+    # (la trajectoire peut persister sur plusieurs cycles sans re-notifier).
+    from utils.push_notify import broadcast_once
+    await _asyncio.gather(*(
+        broadcast_once(
+            f"moonshot:{c.chain}:{c.token_address or c.symbol}",
+            f"🚀 Moonshot — {c.symbol}",
+            f"{c.name} ({c.chain}) : trajectoire explosive détectée. "
+            f"Score {c.gem_score}/100"
+            + (f", holders {c.trajectory.get('holder_growth_pct'):+.0f}%/24h"
+               if c.trajectory and c.trajectory.get("holder_growth_pct") is not None else ""),
+            {"type": "moonshot", "symbol": c.symbol, "chain": c.chain,
+             "gem_score": c.gem_score, "url": next(
+                 (t.get("url") for t in filtered if t.get("token_address") == c.token_address), None)},
+            cooldown_seconds=48 * 3600,
+        )
+        for c in top_gems if c.moonshot
+    ), return_exceptions=True)
 
     return {
         "gems": [
@@ -948,6 +1097,8 @@ async def discover_hidden_gems(
                 "narrative_momentum": c.narrative_momentum,
                 "trajectory": c.trajectory,
                 "moonshot": c.moonshot,
+                "under_the_radar": c.under_the_radar,
+                "manipulation": c.manipulation,
                 "reasons": c.reasons,
                 "warnings": c.warnings,
                 "url": next((t.get("url", "") for t in filtered if t.get("symbol") == c.symbol), ""),

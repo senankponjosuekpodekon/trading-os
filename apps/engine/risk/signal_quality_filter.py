@@ -51,7 +51,9 @@ SESSION_WINDOWS = {
     "SYNTHETIC": None,
     "FOREX": {
         "optimal": [(7, 22)],
-        "avoid": [(21, 22)],
+        # Asie profonde (0-7h UTC : spreads larges, fausse volatilité)
+        # + clôture NY (21h+ : carnet fin)
+        "avoid": [(0, 7), (21, 24)],
         "weekend_block": True,
     },
     "GOLD": {
@@ -123,11 +125,19 @@ def _is_in_window(hour: int, windows: list[tuple[int, int]]) -> bool:
 # ════════════════════════════════════════════════════════════════════
 def _check_session(asset_type: str, session_info: dict) -> dict:
     windows = SESSION_WINDOWS.get(asset_type)
-    if windows is None:
-        return {"passed": True, "reason": None, "layer": "session"}
-
     hour = session_info.get("hour", datetime.now(timezone.utc).hour)
     is_weekend = session_info.get("is_weekend", False)
+
+    if windows is None:
+        # Crypto trade 24/7 mais le week-end la liquidité CEX/DEX s'effondre
+        # → faux breakouts. Pénalité légère, pas de bloc (le marché est ouvert).
+        # SYNTHETIC (Deriv V75/BOOM…) : liquidité constante, aucune pénalité.
+        if asset_type == "CRYPTO" and is_weekend:
+            return {
+                "passed": True, "reason": None, "layer": "session",
+                "session_penalty": 0.10, "in_optimal": False,
+            }
+        return {"passed": True, "reason": None, "layer": "session"}
 
     if is_weekend and windows.get("weekend_block", False):
         return {

@@ -126,34 +126,71 @@ export class AlertService {
       await Promise.allSettled(
         subs
           .filter(p => scorePct >= (p.minConfidence ?? 0))
-          .map(p => this._deliverPush(p.userId, p.pushSubscription, input)),
+          .map(p => this._deliverPush(p.userId, p.pushSubscription, this._signalPayload(input))),
       );
       return;
     }
 
     const pref = await this.prefService.getOrCreate(userId);
     if (!pref.pushEnabled || !pref.pushSubscription) return;
-    await this._deliverPush(userId, pref.pushSubscription, input);
+    await this._deliverPush(userId, pref.pushSubscription, this._signalPayload(input));
   }
 
-  private async _deliverPush(userId: string, subscription: unknown, input: SignalAlertInput) {
-    const sub = subscription as { endpoint: string; keys: { p256dh: string; auth: string } };
-    const title = `Signal ${input.signal} — ${input.symbol}`;
-    const body = `Confiance ${Math.round((input.opportunityScore ?? input.confidence / 100) * 100)}%${input.timeframe ? ` · ${input.timeframe}` : ''}`;
-    const payload = JSON.stringify({
+  /**
+   * Broadcast générique — utilisé par les modules engine (moonshot,
+   * changement de régime onchain, early-alpha) via /notifications/internal/broadcast.
+   * Envoie à tous les abonnés push + notification in-app globale.
+   */
+  async broadcastPush(title: string, body: string, data?: Record<string, unknown>) {
+    const sent = { push: 0, inApp: false };
+
+    // Notification in-app (cloche) pour tous les users
+    Promise.resolve(this.notifications.push({
+      userId: '*',
+      type: 'ALERT',
       title,
-      body,
+      message: body,
+      data: (data ?? {}) as any,
+    })).then(() => { sent.inApp = true; }).catch(() => {});
+
+    if (!this.webPushConfigured) return sent;
+    let subs: Awaited<ReturnType<NotificationPreferenceService['findPushSubscribed']>> = [];
+    try {
+      subs = await this.prefService.findPushSubscribed();
+    } catch {}
+    await Promise.allSettled(
+      subs.map(p =>
+        this._deliverPush(p.userId, p.pushSubscription, { title, body, data })
+          .then(() => { sent.push += 1; }),
+      ),
+    );
+    return sent;
+  }
+
+  private _signalPayload(input: SignalAlertInput) {
+    return {
+      title: `Signal ${input.signal} — ${input.symbol}`,
+      body: `Confiance ${Math.round((input.opportunityScore ?? input.confidence / 100) * 100)}%${input.timeframe ? ` · ${input.timeframe}` : ''}`,
+      data: { symbol: input.symbol, signal: input.signal, confidence: input.confidence },
+    };
+  }
+
+  private async _deliverPush(userId: string, subscription: unknown, payload: { title: string; body: string; data?: unknown }) {
+    const sub = subscription as { endpoint: string; keys: { p256dh: string; auth: string } };
+    const payloadStr = JSON.stringify({
+      title: payload.title,
+      body: payload.body,
       icon: '/icon-192.svg',
       badge: '/icon-192.svg',
-      data: { symbol: input.symbol, signal: input.signal, confidence: input.confidence },
+      data: payload.data,
     });
 
     try {
-      await webPush.sendNotification(sub, payload);
-      this.logger.log(`Web push sent for ${input.symbol}`);
+      await webPush.sendNotification(sub, payloadStr);
+      this.logger.log(`Web push sent: ${payload.title}`);
     } catch (err: any) {
       const msg = err?.message || 'unknown';
-      this.logger.error(`Web push failed for ${input.symbol}: ${msg}`);
+      this.logger.error(`Web push failed: ${payload.title} — ${msg}`);
       if (err?.statusCode === 410 || err?.statusCode === 404) {
         await this.prefService.update(userId, { pushEnabled: false, pushSubscription: undefined });
       }

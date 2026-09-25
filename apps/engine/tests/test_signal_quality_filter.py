@@ -47,6 +47,28 @@ class TestSessionFilter:
         result = _check_session("CRYPTO", {"hour": 3, "is_weekend": True})
         assert result["passed"] is True
 
+    def test_crypto_weekend_penalized(self):
+        # Crypto trade 24/7 mais liquidité faible le week-end → pénalité douce
+        result = _check_session("CRYPTO", {"hour": 14, "is_weekend": True})
+        assert result["passed"] is True
+        assert result.get("session_penalty", 0) > 0
+
+    def test_crypto_weekday_no_penalty(self):
+        result = _check_session("CRYPTO", {"hour": 14, "is_weekend": False})
+        assert result["passed"] is True
+        assert result.get("session_penalty", 0) == 0
+
+    def test_synthetic_weekend_no_penalty(self):
+        # Deriv synthetics : liquidité constante, pas de pénalité week-end
+        result = _check_session("SYNTHETIC", {"hour": 14, "is_weekend": True})
+        assert result["passed"] is True
+        assert result.get("session_penalty", 0) == 0
+
+    def test_forex_asia_session_blocked(self):
+        # Session Asie profonde (0-7h UTC) : spreads larges, fausse volatilité
+        result = _check_session("FOREX", {"hour": 3, "is_weekend": False})
+        assert result["passed"] is False
+
     def test_forex_weekend_blocked(self):
         result = _check_session("FOREX", {"hour": 12, "is_weekend": True})
         assert result["passed"] is False

@@ -300,6 +300,11 @@ export class EngineProxyController {
     return this.engine.get(`/onchain/market-interpretation`, { params: { symbol } });
   }
 
+  @Get('onchain/undervalued')
+  onchainUndervalued(@Query('limit') limit?: string) {
+    return this.engine.get(`/onchain/undervalued`, { params: { limit } });
+  }
+
   @Get('dex/new-pools')
   dexNewPools() {
     return this.engine.get('/dex/new-pools');

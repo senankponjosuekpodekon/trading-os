@@ -331,3 +331,76 @@ def test_risk_of_ruin():
     # Low win rate → high risk of ruin
     ror_bad = compute_risk_of_ruin(win_rate=35, risk_reward=1.0, risk_pct=2.0)
     assert ror_bad > 50.0
+
+
+# ── Manipulation detection & under-the-radar ────────────────────────────────
+
+def test_manipulation_wash_trading_flag():
+    from ml.hidden_gems import _detect_manipulation
+    m = _detect_manipulation(
+        liquidity=100_000, volume_24h=2_000_000,  # 20x — volume fabriqué
+        buys_24h=2000, sells_24h=1900,
+        onchain={"available": True, "holder_count": 500},
+    )
+    assert m["penalty"] < 0
+    assert any("wash" in f.lower() for f in m["flags"])
+    assert m["txns_per_holder"] == 7.8
+
+
+def test_manipulation_bot_churn_flag():
+    from ml.hidden_gems import _detect_manipulation
+    m = _detect_manipulation(
+        liquidity=200_000, volume_24h=400_000,
+        buys_24h=5000, sells_24h=5050,  # churn équilibré + 40 txns/holder
+        onchain={"available": True, "holder_count": 250},
+    )
+    assert m["penalty"] <= -11  # bot churn -6 + balanced churn -5
+    assert any("bot" in f.lower() for f in m["flags"])
+    assert any("churn" in f.lower() for f in m["flags"])
+
+
+def test_manipulation_lp_expiring_soon():
+    from ml.hidden_gems import _detect_manipulation
+    m = _detect_manipulation(
+        liquidity=200_000, volume_24h=400_000,
+        buys_24h=600, sells_24h=400,
+        onchain={"available": True, "holder_count": 2000,
+                 "lp_locked_pct": 90, "lp_min_unlock_days": 3.0},
+    )
+    assert m["penalty"] == -10
+    assert any("rug" in f.lower() for f in m["flags"])
+
+
+def test_manipulation_clean_token():
+    from ml.hidden_gems import _detect_manipulation
+    m = _detect_manipulation(
+        liquidity=500_000, volume_24h=1_000_000,
+        buys_24h=800, sells_24h=500,
+        onchain={"available": True, "holder_count": 5000},
+    )
+    assert m["penalty"] == 0
+    assert m["price_impact_1k_pct"] == 0.2
+
+
+def test_under_the_radar_flag():
+    from ml.hidden_gems import _is_under_the_radar
+    # Croissance holders forte + buzz quasi nul + score correct → sous le radar
+    assert _is_under_the_radar(
+        {"honeypot": False}, social_buzz=0.05,
+        trajectory={"holder_growth_pct": 45, "snapshots": 10}, score=60,
+    ) is True
+    # Buzz élevé → déjà pricé, pas "sous le radar"
+    assert _is_under_the_radar(
+        {"honeypot": False}, social_buzz=0.5,
+        trajectory={"holder_growth_pct": 45}, score=60,
+    ) is False
+    # Honeypot → jamais sous le radar
+    assert _is_under_the_radar(
+        {"honeypot": True}, social_buzz=0.05,
+        trajectory={"holder_growth_pct": 45}, score=60,
+    ) is False
+    # Pas de trajectoire → pas de preuve de fondamentaux forts
+    assert _is_under_the_radar(
+        {"honeypot": False}, social_buzz=0.05,
+        trajectory={}, score=60,
+    ) is False

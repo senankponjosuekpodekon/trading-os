@@ -112,6 +112,11 @@ export default function HiddenGemsPage() {
                         🚀 MOONSHOT
                       </span>
                     )}
+                    {gem.under_the_radar && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 font-semibold" title="Métriques fortes, attention sociale quasi nulle — candidat sous-évalué">
+                        ◉ SOUS LE RADAR
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">{gem.name}</p>
                 </div>

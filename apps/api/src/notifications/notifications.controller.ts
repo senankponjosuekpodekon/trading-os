@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { NotificationsService } from './notifications.service';
 import { NotificationPreferenceService } from './notification-preference.service';
+import { AlertService } from './alert.service';
 import { UpdateNotificationPreferenceDto } from './dto/notification-preference.dto';
 import { Observable } from 'rxjs';
 import * as jwt from 'jsonwebtoken';
@@ -14,6 +15,7 @@ export class NotificationsController {
     private notificationsService: NotificationsService,
     private prefService: NotificationPreferenceService,
     private config: ConfigService,
+    private alertService: AlertService,
   ) {}
 
   /**
@@ -125,5 +127,28 @@ export class NotificationsController {
       message: `${body.symbol} — ${body.name} ${direction} sur ${timeframe}${body.confluenceScore ? ` — Confluence: ${body.confluenceScore}%` : ''}`,
       data: body,
     });
+  }
+
+  /**
+   * POST /notifications/internal/broadcast — push générique depuis l'engine.
+   * Utilisé par les détections non-signal : moonshot, changement de régime
+   * onchain, early-alpha forte conviction. Protégé par X-Engine-Key.
+   */
+  @Post('internal/broadcast')
+  async internalBroadcast(@Body() body: any, @Headers() headers: any) {
+    const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
+    const providedKey = headers['x-engine-key'] || '';
+    if (!engineKey || providedKey !== engineKey) {
+      throw new UnauthorizedException('Invalid engine key');
+    }
+    if (!body?.title || !body?.message) {
+      throw new BadRequestException('title and message are required');
+    }
+    const sent = await this.alertService.broadcastPush(
+      String(body.title).slice(0, 120),
+      String(body.message).slice(0, 500),
+      body.data ?? {},
+    );
+    return { ok: true, sent };
   }
 }

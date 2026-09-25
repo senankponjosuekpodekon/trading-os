@@ -949,6 +949,23 @@ async def discover_pre_listing(
     high_score = sum(1 for p in scored if p["asymmetric_score"] >= 70)
     has_red_flags = sum(1 for p in scored if any("CRITICAL" in r for r in p.get("risk_flags", [])))
 
+    # Push broadcast sur les fortes convictions (score ≥80) — dédupliqué 72h
+    # par projet (le score peut persister sur plusieurs cycles sans re-notifier).
+    from utils.push_notify import broadcast_once
+    import asyncio as _a2
+    await _a2.gather(*(
+        broadcast_once(
+            f"alpha:{p.get('name', '')}:{p.get('symbol', '')}",
+            f"⭐ Early Alpha — {p.get('name', p.get('symbol'))}",
+            f"Score asymétrique {p['asymmetric_score']}/100"
+            + (f" — {p['opportunity_flags'][0]}" if p.get("opportunity_flags") else ""),
+            {"type": "early_alpha", "name": p.get("name"), "symbol": p.get("symbol"),
+             "score": p["asymmetric_score"], "risks": p.get("risk_flags", [])},
+            cooldown_seconds=72 * 3600,
+        )
+        for p in scored[:limit] if p["asymmetric_score"] >= 80
+    ), return_exceptions=True)
+
     return {
         "projects": scored[:limit],
         "summary": (

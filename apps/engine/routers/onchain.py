@@ -369,6 +369,29 @@ async def market_interpretation(symbol: str = "BTC/USDT"):
         gas_gwei=gas if isinstance(gas, float) else None,
     )
 
+    # Push sur changement de régime notable (SQUEEZE_RISK, RISK_OFF, RISK_ON_ALTS)
+    # — dédupliqué 4h via Redis, no-op si le régime n'a pas changé.
+    global _last_regime
+    new_regime = interp["regime"]
+    if _last_regime and new_regime != _last_regime and new_regime in (
+        "SQUEEZE_RISK", "RISK_OFF", "RISK_ON_ALTS",
+    ):
+        from utils.push_notify import broadcast_once
+        _regime_labels = {
+            "SQUEEZE_RISK": "⚠️ Marché déséquilibré",
+            "RISK_OFF": "🔴 Régime défavorable",
+            "RISK_ON_ALTS": "🟢 Fenêtre altcoins",
+        }
+        await broadcast_once(
+            f"regime:{new_regime}",
+            f"{_regime_labels[new_regime]} — {new_regime}",
+            f"Régime onchain {_last_regime} → {new_regime} (score {interp['score']:+d}). {interp['advice']}",
+            {"type": "regime_change", "from": _last_regime, "to": new_regime,
+             "score": interp["score"]},
+            cooldown_seconds=4 * 3600,
+        )
+    _last_regime = new_regime
+
     result = {
         "symbol": symbol,
         **interp,
@@ -379,6 +402,66 @@ async def market_interpretation(symbol: str = "BTC/USDT"):
             "mempool": mempool,
             "gas_gwei": gas if isinstance(gas, float) else None,
         },
+    }
+    _set(cache_key, result)
+    return result
+
+
+_last_regime: str | None = None
+
+
+@router.get("/undervalued")
+async def undervalued_protocols(limit: int = 15):
+    """
+    GET /onchain/undervalued — Protocoles établis potentiellement sous-évalués :
+    ratio market_cap/TVL bas = le marché paie moins que la valeur bloquée.
+    Source : DefiLlama /protocols (tvl + mcap réels, gratuit, sans clé).
+
+    Le ratio n'est pas une preuve de sous-évaluation — il filtre les candidats
+    pour due diligence (un ratio bas peut aussi refléter un protocole mort).
+    """
+    cache_key = "undervalued:protocols"
+    cached = _get(cache_key)
+    if cached:
+        return cached
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get("https://api.llama.fi/protocols")
+            r.raise_for_status()
+            protocols = r.json()
+    except Exception:
+        raise HTTPException(502, "DefiLlama unreachable") from None
+
+    rows = []
+    for p in protocols:
+        tvl = float(p.get("tvl") or 0)
+        mcap = float(p.get("mcap") or 0)
+        if tvl < 20_000_000 or mcap < 5_000_000:
+            continue
+        ratio = mcap / tvl
+        if ratio > 1.5:
+            continue
+        rows.append({
+            "name": p.get("name"),
+            "symbol": (p.get("symbol") or "").upper() or None,
+            "category": p.get("category"),
+            "tvl": round(tvl),
+            "mcap": round(mcap),
+            "mcap_tvl": round(ratio, 2),
+            "change_1d_pct": p.get("change_1d"),
+        })
+
+    rows.sort(key=lambda x: x["mcap_tvl"])
+    result = {
+        "undervalued": rows[:limit],
+        "scanned_count": len(protocols),
+        "note": (
+            "mcap_tvl < 1.0 = le marché valorise le token moins que les fonds "
+            "bloqués dans le protocole. Heuristique de screening, pas un signal d'achat."
+        ),
+        "fetched_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(),
     }
     _set(cache_key, result)
     return result
