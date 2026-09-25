@@ -410,15 +410,104 @@ async def market_interpretation(symbol: str = "BTC/USDT"):
 _last_regime: str | None = None
 
 
+async def _coingecko_markets(gecko_ids: list) -> dict:
+    """Batch CoinGecko /coins/markets — volume 24h + variation 7j par id."""
+    if not gecko_ids:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            r = await client.get(
+                "https://api.coingecko.com/api/v3/coins/markets",
+                params={
+                    "vs_currency": "usd",
+                    "ids": ",".join(gecko_ids[:200]),
+                    "price_change_percentage": "7d",
+                },
+            )
+            r.raise_for_status()
+            return {c["id"]: c for c in r.json()}
+    except Exception:
+        return {}
+
+
+def _coach_comment(name: str, mcap_tvl: float, vol_mcap: float | None,
+                   trend_7d: float | None, tvl_chg: float | None) -> str:
+    """
+    Commentaire automatique façon "analyste" : lit les ratios et dit ce qu'ils
+    signifient concrètement pour CE protocole — pas un score brut.
+    """
+    parts = []
+    if mcap_tvl < 0.4:
+        parts.append(f"le marché valorise {name} à {mcap_tvl:.0%} de sa TVL — décote structurelle marquée")
+    elif mcap_tvl < 0.8:
+        parts.append(f"mcap = {mcap_tvl:.0%} de la TVL — valorisation modérée")
+    else:
+        parts.append(f"mcap {mcap_tvl:.1f}x la TVL — déjà pricé au-dessus des fonds bloqués")
+
+    if vol_mcap is not None:
+        if vol_mcap > 0.15:
+            parts.append("volume/mcap élevé — forte activité pour cette taille")
+        elif vol_mcap < 0.02:
+            parts.append("volume/mcap très faible — peu d'intérêt marché actuellement")
+
+    if trend_7d is not None:
+        if trend_7d > 25:
+            parts.append(f"+{trend_7d:.0f}% sur 7j — la repricing a déjà commencé")
+        elif trend_7d < -20:
+            parts.append(f"{trend_7d:.0f}% sur 7j — baisse forte, peut signaler une value trap")
+        else:
+            parts.append(f"prix stable sur 7j ({trend_7d:+.0f}%) — la découverte n'a pas encore eu lieu")
+
+    if tvl_chg is not None:
+        if tvl_chg > 5:
+            parts.append("TVL en croissance — du capital entre dans le protocole")
+        elif tvl_chg < -8:
+            parts.append("TVL en sortie — le ratio bas peut refléter une perte de confiance")
+
+    return " · ".join(parts)
+
+
+def _undervalued_score(mcap_tvl: float, vol_mcap: float | None,
+                       trend_7d: float | None, tvl_chg: float | None) -> int:
+    """Score 0-100 — même raisonnement qu'un coach : mcap/tvl + volume/mcap
+    + tendance 7j + dynamique TVL. Screening, pas signal d'achat."""
+    s = 0
+    if mcap_tvl < 0.3:
+        s += 40
+    elif mcap_tvl < 0.6:
+        s += 30
+    elif mcap_tvl < 1.0:
+        s += 20
+    else:
+        s += 10
+    if vol_mcap is not None:
+        s += 25 if vol_mcap > 0.15 else 15 if vol_mcap > 0.08 else 8 if vol_mcap > 0.04 else 0
+    if trend_7d is not None:
+        if trend_7d > 25:
+            s -= 15  # déjà repricé — plus "undervalued"
+        elif trend_7d < -30:
+            s -= 10  # possible value trap
+        elif -10 <= trend_7d <= 15:
+            s += 15  # bon marché ET stable
+        else:
+            s += 5
+    if tvl_chg is not None:
+        if tvl_chg > 5:
+            s += 10
+        elif tvl_chg < -8:
+            s -= 10
+    return max(0, min(100, s))
+
+
 @router.get("/undervalued")
 async def undervalued_protocols(limit: int = 15):
     """
-    GET /onchain/undervalued — Protocoles établis potentiellement sous-évalués :
-    ratio market_cap/TVL bas = le marché paie moins que la valeur bloquée.
-    Source : DefiLlama /protocols (tvl + mcap réels, gratuit, sans clé).
+    GET /onchain/undervalued — Protocoles établis potentiellement sous-évalués.
 
-    Le ratio n'est pas une preuve de sous-évaluation — il filtre les candidats
-    pour due diligence (un ratio bas peut aussi refléter un protocole mort).
+    Combine mcap/TVL (DefiLlama) + volume/mcap + tendance 7j (CoinGecko) —
+    le même raisonnement qu'un analyste ("cap/tvl bon, volume/cap bon"),
+    mais mesuré en continu sur tous les protocoles indexés.
+    Chaque ligne porte un commentaire explicatif généré automatiquement.
     """
     cache_key = "undervalued:protocols"
     cached = _get(cache_key)
@@ -449,16 +538,42 @@ async def undervalued_protocols(limit: int = 15):
             "tvl": round(tvl),
             "mcap": round(mcap),
             "mcap_tvl": round(ratio, 2),
-            "change_1d_pct": p.get("change_1d"),
+            "tvl_change_1d_pct": p.get("change_1d"),
+            "gecko_id": p.get("gecko_id"),
         })
 
     rows.sort(key=lambda x: x["mcap_tvl"])
+
+    # Enrichissement CoinGecko : volume/mcap + tendance 7j pour les meilleurs
+    # candidats (ceux qu'on va retourner), via gecko_id DefiLlama → CoinGecko.
+    top = rows[: max(limit, 30)]
+    markets = await _coingecko_markets([r["gecko_id"] for r in top if r.get("gecko_id")])
+    for row in top:
+        g = markets.get(row.get("gecko_id") or "")
+        vol_24h = float(g.get("total_volume") or 0) if g else 0
+        row["volume_24h"] = round(vol_24h) if vol_24h else None
+        row["vol_mcap"] = round(vol_24h / row["mcap"], 3) if vol_24h and row["mcap"] else None
+        row["trend_7d_pct"] = (
+            round(float(g["price_change_percentage_7d_in_currency"]), 1)
+            if g and g.get("price_change_percentage_7d_in_currency") is not None else None
+        )
+        row["undervalued_score"] = _undervalued_score(
+            row["mcap_tvl"], row["vol_mcap"], row["trend_7d_pct"], row["tvl_change_1d_pct"],
+        )
+        row["comment"] = _coach_comment(
+            row["name"], row["mcap_tvl"], row["vol_mcap"],
+            row["trend_7d_pct"], row["tvl_change_1d_pct"],
+        )
+        row.pop("gecko_id", None)
+
+    top.sort(key=lambda x: x.get("undervalued_score", 0), reverse=True)
     result = {
-        "undervalued": rows[:limit],
+        "undervalued": top[:limit],
         "scanned_count": len(protocols),
         "note": (
-            "mcap_tvl < 1.0 = le marché valorise le token moins que les fonds "
-            "bloqués dans le protocole. Heuristique de screening, pas un signal d'achat."
+            "undervalued_score combine mcap/tvl, volume/mcap, tendance 7j et "
+            "dynamique TVL. Heuristique de screening pour due diligence — "
+            "un ratio bas peut aussi refléter un protocole en déclin, pas un signal d'achat."
         ),
         "fetched_at": __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc).isoformat(),

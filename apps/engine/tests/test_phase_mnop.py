@@ -277,3 +277,35 @@ def test_market_interpretation_neutral():
     )
     assert r["regime"] == "NEUTRAL"
     assert -10 < r["score"] < 10
+
+
+# ── Undervalued protocols (mcap/tvl + vol/mcap + trend) ─────────────────────
+
+def test_undervalued_score_strong_candidate():
+    from routers.onchain import _undervalued_score
+    # LDO-like : mcap 30% de la TVL + volume actif + stable 7j + TVL en croissance
+    s = _undervalued_score(mcap_tvl=0.28, vol_mcap=0.18, trend_7d=2.0, tvl_chg=8.0)
+    assert s >= 80
+
+
+def test_undervalued_score_already_repriced():
+    from routers.onchain import _undervalued_score
+    # Bon ratio mais +40% sur 7j → la découverte a déjà eu lieu
+    s = _undervalued_score(mcap_tvl=0.28, vol_mcap=0.18, trend_7d=40.0, tvl_chg=8.0)
+    cheap_flat = _undervalued_score(mcap_tvl=0.28, vol_mcap=0.18, trend_7d=2.0, tvl_chg=8.0)
+    assert s < cheap_flat
+
+
+def test_undervalued_score_value_trap():
+    from routers.onchain import _undervalued_score
+    # Ratio bas + prix -40% + TVL en sortie = probablement mérité, pas sous-évalué
+    s = _undervalued_score(mcap_tvl=0.28, vol_mcap=0.05, trend_7d=-40.0, tvl_chg=-15.0)
+    assert s < 60
+
+
+def test_coach_comment_contents():
+    from routers.onchain import _coach_comment
+    c = _coach_comment("Lido", mcap_tvl=0.28, vol_mcap=0.18, trend_7d=3.0, tvl_chg=8.0)
+    assert "Lido" in c
+    assert "TVL" in c
+    assert "7j" in c or "7%" in c or "découverte" in c
