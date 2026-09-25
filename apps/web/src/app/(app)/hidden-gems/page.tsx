@@ -132,6 +132,11 @@ export default function HiddenGemsPage() {
                         Analyste {gem.analyst_conviction}
                       </span>
                     )}
+                    {gem.posture && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${gem.posture.action === 'ÉVITER' ? 'border-red-500/50 bg-red-500/10 text-red-300' : gem.posture.action === 'MOMENTUM' || gem.posture.action === 'ACCUMULER' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' : 'border-gray-600 bg-gray-800 text-gray-300'}`} title={`${gem.posture.reason} — synthèse des règles du moteur, pas un conseil financier`}>
+                        {gem.posture.action}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">{gem.name}</p>
                   {gem.llm_comment && (

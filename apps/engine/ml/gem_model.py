@@ -48,8 +48,9 @@ def _snap_features(snap: Dict[str, Any]) -> List[float]:
     ]
 
 
-def _build_dataset(histories: List[List[Dict[str, Any]]]) -> tuple:
-    """X, y depuis les séries (desc). Label = prix +20% à +24h."""
+def _build_dataset(histories: List[List[Dict[str, Any]]], feat_fn=_snap_features,
+                   win_threshold: float = _WIN_THRESHOLD) -> tuple:
+    """X, y depuis les séries (desc). Label = prix +X% à +24h."""
     X: List[List[float]] = []
     y: List[int] = []
     for hist in histories:
@@ -68,9 +69,43 @@ def _build_dataset(histories: List[List[Dict[str, Any]]]) -> tuple:
             p1 = float(fut.get("price") or 0)
             if not p1:
                 continue
-            X.append(_snap_features(snap))
-            y.append(1 if p1 >= p0 * _WIN_THRESHOLD else 0)
+            X.append(feat_fn(snap))
+            y.append(1 if p1 >= p0 * win_threshold else 0)
     return X, y
+
+
+def _train_logistic(X: List[List[float]], y: List[int]) -> Dict[str, Any]:
+    """Régression logistique numpy — GD + L2 léger. Retourne le modèle sérialisable."""
+    Xa = np.array(X, dtype=np.float64)
+    ya = np.array(y, dtype=np.float64)
+    mean, std = Xa.mean(axis=0), Xa.std(axis=0)
+    std[std == 0] = 1.0
+    Xs = (Xa - mean) / std
+    Xb = np.hstack([np.ones((len(Xs), 1)), Xs])
+
+    w = np.zeros(Xb.shape[1])
+    lr, epochs, l2 = 0.1, 600, 1e-3
+    for _ in range(epochs):
+        z = np.clip(Xb @ w, -30, 30)
+        p = 1 / (1 + np.exp(-z))
+        grad = Xb.T @ (p - ya) / len(ya) + l2 * w
+        grad[0] -= l2 * w[0]
+        w -= lr * grad
+
+    z = np.clip(Xb @ w, -30, 30)
+    p = 1 / (1 + np.exp(-z))
+    order = np.argsort(p)
+    ranks = np.empty(len(order)); ranks[order] = np.arange(len(order))
+    pos = ya == 1
+    n_pos, n_neg = pos.sum(), (~pos).sum()
+    auc = float((ranks[pos].sum() - n_pos * (n_pos - 1) / 2) / max(n_pos * n_neg, 1)) if n_pos and n_neg else None
+
+    return {
+        "w": w.tolist(), "mean": mean.tolist(), "std": std.tolist(),
+        "trained_at": int(time.time()), "samples": len(X),
+        "win_rate": float(ya.mean()), "auc": round(auc, 3) if auc else None,
+        "horizon_h": 24,
+    }
 
 
 async def train_gem_model(min_samples: int = _MIN_SAMPLES) -> Dict[str, Any]:
@@ -92,38 +127,7 @@ async def train_gem_model(min_samples: int = _MIN_SAMPLES) -> Dict[str, Any]:
     if len(X) < min_samples:
         return {"status": "collecting", "samples": len(X), "needed": min_samples}
 
-    Xa = np.array(X, dtype=np.float64)
-    ya = np.array(y, dtype=np.float64)
-    mean, std = Xa.mean(axis=0), Xa.std(axis=0)
-    std[std == 0] = 1.0
-    Xs = (Xa - mean) / std
-    Xb = np.hstack([np.ones((len(Xs), 1)), Xs])
-
-    # Régression logistique — descente de gradient simple, L2 léger
-    w = np.zeros(Xb.shape[1])
-    lr, epochs, l2 = 0.1, 600, 1e-3
-    for _ in range(epochs):
-        z = np.clip(Xb @ w, -30, 30)
-        p = 1 / (1 + np.exp(-z))
-        grad = Xb.T @ (p - ya) / len(ya) + l2 * w
-        grad[0] -= l2 * w[0]  # pas de régul sur le biais
-        w -= lr * grad
-
-    # AUC in-sample (tri par score prédit)
-    z = np.clip(Xb @ w, -30, 30)
-    p = 1 / (1 + np.exp(-z))
-    order = np.argsort(p)
-    ranks = np.empty(len(order)); ranks[order] = np.arange(len(order))
-    pos = ya == 1
-    n_pos, n_neg = pos.sum(), (~pos).sum()
-    auc = float((ranks[pos].sum() - n_pos * (n_pos - 1) / 2) / max(n_pos * n_neg, 1)) if n_pos and n_neg else None
-
-    model = {
-        "w": w.tolist(), "mean": mean.tolist(), "std": std.tolist(),
-        "trained_at": int(time.time()), "samples": len(X),
-        "win_rate": float(ya.mean()), "auc": round(auc, 3) if auc else None,
-        "horizon_h": 24, "win_threshold": "+20%",
-    }
+    model = {**_train_logistic(X, y), "win_threshold": "+20%"}
     try:
         from utils.cache import cache
         r = await cache.client()
@@ -162,3 +166,71 @@ def predict_win_prob(features: List[float], model: Dict[str, Any]) -> float | No
         return round(1 / (1 + math.exp(-z)), 3)
     except Exception:
         return None
+
+
+# ── Majors — même boucle, seuil +5%/24h (les majors bougent moins) ──────────
+
+_MAJOR_MODEL_KEY = "major:model:v1"
+_MAJOR_WIN = 1.05
+_major_model_mem: Dict[str, Any] = {"ts": 0.0, "model": None}
+
+
+def _major_features(snap: Dict[str, Any]) -> List[float]:
+    mcap = float(snap.get("mcap") or 0)
+    vol = float(snap.get("volume") or 0)
+    return [
+        math.log10(max(mcap, 1)),
+        vol / max(mcap, 1),
+        float(snap.get("change_7d") or 0) / 100.0,
+    ]
+
+
+async def train_majors_model(min_samples: int = _MIN_SAMPLES) -> Dict[str, Any]:
+    """Même boucle d'apprentissage sur les snapshots majors (+5%/24h)."""
+    try:
+        from utils.cache import cache
+        from ml.majors_tracker import _MAJOR_TRACKED_SET, _load_major_history
+        r = await cache.client()
+        tracked_raw = await r.smembers(_MAJOR_TRACKED_SET)
+    except Exception as exc:
+        return {"status": "unavailable", "error": str(exc)[:200]}
+
+    histories = []
+    for raw in tracked_raw:
+        try:
+            gid = json.loads(raw).get("id")
+        except Exception:
+            gid = raw
+        if gid:
+            histories.append(await _load_major_history(gid))
+
+    X, y = _build_dataset(histories, feat_fn=_major_features, win_threshold=_MAJOR_WIN)
+    if len(X) < min_samples:
+        return {"status": "collecting", "samples": len(X), "needed": min_samples}
+
+    model = {**_train_logistic(X, y), "win_threshold": "+5%"}
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        await r.set(_MAJOR_MODEL_KEY, json.dumps(model), ex=_MODEL_TTL)
+    except Exception as exc:
+        logger.warning("majors_model_persist_failed", error=str(exc))
+    _major_model_mem.update(ts=time.time(), model=model)
+    logger.info("majors_model_trained", samples=len(X), auc=model["auc"])
+    return {"status": "trained", "samples": model["samples"], "auc": model["auc"],
+            "win_rate": model["win_rate"], "trained_at": model["trained_at"]}
+
+
+async def load_majors_model() -> Dict[str, Any] | None:
+    if _major_model_mem["model"] and time.time() - _major_model_mem["ts"] < 3600:
+        return _major_model_mem["model"]
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        raw = await r.get(_MAJOR_MODEL_KEY)
+        model = json.loads(raw) if raw else None
+    except Exception:
+        model = _major_model_mem["model"]
+    if model:
+        _major_model_mem.update(ts=time.time(), model=model)
+    return model

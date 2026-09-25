@@ -106,6 +106,15 @@ export function useNotifications() {
     if (!user) return;
     const uid = user.id;
 
+    // Hydratation : notifs persistées en DB — visibles après restart/redeploy
+    fetch(`${API_URL}/notifications`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: AppNotification[]) => {
+        setNotifications(rows.slice(0, 50));
+        setUnread(rows.filter(n => !n.read).length);
+      })
+      .catch(() => {});
+
     const cb = (n: AppNotification) => {
       setNotifications(prev => [n, ...prev].slice(0, 50));
       setUnread(u => u + 1);
@@ -121,6 +130,10 @@ export function useNotifications() {
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     setUnread(0);
+    fetch(`${API_URL}/notifications/read-all`, {
+      method: 'PATCH',
+      credentials: 'include',
+    }).catch(() => {});
   };
 
   return { notifications, unread, markAllRead };

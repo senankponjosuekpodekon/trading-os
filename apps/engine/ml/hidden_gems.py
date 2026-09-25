@@ -709,6 +709,28 @@ def _score_onchain(
     return max(-35, min(20, pts)), reasons, warnings, honeypot
 
 
+def _suggest_action(score: int, moonshot: bool, under_radar: bool,
+                    manipulation: Dict[str, Any] | None,
+                    trajectory: Dict[str, Any] | None,
+                    onchain: Dict[str, Any] | None) -> Dict[str, str]:
+    """Posture de lecture — ce que les signaux mesurés suggèrent.
+    PAS un conseil financier : une synthèse des règles du moteur."""
+    oc = onchain or {}
+    pen = abs((manipulation or {}).get("penalty") or 0)
+    if oc.get("honeypot") or pen >= 15:
+        return {"action": "ÉVITER", "reason": "risque sécurité/manipulation élevé"}
+    if moonshot and score >= 70:
+        return {"action": "MOMENTUM", "reason": "trajectoire explosive — entrée progressive + trailing stop"}
+    if under_radar and score >= 70:
+        return {"action": "ACCUMULER", "reason": "métriques fortes + attention nulle — fenêtre pré-discovery"}
+    growth = (trajectory or {}).get("holder_growth_pct")
+    if score >= 75 and growth is not None and growth > 0:
+        return {"action": "SURVEILLER+", "reason": "score élevé + holders croissants"}
+    if score >= 60:
+        return {"action": "SURVEILLER", "reason": "setup naissant, attendre confirmation"}
+    return {"action": "OBSERVER", "reason": "signaux insuffisants"}
+
+
 def _detect_manipulation(
     liquidity: float,
     volume_24h: float,
@@ -1310,6 +1332,8 @@ async def discover_hidden_gems(
                 "upside": c.upside,
                 "llm_comment": (c_llm or {}).get("comment") if isinstance(c_llm, dict) else None,
                 "analyst_conviction": (c_llm or {}).get("conviction") if isinstance(c_llm, dict) else None,
+                "posture": _suggest_action(c.gem_score, c.moonshot, c.under_the_radar,
+                                           c.manipulation, c.trajectory, c.onchain),
                 "ml_win_prob": predict_win_prob(
                     _snap_features({**_snap_for(c),
                                     "analyst": (c_llm or {}).get("conviction") if isinstance(c_llm, dict) else None}),

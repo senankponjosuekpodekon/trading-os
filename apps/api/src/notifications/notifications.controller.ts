@@ -65,6 +65,13 @@ export class NotificationsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Patch('read-all')
+  markAllRead(@Request() req: any) {
+    this.notificationsService.markAllRead(req.user.id);
+    return { ok: true };
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('preferences')
   getPreferences(@Request() req: any) {
     return this.prefService.getOrCreate(req.user.id);

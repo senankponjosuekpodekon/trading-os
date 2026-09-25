@@ -10,6 +10,7 @@ export interface Notification {
   message:   string;
   data?:     any;
   createdAt: Date;
+  read?:     boolean;
 }
 
 @Injectable()
@@ -17,8 +18,23 @@ export class NotificationsService {
   private readonly logger  = new Logger(NotificationsService.name);
   private readonly subject = new Subject<Notification>();
   private readonly store   = new Map<string, Notification[]>(); // userId -> notifications[]
+  private readonly lastRead = new Map<string, number>();         // userId -> timestamp dernier "mark all read"
 
   constructor(private prisma?: PrismaService) {}
+
+  /** Marque tout comme lu — mémoire + DB (survit au restart). */
+  markAllRead(userId: string) {
+    const now = Date.now();
+    this.lastRead.set(userId, now);
+    if (this.prisma?.notification) {
+      void Promise.resolve(
+        this.prisma.notification.updateMany({
+          where: { userId, readAt: null },
+          data: { readAt: new Date(now) },
+        }),
+      ).catch((err) => this.logger.warn(`markAllRead persist failed: ${err?.message}`));
+    }
+  }
 
   subscribe(userId: string): Observable<MessageEvent> {
     const notifications$ = this.subject.asObservable().pipe(
@@ -102,17 +118,19 @@ export class NotificationsService {
   /** Historique fusionné mémoire + DB — survit au restart API */
   async getRecentPersisted(userId: string, limit = 20): Promise<Notification[]> {
     const memory = this.getRecent(userId, limit);
-    if (!this.prisma) return memory;
+    const lastRead = this.lastRead.get(userId) ?? 0;
 
-    let rows: { id: string; type: string; title: string; message: string; data: unknown; createdAt: Date }[] = [];
-    try {
-      rows = (await this.prisma.notification.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      })) ?? [];
-    } catch {
-      return memory;
+    let rows: { id: string; type: string; title: string; message: string; data: unknown; createdAt: Date; readAt: Date | null }[] = [];
+    if (this.prisma) {
+      try {
+        rows = (await this.prisma.notification.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        })) ?? [];
+      } catch {
+        rows = [];
+      }
     }
 
     const seen = new Set(memory.map((n) => n.id));
@@ -127,7 +145,11 @@ export class NotificationsService {
         message: r.message,
         data: r.data as Notification['data'],
         createdAt: r.createdAt,
+        read: r.readAt != null,
       });
+    }
+    for (const n of merged) {
+      n.read = n.read ?? (n.createdAt.getTime() <= lastRead);
     }
     merged.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return merged.slice(0, limit);

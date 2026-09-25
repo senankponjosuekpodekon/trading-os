@@ -176,6 +176,10 @@ async def majors_trajectory(limit: int = 15, refresh: bool = False) -> Dict[str,
     import asyncio as _a
     histories = await _a.gather(*(_load_major_history(t["id"]) for t in tracked))
 
+    # Probabilité ML (+5%/24h) du modèle auto-calibré — None tant qu'il collecte
+    from ml.gem_model import load_majors_model, predict_win_prob, _major_features
+    _m_model = await load_majors_model()
+
     rows = []
     for t, h in zip(tracked, histories):
         traj = _major_trajectory(h)
@@ -186,6 +190,10 @@ async def majors_trajectory(limit: int = 15, refresh: bool = False) -> Dict[str,
             "change_7d_pct": traj.get("change_7d_coingecko"),
             "trajectory": traj,
             "comment": _major_comment(t["name"], traj),
+            "ml_win_prob": (
+                predict_win_prob(_major_features(h[0]), _m_model)
+                if h and _m_model else None
+            ),
         })
 
     # Plus significatifs d'abord : volume trend ou prix qui bouge

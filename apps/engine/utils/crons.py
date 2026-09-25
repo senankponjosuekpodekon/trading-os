@@ -75,9 +75,11 @@ async def cron_gem_model():
     await asyncio.sleep(3600)  # premier run 1h après boot
     while True:
         try:
-            from ml.gem_model import train_gem_model
+            from ml.gem_model import train_gem_model, train_majors_model
             res = await train_gem_model()
             logger.info("cron_gem_model_done", **res)
+            res_m = await train_majors_model()
+            logger.info("cron_majors_model_done", **res_m)
         except Exception as exc:
             logger.warning("cron_gem_model_failed", error=str(exc))
 
