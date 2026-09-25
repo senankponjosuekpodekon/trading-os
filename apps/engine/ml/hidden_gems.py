@@ -228,6 +228,8 @@ async def _record_gem_snapshot(t: Dict[str, Any]) -> None:
             "top10_pct": oc.get("top10_pct", 0),
             "buys": t.get("buys_24h", 0),
             "sells": t.get("sells_24h", 0),
+            "buzz": t.get("social_buzz", 0),
+            "narr_mom": t.get("narrative_momentum"),
         }
         r = await cache.client()
         key = _gem_snapshot_key(t.get("chain", ""), addr)
@@ -252,6 +254,24 @@ async def _stamp_gem_score(chain: str, addr: str, score: int) -> None:
             return
         snap = json.loads(raw)
         snap["score"] = score
+        await r.lset(key, 0, json.dumps(snap))
+    except Exception:
+        pass
+
+
+async def _stamp_analyst_conviction(chain: str, addr: str, conviction: int) -> None:
+    """Injecte la conviction LLM dans le snapshot le plus récent — le jugement
+    qualitatif devient une feature entraînable du modèle auto-calibré."""
+    import json
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        key = _gem_snapshot_key(chain, addr)
+        raw = await r.lindex(key, 0)
+        if not raw:
+            return
+        snap = json.loads(raw)
+        snap["analyst"] = conviction
         await r.lset(key, 0, json.dumps(snap))
     except Exception:
         pass
@@ -1228,8 +1248,23 @@ async def discover_hidden_gems(
 
     # Brief analyste LLM par gem shortlistée (cache 6h/token) — le commentaire
     # qualitatif qu'un coach écrirait, généré sur les données mesurées.
+    # Le modèle auto-calibré ajoute sa probabilité de win +20%/24h.
     from ml.gem_analyst import gem_llm_comment
+    from ml.gem_model import load_gem_model, predict_win_prob, _snap_features
+    _gem_model = await load_gem_model()
     _raw_by_addr = {t.get("token_address"): t for t in filtered}
+
+    def _snap_for(c: "GemCandidate") -> Dict[str, Any]:
+        t = _raw_by_addr.get(c.token_address) or {}
+        oc = c.onchain or {}
+        return {
+            "liquidity": c.liquidity, "volume_24h": c.volume_24h,
+            "buys": t.get("buys_24h", 0), "sells": t.get("sells_24h", 0),
+            "holders": oc.get("holder_count", 0), "top10_pct": oc.get("top10_pct", 0),
+            "buzz": c.social_buzz, "narr_mom": c.narrative_momentum,
+            "score": c.gem_score,
+        }
+
     llm_comments = await _asyncio.gather(*(
         gem_llm_comment({
             "symbol": c.symbol, "name": c.name, "chain": c.chain,
@@ -1243,6 +1278,13 @@ async def discover_hidden_gems(
             "description": (_raw_by_addr.get(c.token_address) or {}).get("description", ""),
         })
         for c in top_gems
+    ), return_exceptions=True)
+
+    # Conviction LLM stampée dans le snapshot → feature entraînable
+    await _asyncio.gather(*(
+        _stamp_analyst_conviction(c.chain, c.token_address, c_llm["conviction"])
+        for c, c_llm in zip(top_gems, llm_comments)
+        if isinstance(c_llm, dict) and c_llm.get("conviction") is not None and c.token_address
     ), return_exceptions=True)
 
     return {
@@ -1266,7 +1308,13 @@ async def discover_hidden_gems(
                 "under_the_radar": c.under_the_radar,
                 "manipulation": c.manipulation,
                 "upside": c.upside,
-                "llm_comment": c_llm if isinstance(c_llm, str) else None,
+                "llm_comment": (c_llm or {}).get("comment") if isinstance(c_llm, dict) else None,
+                "analyst_conviction": (c_llm or {}).get("conviction") if isinstance(c_llm, dict) else None,
+                "ml_win_prob": predict_win_prob(
+                    _snap_features({**_snap_for(c),
+                                    "analyst": (c_llm or {}).get("conviction") if isinstance(c_llm, dict) else None}),
+                    _gem_model,
+                ),
                 "token_address": c.token_address,
                 "reasons": c.reasons,
                 "warnings": c.warnings,

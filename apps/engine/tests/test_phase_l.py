@@ -461,3 +461,34 @@ class TestUpsideEstimate:
         assert _estimate_upside(0, "DeFi", {"uniswap": 8e9}) is None   # fdv inconnu
         assert _estimate_upside(1e9, None, {"uniswap": 8e9}) is None   # pas de narrative
         assert _estimate_upside(1e9, "Stablecoin", {}) is None         # pas de leader
+
+
+class TestGemModel:
+    def test_snap_features_vector(self):
+        from ml.gem_model import _snap_features
+        f = _snap_features({"liquidity": 100_000, "volume_24h": 50_000,
+                            "buys": 300, "sells": 100, "holders": 2000,
+                            "top10_pct": 30, "buzz": 0.4, "score": 72})
+        assert len(f) == 9
+        assert f[2] == 0.75  # buy ratio
+        assert f[8] == 0.5   # analyst neutre par défaut
+
+    def test_predict_with_fake_model(self):
+        from ml.gem_model import predict_win_prob
+        model = {"w": [0.0] * 10, "mean": [0.0] * 9, "std": [1.0] * 9}
+        p = predict_win_prob([0.0] * 9, model)
+        assert p == 0.5  # biais 0 → probabilité neutre
+        assert predict_win_prob([0.0] * 9, None) is None
+
+    def test_dataset_labeling(self):
+        import time
+        from ml.gem_model import _build_dataset
+        now = int(time.time())
+        # desc : newest d'abord. snap i0 = +24h après snap i1
+        hist = [
+            {"ts": now, "price": 1.3, "liquidity": 1, "volume_24h": 0, "buys": 0, "sells": 0},
+            {"ts": now - 86400, "price": 1.0, "liquidity": 1, "volume_24h": 0, "buys": 0, "sells": 0},
+            {"ts": now - 172800, "price": 0.5, "liquidity": 1, "volume_24h": 0, "buys": 0, "sells": 0},
+        ]
+        X, y = _build_dataset([hist])
+        assert len(X) >= 1 and y[0] == 1  # 0.5→1.3 = +160% → win

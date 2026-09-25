@@ -67,6 +67,23 @@ async def cron_majors_tracker():
         await asyncio.sleep(HIDDEN_GEMS_INTERVAL)
 
 
+async def cron_gem_model():
+    """Réentraîne le modèle de détection chaque nuit — régression logistique
+    calibrée sur les snapshots accumulés (label = +20% à 24h). Le modèle
+    s'améliore au fil des données : self-calibrating scorer."""
+    GEM_MODEL_INTERVAL = 24 * 3600
+    await asyncio.sleep(3600)  # premier run 1h après boot
+    while True:
+        try:
+            from ml.gem_model import train_gem_model
+            res = await train_gem_model()
+            logger.info("cron_gem_model_done", **res)
+        except Exception as exc:
+            logger.warning("cron_gem_model_failed", error=str(exc))
+
+        await asyncio.sleep(GEM_MODEL_INTERVAL)
+
+
 async def cron_portfolio_rebalance():
     """
     Periodically compute portfolio rebalancing suggestions.
@@ -92,6 +109,7 @@ async def run_all_crons():
         cron_daily_pulse(),
         cron_hidden_gems(),
         cron_majors_tracker(),
+        cron_gem_model(),
         cron_portfolio_rebalance(),
         return_exceptions=True,
     )

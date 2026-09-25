@@ -315,6 +315,11 @@ export class EngineProxyController {
     return this.engine.get(`/ml/hidden-gems/backtest`);
   }
 
+  @Get('ml/hidden-gems/model-status')
+  gemModelStatus(@Query('retrain') retrain?: string) {
+    return this.engine.get(`/ml/hidden-gems/model-status`, { params: { retrain } });
+  }
+
   @Get('dex/new-pools')
   dexNewPools() {
     return this.engine.get('/dex/new-pools');

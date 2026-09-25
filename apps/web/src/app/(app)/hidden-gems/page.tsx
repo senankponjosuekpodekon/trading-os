@@ -122,6 +122,16 @@ export default function HiddenGemsPage() {
                         Potentiel {gem.upside.bucket}
                       </span>
                     )}
+                    {gem.ml_win_prob != null && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${gem.ml_win_prob >= 0.6 ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' : 'border-gray-600 bg-gray-800 text-gray-400'}`} title="Probabilité ML (régression logistique calibrée sur nos snapshots) que le token gagne ≥20% sous 24h — s'améliore chaque nuit">
+                        ML {Math.round(gem.ml_win_prob * 100)}%
+                      </span>
+                    )}
+                    {gem.analyst_conviction != null && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300 font-semibold" title="Conviction de l'analyste LLM (0-100) — feature entraînable du modèle">
+                        Analyste {gem.analyst_conviction}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-400 mt-0.5">{gem.name}</p>
                   {gem.llm_comment && (

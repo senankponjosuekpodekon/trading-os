@@ -71,6 +71,21 @@ async def hidden_gems_backtest(min_hours: float = Query(24, ge=1)):
     return await gems_backtest(min_hours=min_hours)
 
 
+@router.get("/ml/hidden-gems/model-status")
+async def gem_model_status(retrain: bool = Query(False)):
+    """GET /ml/hidden-gems/model-status — état du modèle auto-calibré :
+    samples, AUC in-sample, win rate, date d'entraînement. retrain=true force."""
+    from ml.gem_model import load_gem_model, train_gem_model
+    if retrain:
+        return await train_gem_model()
+    model = await load_gem_model()
+    if not model:
+        return {"status": "collecting", "note": "modèle pas encore entraîné — snapshots en accumulation"}
+    return {"status": "trained", "samples": model["samples"], "auc": model.get("auc"),
+            "win_rate": model.get("win_rate"), "trained_at": model.get("trained_at"),
+            "horizon_h": model.get("horizon_h"), "win_threshold": model.get("win_threshold")}
+
+
 @router.get("/ml/majors/trajectory")
 async def majors_trajectory_endpoint(
     limit: int = Query(15, ge=1, le=30),

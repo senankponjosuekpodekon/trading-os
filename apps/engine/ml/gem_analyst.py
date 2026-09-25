@@ -12,7 +12,7 @@ re-génération à chaque poll du frontend.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from utils.logger import get_logger
 
@@ -21,10 +21,12 @@ logger = get_logger(__name__)
 _LLM_COMMENT_TTL = 6 * 3600  # 6h — le commentaire change avec les métriques
 
 
-async def gem_llm_comment(gem: Dict[str, Any]) -> Optional[str]:
+async def gem_llm_comment(gem: Dict[str, Any]) -> Dict[str, Any] | None:
     """
-    Génère un brief LLM pour une gem, ou None si LLM indisponible.
-    Le résultat est caché 6h par token (clé = chain:address).
+    Génère un brief LLM pour une gem + une conviction numérique (0-100).
+    La conviction entre comme feature du modèle auto-calibré (gem_model) —
+    le jugement qualitatif du LLM devient mesurable et rétro-testé.
+    Cache 6h par token (clé = chain:address). None si LLM indisponible.
     """
     chain = (gem.get("chain") or "").lower()
     addr = gem.get("token_address") or gem.get("symbol") or ""
@@ -37,7 +39,7 @@ async def gem_llm_comment(gem: Dict[str, Any]) -> Optional[str]:
         r = await cache.client()
         cached = await r.get(cache_key)
         if cached:
-            return cached
+            return json.loads(cached)
     except Exception:
         r = None
 
@@ -69,6 +71,9 @@ async def gem_llm_comment(gem: Dict[str, Any]) -> Optional[str]:
         "d'un token DEX. En 2-3 phrases en français : dis ce que les données "
         "montrent concrètement, puis la vigilance principale. Pas de "
         "recommandation d'achat, pas de jargon vide — un brief factuel.\n"
+        "Termine OBLIGATOIREMENT par une ligne seule : CONVICTION: NN "
+        "(ta conviction que ce token surperforme à 24h, 0-100 — "
+        "sois sévère, la moyenne du marché est ~30).\n"
         f"Données: {json.dumps(payload, ensure_ascii=False)}"
     )
 
@@ -77,10 +82,16 @@ async def gem_llm_comment(gem: Dict[str, Any]) -> Optional[str]:
         text, provider, _model = await _call_llm_with_fallback(prompt, max_tokens=150)
         if not text or provider == "mock":
             return None
-        text = text.strip()[:500]
+        text = text.strip()
+        conviction = None
+        m = __import__("re").search(r"CONVICTION\s*:\s*(\d{1,3})", text)
+        if m:
+            conviction = max(0, min(100, int(m.group(1))))
+            text = text[: m.start()].strip()
+        out = {"comment": text[:500], "conviction": conviction}
         if r is not None:
-            await r.set(cache_key, text, ex=_LLM_COMMENT_TTL)
-        return text
+            await r.set(cache_key, json.dumps(out), ex=_LLM_COMMENT_TTL)
+        return out
     except Exception as exc:
         logger.debug("gem_llm_comment_failed", error=str(exc))
         return None
