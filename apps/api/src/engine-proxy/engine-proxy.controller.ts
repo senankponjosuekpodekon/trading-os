@@ -310,6 +310,16 @@ export class EngineProxyController {
     return this.engine.get(`/ml/majors/trajectory`, { params: { limit } });
   }
 
+  @Get('onchain/yield-opportunities')
+  onchainYieldOpportunities(@Query('limit') limit?: string, @Query('min_tvl') minTvl?: string) {
+    return this.engine.get(`/onchain/yield-opportunities`, { params: { limit, min_tvl: minTvl }, timeout: 30_000 });
+  }
+
+  @Get('onchain/airdrop-candidates')
+  onchainAirdropCandidates(@Query('limit') limit?: string, @Query('min_tvl') minTvl?: string) {
+    return this.engine.get(`/onchain/airdrop-candidates`, { params: { limit, min_tvl: minTvl } });
+  }
+
   @Get('ml/hidden-gems/backtest')
   hiddenGemsBacktest() {
     return this.engine.get(`/ml/hidden-gems/backtest`);

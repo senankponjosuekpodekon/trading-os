@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PageSkeleton } from '@/components/ui/PageSkeleton';
-import { Bitcoin, Cpu, Gauge, Wallet, TrendingUp, Database, Percent, Layers, Search, BookOpen, ChevronDown, Activity } from 'lucide-react';
+import { Bitcoin, Cpu, Gauge, Wallet, TrendingUp, Database, Percent, Layers, Search, BookOpen, ChevronDown, Activity, Coins, Rocket, ExternalLink } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface BtcData {
@@ -100,6 +100,18 @@ export default function OnChainPage() {
     queryKey: ['onchain-majors-trajectory'],
     queryFn: async () => (await api.get('/onchain/majors-trajectory?limit=10')).data,
     staleTime: 300_000,
+  });
+
+  const { data: yields } = useQuery({
+    queryKey: ['onchain-yield-opportunities'],
+    queryFn: async () => (await api.get('/onchain/yield-opportunities?limit=8')).data,
+    staleTime: 600_000,
+  });
+
+  const { data: airdrops } = useQuery({
+    queryKey: ['onchain-airdrop-candidates'],
+    queryFn: async () => (await api.get('/onchain/airdrop-candidates?limit=8')).data,
+    staleTime: 600_000,
   });
 
   if (btcLoading || ethLoading) {
@@ -268,6 +280,65 @@ export default function OnChainPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </section>
+        )}
+
+        {/* Yield opportunities — staking/LP risque-ajusté */}
+        {yields?.opportunities?.length > 0 && (
+          <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+              <Coins className="w-4 h-4 text-yellow-400" /> Opportunités yield — staking / LP
+            </h3>
+            <p className="text-[11px] text-gray-500 mb-3">
+              {yields.scanned_count} pools DefiLlama scannées — score risque-ajusté (APY plafonné + TVL − inflation d&apos;incentives − IL). Un APY élevé sur TVL faible est pénalisé.
+            </p>
+            <div className="space-y-2">
+              {yields.opportunities.map((o: any, i: number) => (
+                <div key={i} className="flex items-start justify-between gap-3 text-xs bg-gray-950 rounded-lg p-3">
+                  <div className="min-w-0">
+                    <span className="text-white font-medium">{o.project}</span>
+                    <span className="text-gray-500 ml-1.5">{o.symbol} · {o.chain}</span>
+                    <p className="text-gray-400 mt-0.5">{o.comment}</p>
+                  </div>
+                  <div className="text-right shrink-0 space-y-0.5">
+                    <p className="text-emerald-400 font-semibold">{o.apy}% APY</p>
+                    <p className="text-gray-500">TVL ${(o.tvl / 1e6).toFixed(1)}M · score {o.score}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Airdrop candidates — protocoles majeurs sans token */}
+        {airdrops?.candidates?.length > 0 && (
+          <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+              <Rocket className="w-4 h-4 text-cyan-400" /> Candidats airdrop
+            </h3>
+            <p className="text-[11px] text-gray-500 mb-3">
+              Protocoles à forte TVL sans token listé — profil historique des gros airdrops (Uniswap, dYdX, Arbitrum). Aucune garantie, un airdrop n&apos;est jamais annoncé à l&apos;avance.
+            </p>
+            <div className="space-y-2">
+              {airdrops.candidates.map((c: any, i: number) => (
+                <div key={i} className="flex items-start justify-between gap-3 text-xs bg-gray-950 rounded-lg p-3">
+                  <div className="min-w-0">
+                    <span className="text-white font-medium">{c.name}</span>
+                    <span className="text-gray-500 ml-1.5">{c.category} · {(c.chains || []).slice(0, 3).join(', ')}</span>
+                    {c.url && (
+                      <a href={c.url} target="_blank" rel="noopener noreferrer" className="ml-1.5 text-blue-400 hover:text-blue-300 inline-block align-middle">
+                        <ExternalLink className="w-3 h-3 inline" />
+                      </a>
+                    )}
+                    <p className="text-gray-400 mt-0.5">{c.comment}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-cyan-400 font-semibold">TVL ${(c.tvl / 1e6).toFixed(0)}M</p>
+                    <p className="text-gray-500">score {c.score}</p>
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         )}

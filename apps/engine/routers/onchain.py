@@ -597,6 +597,202 @@ async def undervalued_protocols(limit: int = 15):
     return result
 
 
+# ── Yield / staking / LP opportunities ───────────────────────────────────────
+
+def _yield_score(apy: float, tvl: float, apy_base: float | None,
+                 apy_reward: float | None, il_risk: str | None,
+                 exposure: str | None, pred_class: str | None) -> tuple[int, list[str]]:
+    """Score risque-ajusté 0-100 d'une pool. Un APY élevé ne suffit pas :
+    TVL faible, rendement purement inflationniste (reward), IL fort ou
+    prédiction baissière = pénalités."""
+    import math
+    flags: list[str] = []
+    s = min(45.0, math.log10(max(apy, 0.1)) * 25)          # APY plafonne le gain
+    s += min(35.0, math.log10(max(tvl, 1)) * 5)             # TVL = confiance
+    if tvl < 2_000_000:
+        s -= 15
+        flags.append("TVL faible — sortie difficile / risque de drain")
+    if apy_reward and apy > 0 and (apy_reward / apy) > 0.7:
+        s -= 20
+        flags.append("APY surtout incentive (token émis) — inflation probable")
+    if apy_base is not None and apy_base <= 0 and apy > 0:
+        s -= 10
+        flags.append("aucun rendement réel (frais) — 100% récompenses")
+    if (il_risk or "").lower() == "yes":
+        s -= 8
+        flags.append("risque d'impermanent loss")
+    if (exposure or "").lower() == "multi":
+        s -= 5
+        flags.append("exposition multi-actifs — corrélation/IL plus complexe")
+    if (pred_class or "").lower() in ("stable/down", "down"):
+        s -= 15
+        flags.append("modèle DefiLlama prédit un APY en baisse")
+    return max(0, min(100, round(s))), flags
+
+
+def _yield_comment(p: dict, score: int, flags: list[str]) -> str:
+    bits = [f"{p.get('project')} ({p.get('chain')}) — APY {p.get('apy')}% sur {p.get('symbol')}"]
+    if score >= 65:
+        bits.append("rendement solide et durable en théorie")
+    elif score >= 40:
+        bits.append("rendement correct avec réserves")
+    else:
+        bits.append("opportunité risquée — due diligence requise")
+    if flags:
+        bits.append(flags[0])
+    return " · ".join(bits)
+
+
+@router.get("/yield-opportunities")
+async def yield_opportunities(limit: int = 15, min_tvl: float = 1_000_000):
+    """
+    GET /onchain/yield-opportunities — pools staking/LP triées par score
+    risque-ajusté (DefiLlama yields : APY, TVL, split base/reward, IL).
+    L'APY seul ne suffit pas : on pénalise l'inflation d'incentives, la TVL
+    faible, l'IL et les prédictions baissières.
+    """
+    cache_key = f"yield:opportunities:{min_tvl}"
+    cached = _get(cache_key)
+    if cached:
+        return dict(cached, opportunities=(cached.get("opportunities") or [])[:limit])
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get("https://yields.llama.fi/pools")
+            r.raise_for_status()
+            pools = r.json().get("data", [])
+    except Exception:
+        raise HTTPException(502, "DefiLlama yields unreachable") from None
+
+    rows = []
+    for p in pools:
+        apy = p.get("apy")
+        tvl = float(p.get("tvlUsd") or 0)
+        if apy is None or tvl < min_tvl:
+            continue
+        apy = float(apy)
+        if not 0.5 <= apy <= 300:  # outliers / APY absurdes exclus
+            continue
+        score, flags = _yield_score(
+            apy, tvl, p.get("apyBase"), p.get("apyReward"),
+            p.get("ilRisk"), p.get("exposure"),
+            (p.get("predictions") or {}).get("predictedClass"),
+        )
+        row = {
+            "pool": p.get("pool"), "project": p.get("project"),
+            "chain": p.get("chain"), "symbol": p.get("symbol"),
+            "tvl": round(tvl), "apy": round(apy, 2),
+            "apy_base": round(float(p["apyBase"]), 2) if p.get("apyBase") is not None else None,
+            "apy_reward": round(float(p["apyReward"]), 2) if p.get("apyReward") is not None else None,
+            "il_risk": p.get("ilRisk"), "stablecoin": bool(p.get("stablecoin")),
+            "score": score, "risk_flags": flags,
+        }
+        row["comment"] = _yield_comment(row, score, flags)
+        rows.append(row)
+
+    rows.sort(key=lambda x: x["score"], reverse=True)
+    result = {
+        "opportunities": rows[:100],
+        "scanned_count": len(pools),
+        "note": (
+            "Score risque-ajusté = APY plafonné + confiance TVL − inflation "
+            "d'incentives − IL − prédiction baissière. Un APY élevé sur TVL "
+            "faible est pénalisé, pas récompensé. Screening — pas du conseil."
+        ),
+        "fetched_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(),
+    }
+    _set(cache_key, result)
+    return dict(result, opportunities=result["opportunities"][:limit])
+
+
+# ── Airdrop candidates ────────────────────────────────────────────────────────
+
+@router.get("/airdrop-candidates")
+async def airdrop_candidates(limit: int = 15, min_tvl: float = 50_000_000):
+    """
+    GET /onchain/airdrop-candidates — protocoles majeurs sans token (ou
+    mcap négligeable vs TVL). Pattern historique : Uniswap, dYdX, Arbitrum,
+    EigenLayer ont récompensé leurs utilisateurs précoces. Un protocole à
+    forte TVL sans token = candidat plausible à un futur airdrop.
+    """
+    cache_key = f"airdrop:candidates:{min_tvl}"
+    cached = _get(cache_key)
+    if cached:
+        return dict(cached, candidates=(cached.get("candidates") or [])[:limit])
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get("https://api.llama.fi/protocols")
+            r.raise_for_status()
+            protocols = r.json()
+    except Exception:
+        raise HTTPException(502, "DefiLlama unreachable") from None
+
+    import math
+    # Noms de protocoles ayant déjà un token listé (pour exclure les sous-modules
+    # type "Aave V3" quand "Aave" a un gecko_id)
+    tokenized_bases = {
+        (p.get("name") or "").lower().split()[0]
+        for p in protocols
+        if p.get("gecko_id") and p.get("name")
+    }
+    # Émetteurs custodials/CEX-adjacents — jamais des candidats airdrop
+    custodial = {"binance", "coinbase", "bitfinex", "bybit", "okx", "kraken",
+                 "crypto.com", "robinhood", "wbtc", "upbit", "gemini"}
+
+    rows = []
+    for p in protocols:
+        tvl = float(p.get("tvl") or 0)
+        mcap = float(p.get("mcap") or 0)
+        if tvl < min_tvl:
+            continue
+        if (p.get("category") or "") in ("CEX", "CeFi"):
+            continue
+        first_word = (p.get("name") or "").lower().split()[0] if p.get("name") else ""
+        if first_word in custodial:
+            continue
+        # Token déjà listé (gecko_id propre ou via le protocole parent)
+        if p.get("gecko_id") or first_word in tokenized_bases:
+            continue
+        if mcap > 0 and mcap / tvl > 0.02:
+            continue
+        score = min(100, round(math.log10(tvl) * 12))
+        if p.get("change_7d") and p["change_7d"] > 0:
+            score += 5
+        rows.append({
+            "name": p.get("name"),
+            "category": p.get("category"),
+            "chains": p.get("chains") or [],
+            "tvl": round(tvl),
+            "mcap": round(mcap) if mcap else 0,
+            "tokenless": mcap <= 0,
+            "url": p.get("url"),
+            "twitter": p.get("twitter"),
+            "tvl_change_7d_pct": p.get("change_7d"),
+            "score": min(100, score),
+            "comment": (
+                f"{p.get('name')} — {p.get('category')} · TVL ${tvl/1e6:,.0f}M, "
+                + ("aucun token listé" if mcap <= 0 else f"mcap/TVL {mcap/tvl:.1%} (quasi tokenless)")
+                + " — l'usage précoce de protocoles dans ce profil a historiquement "
+                  "été récompensé par des airdrops"
+            ),
+        })
+
+    rows.sort(key=lambda x: x["tvl"], reverse=True)
+    result = {
+        "candidates": rows[:100],
+        "scanned_count": len(protocols),
+        "note": (
+            "Heuristique : TVL élevée + token absent/quasi absent = profil "
+            "historique des gros airdrops. Aucune garantie — un airdrop "
+            "n'est jamais annoncé à l'avance."
+        ),
+        "fetched_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(),
+    }
+    _set(cache_key, result)
+    return dict(result, candidates=result["candidates"][:limit])
+
+
 @router.get("/context/{symbol:path}")
 async def onchain_context(symbol: str):
     """Agrège les données on-chain pour un symbole crypto."""
