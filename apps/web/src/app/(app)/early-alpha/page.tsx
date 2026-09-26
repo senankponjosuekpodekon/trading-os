@@ -69,10 +69,11 @@ export default function EarlyAlphaPage() {
   const [chain, setChain] = useState('');
   const [minRisk, setMinRisk] = useState('');
   const [maxRisk, setMaxRisk] = useState('');
+  const [limit, setLimit] = useState(50);
 
   const { data: presales, isLoading: pLoading } = useQuery<{ data: PresaleProject[]; summary: string }>({
-    queryKey: ['early-alpha-presales', chain, minRisk, maxRisk],
-    queryFn: async () => (await api.get(`/early-alpha/presales?chain=${chain}&minRisk=${minRisk}&maxRisk=${maxRisk}`)).data,
+    queryKey: ['early-alpha-presales', chain, minRisk, maxRisk, limit],
+    queryFn: async () => (await api.get(`/early-alpha/presales?chain=${chain}&minRisk=${minRisk}&maxRisk=${maxRisk}&limit=${limit}`)).data,
     staleTime: 300_000,
   });
 
@@ -127,6 +128,15 @@ export default function EarlyAlphaPage() {
                 value={maxRisk}
                 onChange={(e) => setMaxRisk(e.target.value)}
                 className="w-20 bg-gray-900 border border-gray-700 rounded-lg text-sm text-white px-2 py-1.5"
+              />
+              <input
+                type="number"
+                min={1}
+                max={100}
+                placeholder="limit"
+                value={limit}
+                onChange={(e) => setLimit(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
+                className="w-16 bg-gray-900 border border-gray-700 rounded-lg text-sm text-white px-2 py-1.5"
               />
             </div>
           </div>

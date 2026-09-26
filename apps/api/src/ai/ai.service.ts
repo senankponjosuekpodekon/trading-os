@@ -106,7 +106,7 @@ export class AiService {
   async preListingDiscover(minScore = 40, limit = 15, refresh = false): Promise<any> {
     return this.engine.get('/alpha/pre-listing/discover', {
       params: { min_score: minScore, limit, ...(refresh ? { refresh: 'true' } : {}) },
-      timeout: 30_000,
+      timeout: 90_000,
     });
   }
 

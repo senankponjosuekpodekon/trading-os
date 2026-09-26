@@ -79,8 +79,10 @@ export default function HiddenGemsPage() {
             <label className="text-xs text-gray-400">Limit</label>
             <input
               type="number"
+              min={1}
+              max={100}
               value={limit}
-              onChange={(e) => setLimit(Number(e.target.value))}
+              onChange={(e) => setLimit(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
               className="w-16 px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded text-white"
             />
           </div>

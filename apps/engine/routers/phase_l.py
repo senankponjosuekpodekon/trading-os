@@ -40,15 +40,25 @@ async def rebalance(body: RebalanceRequest):
 async def hidden_gems(
     min_liquidity: float = Query(50_000, ge=0),
     min_volume: float = Query(100_000, ge=0),
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(10, ge=1, le=100),
     refresh: bool = Query(False),
 ):
     from ml.hidden_gems import discover_hidden_gems, _cache, _CACHE_TTL
     import time
 
     now = time.monotonic()
-    if not refresh and _cache["gems"] and (now - _cache["ts"]) < _CACHE_TTL:
-        return _cache["gems"]
+    key = f"hiddengems:{min_liquidity}:{min_volume}"
+    data = _cache.get("gems")
+    if not refresh and data and (now - _cache["ts"]) < _CACHE_TTL and _cache.get("key") == key:
+        return dict(data, gems=(data.get("gems") or [])[:limit])
+
+    if not refresh:
+        from utils.cache import cache as _redis
+        rc = await _redis.get(key)
+        if rc:
+            out = dict(rc, gems=(rc.get("gems") or [])[:limit])
+            _cache["gems"], _cache["ts"], _cache["key"] = out, now, key
+            return out
 
     try:
         result = await discover_hidden_gems(
@@ -58,6 +68,9 @@ async def hidden_gems(
         )
         _cache["gems"] = result
         _cache["ts"] = now
+        _cache["key"] = key
+        from utils.cache import cache as _redis
+        await _redis.set(key, result, ttl=_CACHE_TTL * 3)
         return result
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Hidden gems unavailable: {exc}") from exc

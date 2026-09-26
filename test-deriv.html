@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Deriv Asset Explorer</title>
+
+  <style>
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 30px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: auto;
+    }
+
+    h1 {
+      margin-bottom: 5px;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      margin-bottom: 25px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    input,
+    select,
+    button {
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: white;
+    }
+
+    input {
+      flex: 1;
+      min-width: 280px;
+    }
+
+    button {
+      cursor: pointer;
+      background: #2563eb;
+      border-color: #2563eb;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    .status {
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      background: #1e293b;
+    }
+
+    .success {
+      border-left: 4px solid #22c55e;
+    }
+
+    .error {
+      border-left: 4px solid #ef4444;
+    }
+
+    .loading {
+      border-left: 4px solid #f59e0b;
+    }
+
+    .stats {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .card {
+      min-width: 150px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 15px 20px;
+    }
+
+    .card span {
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    .card strong {
+      display: block;
+      font-size: 24px;
+      margin-top: 5px;
+    }
+
+    .table-container {
+      overflow-x: auto;
+      background: #1e293b;
+      border-radius: 10px;
+      border: 1px solid #334155;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1100px;
+    }
+
+    th,
+    td {
+      padding: 13px;
+      text-align: left;
+      border-bottom: 1px solid #334155;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #111827;
+      color: #94a3b8;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    tr:hover {
+      background: #263449;
+    }
+
+    .symbol {
+      color: #22c55e;
+      font-family: monospace;
+      font-weight: bold;
+    }
+
+    .market {
+      color: #60a5fa;
+    }
+
+    .submarket {
+      color: #a78bfa;
+    }
+
+    .yes {
+      color: #22c55e;
+      font-weight: bold;
+    }
+
+    .no {
+      color: #ef4444;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #334155;
+      color: #cbd5e1;
+      font-size: 12px;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 40px !important;
+      color: #94a3b8;
+    }
+
+    details {
+      margin-top: 20px;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 15px;
+    }
+
+    summary {
+      cursor: pointer;
+      color: #94a3b8;
+    }
+
+    pre {
+      overflow: auto;
+      max-height: 500px;
+      font-size: 12px;
+    }
+
+  </style>
+</head>
+
+
+<body>
+
+<div class="container">
+
+  <h1>Deriv Asset Explorer</h1>
+
+  <div class="subtitle">
+    Découverte dynamique des instruments disponibles sur l'API Deriv
+  </div>
+
+
+  <!-- TOOLBAR -->
+
+  <div class="toolbar">
+
+    <input
+      id="search"
+      type="text"
+      placeholder="Rechercher : V75, Boom, Crash, Forex..."
+    >
+
+    <select id="market">
+
+      <option value="">
+        Tous les marchés
+      </option>
+
+    </select>
+
+    <select id="submarket">
+
+      <option value="">
+        Tous les sous-marchés
+      </option>
+
+    </select>
+
+    <button id="reload">
+      ↻ Actualiser
+    </button>
+
+  </div>
+
+
+  <!-- STATUS -->
+
+  <div
+    id="status"
+    class="status loading"
+  >
+    Connexion à Deriv...
+  </div>
+
+
+  <!-- STATS -->
+
+  <div class="stats">
+
+    <div class="card">
+      <span>Symboles</span>
+      <strong id="total">0</strong>
+    </div>
+
+    <div class="card">
+      <span>Marchés</span>
+      <strong id="marketCount">0</strong>
+    </div>
+
+    <div class="card">
+      <span>Sous-marchés</span>
+      <strong id="submarketCount">0</strong>
+    </div>
+
+    <div class="card">
+      <span>Affichés</span>
+      <strong id="shown">0</strong>
+    </div>
+
+  </div>
+
+
+  <!-- TABLE -->
+
+  <div class="table-container">
+
+    <table>
+
+      <thead>
+
+        <tr>
+
+          <th>Symbol</th>
+
+          <th>Nom</th>
+
+          <th>Type</th>
+
+          <th>Market</th>
+
+          <th>Submarket</th>
+
+          <th>Pip Size</th>
+
+          <th>Ouvert</th>
+
+          <th>Suspendu</th>
+
+        </tr>
+
+      </thead>
+
+
+      <tbody id="table">
+
+        <tr>
+          <td
+            colspan="8"
+            class="empty"
+          >
+            Chargement...
+          </td>
+        </tr>
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+
+  <!-- RAW DATA -->
+
+  <details>
+
+    <summary>
+      Afficher les données brutes reçues de Deriv
+    </summary>
+
+    <pre id="rawData">
+Aucune donnée.
+    </pre>
+
+  </details>
+
+</div>
+
+
+<script>
+
+/*
+==========================================================
+ DERIV API
+==========================================================
+*/
+
+const DERIV_WS =
+  "wss://api.derivws.com/trading/v1/options/ws/public";
+
+
+let symbols = [];
+
+
+/*
+==========================================================
+ LOAD SYMBOLS
+==========================================================
+*/
+
+function loadSymbols() {
+
+  setStatus(
+    "Connexion à la nouvelle API Deriv...",
+    "loading"
+  );
+
+
+  const ws =
+    new WebSocket(DERIV_WS);
+
+
+  /*
+  --------------------------------------------------------
+  OPEN
+  --------------------------------------------------------
+  */
+
+  ws.onopen = function () {
+
+    console.log(
+      "Deriv WebSocket connected"
+    );
+
+
+    setStatus(
+      "WebSocket connecté. Récupération des actifs...",
+      "loading"
+    );
+
+
+    /*
+     * Demande des symboles
+     */
+
+    ws.send(
+      JSON.stringify({
+
+        active_symbols: "brief",
+
+        req_id: 1
+
+      })
+    );
+
+  };
+
+
+  /*
+  --------------------------------------------------------
+  MESSAGE
+  --------------------------------------------------------
+  */
+
+  ws.onmessage = function (event) {
+
+    console.log(
+      "Deriv response:",
+      event.data
+    );
+
+
+    let data;
+
+
+    try {
+
+      data =
+        JSON.parse(event.data);
+
+    } catch (error) {
+
+      console.error(
+        "Réponse JSON invalide:",
+        error
+      );
+
+      return;
+
+    }
+
+
+    /*
+     * Afficher les données brutes
+     */
+
+    document
+      .getElementById("rawData")
+      .textContent =
+      JSON.stringify(
+        data,
+        null,
+        2
+      );
+
+
+    /*
+     * ERREUR DERIV
+     */
+
+    if (data.error) {
+
+      console.error(
+        "Deriv API error:",
+        data.error
+      );
+
+
+      setStatus(
+        "Erreur Deriv : " +
+        (
+          data.error.message ||
+          JSON.stringify(data.error)
+        ),
+        "error"
+      );
+
+
+      ws.close();
+
+      return;
+
+    }
+
+
+    /*
+     * SYMBOLS
+     */
+
+    if (
+      data.msg_type ===
+      "active_symbols"
+      ||
+      Array.isArray(data.active_symbols)
+    ) {
+
+      symbols =
+        data.active_symbols || [];
+
+
+      console.log(
+        "Symbols received:",
+        symbols
+      );
+
+
+      /*
+       * Aucun symbole
+       */
+
+      if (!symbols.length) {
+
+        setStatus(
+          "Deriv a retourné 0 symbole.",
+          "error"
+        );
+
+        render();
+
+        ws.close();
+
+        return;
+
+      }
+
+
+      /*
+       * Construire les filtres
+       */
+
+      buildMarketFilter();
+
+      buildSubmarketFilter();
+
+
+      /*
+       * Afficher
+       */
+
+      render();
+
+
+      /*
+       * Status
+       */
+
+      setStatus(
+        "✓ " +
+        symbols.length +
+        " instruments reçus depuis Deriv",
+        "success"
+      );
+
+
+      ws.close();
+
+    }
+
+  };
+
+
+  /*
+  --------------------------------------------------------
+  ERROR
+  --------------------------------------------------------
+  */
+
+  ws.onerror = function (error) {
+
+    console.error(
+      "WebSocket error:",
+      error
+    );
+
+
+    setStatus(
+      "Impossible de se connecter à Deriv.",
+      "error"
+    );
+
+  };
+
+
+  /*
+  --------------------------------------------------------
+  CLOSE
+  --------------------------------------------------------
+  */
+
+  ws.onclose = function (event) {
+
+    console.log(
+      "WebSocket closed:",
+      event.code,
+      event.reason
+    );
+
+  };
+
+}
+
+
+/*
+==========================================================
+ MARKET FILTER
+==========================================================
+*/
+
+function buildMarketFilter() {
+
+  const select =
+    document.getElementById("market");
+
+
+  const markets =
+    [
+      ...new Set(
+
+        symbols
+
+          .map(
+            s => s.market
+          )
+
+          .filter(Boolean)
+
+      )
+    ]
+
+    .sort();
+
+
+  select.innerHTML =
+    `
+      <option value="">
+        Tous les marchés
+      </option>
+    `;
+
+
+  markets.forEach(
+    market => {
+
+      const option =
+        document.createElement(
+          "option"
+        );
+
+
+      option.value =
+        market;
+
+
+      option.textContent =
+        market;
+
+
+      select.appendChild(
+        option
+      );
+
+    }
+  );
+
+}
+
+
+/*
+==========================================================
+ SUBMARKET FILTER
+==========================================================
+*/
+
+function buildSubmarketFilter() {
+
+  const select =
+    document.getElementById(
+      "submarket"
+    );
+
+
+  const submarkets =
+    [
+      ...new Set(
+
+        symbols
+
+          .map(
+            s => s.submarket
+          )
+
+          .filter(Boolean)
+
+      )
+    ]
+
+    .sort();
+
+
+  select.innerHTML =
+    `
+      <option value="">
+        Tous les sous-marchés
+      </option>
+    `;
+
+
+  submarkets.forEach(
+    submarket => {
+
+      const option =
+        document.createElement(
+          "option"
+        );
+
+
+      option.value =
+        submarket;
+
+
+      option.textContent =
+        submarket;
+
+
+      select.appendChild(
+        option
+      );
+
+    }
+  );
+
+}
+
+
+/*
+==========================================================
+ RENDER
+==========================================================
+*/
+
+function render() {
+
+  const search =
+    document
+      .getElementById("search")
+      .value
+      .toLowerCase()
+      .trim();
+
+
+  const market =
+    document
+      .getElementById("market")
+      .value;
+
+
+  const submarket =
+    document
+      .getElementById("submarket")
+      .value;
+
+
+  /*
+   * FILTRAGE
+   */
+
+  const filtered =
+    symbols.filter(
+      s => {
+
+        /*
+         * Nouvelle API
+         */
+
+        const symbol =
+          s.underlying_symbol ||
+          s.symbol ||
+          "";
+
+
+        const name =
+          s.underlying_symbol_name ||
+          s.display_name ||
+          "";
+
+
+        const type =
+          s.underlying_symbol_type ||
+          s.symbol_type ||
+          "";
+
+
+        const marketName =
+          s.market ||
+          "";
+
+
+        const submarketName =
+          s.submarket ||
+          "";
+
+
+        /*
+         * Recherche
+         */
+
+        const matchesSearch =
+          !search ||
+
+          symbol
+            .toLowerCase()
+            .includes(search) ||
+
+          name
+            .toLowerCase()
+            .includes(search) ||
+
+          type
+            .toLowerCase()
+            .includes(search) ||
+
+          marketName
+            .toLowerCase()
+            .includes(search) ||
+
+          submarketName
+            .toLowerCase()
+            .includes(search);
+
+
+        /*
+         * Market
+         */
+
+        const matchesMarket =
+          !market ||
+          marketName === market;
+
+
+        /*
+         * Submarket
+         */
+
+        const matchesSubmarket =
+          !submarket ||
+          submarketName === submarket;
+
+
+        return (
+          matchesSearch &&
+          matchesMarket &&
+          matchesSubmarket
+        );
+
+      }
+    );
+
+
+  /*
+   * TABLE
+   */
+
+  const table =
+    document.getElementById(
+      "table"
+    );
+
+
+  if (!filtered.length) {
+
+    table.innerHTML = `
+      <tr>
+
+        <td
+          colspan="8"
+          class="empty"
+        >
+          Aucun instrument trouvé
+        </td>
+
+      </tr>
+    `;
+
+  } else {
+
+    table.innerHTML =
+      filtered
+
+        .map(
+          s => {
+
+            /*
+             * Symbol
+             */
+
+            const symbol =
+              s.underlying_symbol ||
+              s.symbol ||
+              "-";
+
+
+            /*
+             * Name
+             */
+
+            const name =
+              s.underlying_symbol_name ||
+              s.display_name ||
+              "-";
+
+
+            /*
+             * Type
+             */
+
+            const type =
+              s.underlying_symbol_type ||
+              s.symbol_type ||
+              "-";
+
+
+            /*
+             * Market
+             */
+
+            const market =
+              s.market ||
+              "-";
+
+
+            /*
+             * Submarket
+             */
+
+            const submarket =
+              s.submarket ||
+              "-";
+
+
+            /*
+             * Pip size
+             */
+
+            const pipSize =
+              s.pip_size ??
+              "-";
+
+
+            /*
+             * Exchange open
+             */
+
+            const isOpen =
+              s.exchange_is_open;
+
+
+            const open =
+              isOpen === 1 ||
+              isOpen === true;
+
+
+            /*
+             * Suspended
+             */
+
+            const isSuspended =
+              s.is_trading_suspended;
+
+
+            const suspended =
+              isSuspended === 1 ||
+              isSuspended === true;
+
+
+            return `
+
+              <tr>
+
+                <td class="symbol">
+                  ${escapeHTML(symbol)}
+                </td>
+
+                <td>
+                  ${escapeHTML(name)}
+                </td>
+
+                <td>
+                  <span class="badge">
+                    ${escapeHTML(type)}
+                  </span>
+                </td>
+
+                <td class="market">
+                  ${escapeHTML(market)}
+                </td>
+
+                <td class="submarket">
+                  ${escapeHTML(submarket)}
+                </td>
+
+                <td>
+                  ${escapeHTML(pipSize)}
+                </td>
+
+                <td class="${
+                  open
+                    ? "yes"
+                    : "no"
+                }">
+
+                  ${
+                    open
+                      ? "✓ Oui"
+                      : "✗ Non"
+                  }
+
+                </td>
+
+                <td class="${
+                  suspended
+                    ? "no"
+                    : "yes"
+                }">
+
+                  ${
+                    suspended
+                      ? "✓ Oui"
+                      : "✗ Non"
+                  }
+
+                </td>
+
+              </tr>
+
+            `;
+
+          }
+        )
+
+        .join("");
+
+  }
+
+
+  /*
+   * STATS
+   */
+
+  document
+    .getElementById("total")
+    .textContent =
+    symbols.length;
+
+
+  document
+    .getElementById("shown")
+    .textContent =
+    filtered.length;
+
+
+  document
+    .getElementById("marketCount")
+    .textContent =
+    new Set(
+
+      symbols
+
+        .map(
+          s => s.market
+        )
+
+        .filter(Boolean)
+
+    ).size;
+
+
+  document
+    .getElementById("submarketCount")
+    .textContent =
+    new Set(
+
+      symbols
+
+        .map(
+          s => s.submarket
+        )
+
+        .filter(Boolean)
+
+    ).size;
+
+}
+
+
+/*
+==========================================================
+ STATUS
+==========================================================
+*/
+
+function setStatus(
+  message,
+  type
+) {
+
+  const status =
+    document.getElementById(
+      "status"
+    );
+
+
+  status.textContent =
+    message;
+
+
+  status.className =
+    "status " + type;
+
+}
+
+
+/*
+==========================================================
+ SECURITY
+==========================================================
+*/
+
+function escapeHTML(value) {
+
+  return String(value)
+
+    .replaceAll(
+      "&",
+      "&amp;"
+    )
+
+    .replaceAll(
+      "<",
+      "&lt;"
+    )
+
+    .replaceAll(
+      ">",
+      "&gt;"
+    )
+
+    .replaceAll(
+      '"',
+      "&quot;"
+    )
+
+    .replaceAll(
+      "'",
+      "&#039;"
+    );
+
+}
+
+
+/*
+==========================================================
+ FILTER EVENTS
+==========================================================
+*/
+
+document
+  .getElementById("search")
+  .addEventListener(
+    "input",
+    render
+  );
+
+
+document
+  .getElementById("market")
+  .addEventListener(
+    "change",
+    render
+  );
+
+
+document
+  .getElementById("submarket")
+  .addEventListener(
+    "change",
+    render
+  );
+
+
+document
+  .getElementById("reload")
+  .addEventListener(
+    "click",
+    loadSymbols
+  );
+
+
+/*
+==========================================================
+ START
+==========================================================
+*/
+
+loadSymbols();
+
+</script>
+
+</body>
+</html>

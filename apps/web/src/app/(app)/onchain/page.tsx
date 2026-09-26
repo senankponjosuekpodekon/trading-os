@@ -74,13 +74,13 @@ export default function OnChainPage() {
 
   const { data: funding } = useQuery({
     queryKey: ['onchain-funding', symbol],
-    queryFn: async () => (await api.get(`/onchain/funding/${symbol}`)).data,
+    queryFn: async () => (await api.get(`/onchain/funding/${encodeURIComponent(symbol)}`)).data,
     staleTime: 120_000,
   });
 
   const { data: basis } = useQuery({
     queryKey: ['onchain-spot-perp-basis', symbol],
-    queryFn: async () => (await api.get(`/onchain/spot-perp-basis/${symbol}`)).data,
+    queryFn: async () => (await api.get(`/onchain/spot-perp-basis/${encodeURIComponent(symbol)}`)).data,
     staleTime: 120_000,
   });
 

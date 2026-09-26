@@ -53,8 +53,10 @@ export class EarlyAlphaController {
     @Query('chain') chain?: string,
     @Query('minRisk') minRisk?: string,
     @Query('maxRisk') maxRisk?: string,
+    @Query('limit') limit?: string,
   ) {
-    const res = await this.ai.preListingDiscover(0, 50);
+    const lim = Math.min(100, Math.max(1, Number(limit) || 50));
+    const res = await this.ai.preListingDiscover(0, lim);
     let data: PresaleProject[] = (res?.projects ?? []).map((p: any) => {
       const tags = [p.listing_type, p.platform].filter(Boolean);
       return {

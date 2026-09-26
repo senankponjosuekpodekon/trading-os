@@ -35,7 +35,9 @@ def _set(key: str, val: any):
 
 
 def _binance_symbol(symbol: str) -> str:
-    base = symbol.split("/")[0]
+    base = symbol.split("/")[0].split("-")[0].strip().upper()
+    if base.endswith("USDT") or base.endswith("USDC"):
+        return base
     return f"{base}USDT"
 
 
@@ -49,7 +51,7 @@ async def _binance_get(url: str, params: Optional[dict] = None):
     return await retry_async(_do, max_retries=1, base_delay=0.5, source="binance")
 
 
-@router.get("/funding/{symbol}")
+@router.get("/funding/{symbol:path}")
 async def funding_rate(symbol: str):
     """Dernier funding rate Binance Futures pour un symbole."""
     bin_sym = _binance_symbol(symbol)
@@ -75,7 +77,7 @@ async def funding_rate(symbol: str):
         raise HTTPException(status_code=503, detail=f"Funding rate unavailable: {e}") from e
 
 
-@router.get("/open-interest/{symbol}")
+@router.get("/open-interest/{symbol:path}")
 async def open_interest(symbol: str):
     """Open interest Binance Futures."""
     bin_sym = _binance_symbol(symbol)
@@ -96,7 +98,7 @@ async def open_interest(symbol: str):
         raise HTTPException(status_code=503, detail=f"Open interest unavailable: {e}") from e
 
 
-@router.get("/spot-perp-basis/{symbol}")
+@router.get("/spot-perp-basis/{symbol:path}")
 async def spot_perp_basis(symbol: str):
     """Écart prix perpétuel vs spot (premium/discount)."""
     bin_sym = _binance_symbol(symbol)
@@ -595,7 +597,7 @@ async def undervalued_protocols(limit: int = 15):
     return result
 
 
-@router.get("/context/{symbol}")
+@router.get("/context/{symbol:path}")
 async def onchain_context(symbol: str):
     """Agrège les données on-chain pour un symbole crypto."""
     if not is_crypto_symbol(symbol):

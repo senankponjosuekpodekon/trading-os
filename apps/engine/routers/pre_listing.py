@@ -987,14 +987,23 @@ async def discover_pre_listing(
 @router.get("/pre-listing/discover")
 async def discover_endpoint(
     min_score: int = Query(40, ge=0, le=100),
-    limit: int = Query(15, ge=1, le=50),
+    limit: int = Query(15, ge=1, le=100),
     include_trending: bool = Query(True),
     refresh: bool = Query(False),
 ):
     """GET /pre-listing/discover -- Discover pre-listing opportunities."""
     now = time.monotonic()
     if not refresh and _cache["data"] and (now - _cache["ts"]) < _CACHE_TTL:
-        return _cache["data"]
+        data = _cache["data"]
+        return dict(data, projects=(data.get("projects") or [])[:limit])
+
+    if not refresh:
+        from utils.cache import cache as _redis
+        cached = await _redis.get("prelisting:discover")
+        if cached:
+            out = dict(cached, projects=(cached.get("projects") or [])[:limit])
+            _cache["data"], _cache["ts"] = out, now
+            return out
 
     try:
         result = await discover_pre_listing(
@@ -1004,6 +1013,8 @@ async def discover_endpoint(
         )
         _cache["data"] = result
         _cache["ts"] = now
+        from utils.cache import cache as _redis
+        await _redis.set("prelisting:discover", result, ttl=_CACHE_TTL * 3)
         return result
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Pre-listing discovery unavailable: {exc}") from exc
