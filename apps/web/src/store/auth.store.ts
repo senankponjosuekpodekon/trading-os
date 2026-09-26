@@ -38,16 +38,24 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (email, password, totpToken) => {
     set({ isLoading: true });
-    const { data } = await api.post('/auth/login', { email, password, totpToken });
-    storeUser(data.user);
-    set({ user: data.user, isLoading: false });
+    try {
+      const { data } = await api.post('/auth/login', { email, password, totpToken });
+      storeUser(data.user);
+      set({ user: data.user });
+    } finally {
+      set({ isLoading: false });
+    }
   },
 
   register: async (email, password, name) => {
     set({ isLoading: true });
-    const { data } = await api.post('/auth/register', { email, password, name });
-    storeUser(data.user);
-    set({ user: data.user, isLoading: false });
+    try {
+      const { data } = await api.post('/auth/register', { email, password, name });
+      storeUser(data.user);
+      set({ user: data.user });
+    } finally {
+      set({ isLoading: false });
+    }
   },
 
   logout: async () => {

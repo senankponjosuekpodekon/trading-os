@@ -129,9 +129,10 @@ function ReportDetail({ report }: { report: any }) {
   const portfolioValue = data.portfolio?.totalValue;
 
   const handleDownload = () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('trading_os_token') : null;
+    // Auth = cookie httpOnly (pas de token en localStorage) — credentials: 'include'
+    // est requis pour un fetch cross-origin direct.
     const url = `${api.defaults.baseURL}/reports/${report.id}/export`;
-    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    fetch(url, { credentials: 'include' })
       .then(res => res.text())
       .then(html => {
         const blob = new Blob([html], { type: 'text/html' });
