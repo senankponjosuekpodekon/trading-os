@@ -1,8 +1,12 @@
 import { Controller, Get, Post, Body, Request, UseGuards } from '@nestjs/common';
+import { IsString, IsNotEmpty, Length } from 'class-validator';
 import { TwoFactorService } from './two-factor.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 class TwoFactorDto {
+  @IsString()
+  @IsNotEmpty()
+  @Length(6, 8)
   token: string;
 }
 

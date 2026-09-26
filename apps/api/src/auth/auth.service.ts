@@ -64,7 +64,7 @@ export class AuthService {
     const mailResult = await this.mail.sendVerificationEmail(user.email, verificationUrl);
     this.fileLogger.log('User registered', { userId: user.id, email: user.email, verificationSent: mailResult.sent });
 
-    return { user: userWithoutPassword, emailVerificationToken, ...tokens };
+    return { user: userWithoutPassword, ...tokens };
   }
 
   async login(dto: LoginDto) {
@@ -159,11 +159,7 @@ export class AuthService {
 
     this.fileLogger.log('Password reset requested', { userId: user.id, email, sent: mailResult.sent });
 
-    return {
-      queued: true,
-      sent: mailResult.sent,
-      resetUrl,
-    };
+    return { queued: true };
   }
 
   async resetPassword(token: string, newPassword: string) {
@@ -203,14 +199,19 @@ export class AuthService {
     const hash = this.hashToken(refreshToken);
     const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash: hash } });
 
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+    if (!stored || stored.expiresAt < new Date()) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // Détection de réutilisation : si déjà remplacé, revoke tous les tokens du user
+    // Détection de réutilisation : un token déjà remplacé (revokedAt + replacedBy)
+    // qui se représente indique un vol — révoquer toute la famille.
     if (stored.replacedBy) {
       await this.revokeAllUserTokens(stored.userId);
       throw new UnauthorizedException('Token reuse detected');
+    }
+
+    if (stored.revokedAt) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: stored.userId } });

@@ -222,7 +222,7 @@ export default function HiddenGemsPage() {
                   {gem.smart_money.smart_wallets > 0 && (
                     <p className="text-emerald-400/90"
                       title={(gem.smart_money.known_buyers || []).join('\n') || ''}>
-                      {gem.smart_money.smart_wallets} acheteur(s) précoce(s) de ce token ont déjà gagné sur d'autres tokens
+                      {gem.smart_money.smart_wallets} acheteur(s) précoce(s) de ce token ont déjà gagné sur d&apos;autres tokens
                     </p>
                   )}
                   {gem.smart_money.deployer_wins > 0 && (

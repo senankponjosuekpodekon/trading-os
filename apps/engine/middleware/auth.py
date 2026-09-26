@@ -8,6 +8,7 @@ If ENGINE_API_KEY is not set, the middleware is bypassed with a warning
 (development mode).  In production the key MUST be configured.
 """
 import os
+import secrets
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -19,6 +20,7 @@ logger = get_logger(__name__)
 
 _EXEMPT_PATHS = {"/health", "/metrics"}
 _ENGINE_KEY = os.getenv("ENGINE_API_KEY", "")
+_PRODUCTION = os.getenv("ENVIRONMENT", os.getenv("NODE_ENV", "")).strip().lower() in ("production", "prod")
 
 
 class EngineAuthMiddleware(BaseHTTPMiddleware):
@@ -31,12 +33,20 @@ class EngineAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 
-        # No key configured — dev mode, log once
+        # No key configured — toléré en dev uniquement. En production on
+        # refuse tout : une clé absente + bind exposé ouvrirait les endpoints
+        # de trading réel (/deriv/scalp) et le LLM à quiconque atteint le port.
         if not _ENGINE_KEY:
+            if _PRODUCTION:
+                logger.error("engine_auth_no_key_production", path=request.url.path)
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "ENGINE_KEY_MISSING", "message": "ENGINE_API_KEY is required in production"},
+                )
             return await call_next(request)
 
         provided = request.headers.get("x-engine-key", "")
-        if provided != _ENGINE_KEY:
+        if not secrets.compare_digest(provided, _ENGINE_KEY):
             logger.warning("engine_auth_rejected", path=request.url.path, ip=request.client.host if request.client else "?")
             return JSONResponse(
                 status_code=401,

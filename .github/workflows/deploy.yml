@@ -29,9 +29,9 @@ jobs:
           echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
+          printf '%s' "${GHCR_PASS}" | ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519 "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
             "cd /root/projects/trading-os && \
-             docker login ghcr.io -u '${GHCR_USER}' -p '${GHCR_PASS}' && \
+             docker login ghcr.io -u '${GHCR_USER}' --password-stdin && \
              docker pull ghcr.io/${IMAGE_PREFIX}-api:${TAG} && \
              docker pull ghcr.io/${IMAGE_PREFIX}-web:${TAG} && \
              docker pull ghcr.io/${IMAGE_PREFIX}-engine:${TAG} && \

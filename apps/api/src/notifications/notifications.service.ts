@@ -1,6 +1,7 @@
 import { Injectable, Logger, MessageEvent } from '@nestjs/common';
 import { Subject, Observable, filter, map, merge, interval, startWith } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { rlsContext } from '../prisma/rls-context';
 
 export interface Notification {
   id:        string;
@@ -67,9 +68,14 @@ export class NotificationsService {
 
     // Persistance DB (fire-and-forget) — '*' n'a pas de user_id en DB, skip.
     // Optional chaining : les mocks Prisma partiels ne cassent pas le push.
+    // rlsContext.run : la table notifications est sous RLS. Les chemins
+    // système (broadcast engine, crons) n'ont pas de contexte request —
+    // on scope explicitement l'écriture sur le user destinataire, sinon
+    // l'INSERT est rejeté par le WITH CHECK de la policy.
     if (n.userId !== '*' && this.prisma?.notification) {
       void Promise.resolve(
-        this.prisma.notification.create({
+        rlsContext.run(n.userId, () =>
+          this.prisma!.notification.create({
           data: {
             id: n.id,
             userId: n.userId,
@@ -78,7 +84,8 @@ export class NotificationsService {
             message: n.message,
             data: n.data === undefined ? undefined : n.data,
           },
-        }),
+          }),
+        ),
       ).catch((err) => this.logger.warn(`Notification persist failed: ${err?.message}`));
     }
 

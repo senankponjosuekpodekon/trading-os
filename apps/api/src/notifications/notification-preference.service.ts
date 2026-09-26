@@ -1,13 +1,23 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { UpdateNotificationPreferenceDto } from './dto/notification-preference.dto';
 
 @Injectable()
 export class NotificationPreferenceService {
   private readonly logger = new Logger(NotificationPreferenceService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    // Lectures cross-user (broadcast engine, fan-out push) — la table users
+    // est sous RLS : sans contexte request ces requêtes renvoient [].
+    // Optionnel pour ne pas casser les tests qui mockent un seul client.
+    @Optional() private prismaSystem?: PrismaSystemService,
+  ) {}
+
+  private get systemDb() {
+    return (this.prismaSystem ?? this.prisma) as PrismaService;
+  }
 
   async getOrCreate(userId: string) {
     let pref = await this.prisma.notificationPreference.findUnique({
@@ -23,14 +33,14 @@ export class NotificationPreferenceService {
   }
 
   async findPushSubscribed() {
-    return this.prisma.notificationPreference.findMany({
+    return this.systemDb.notificationPreference.findMany({
       where: { pushEnabled: true, pushSubscription: { not: Prisma.DbNull } },
       select: { userId: true, pushSubscription: true, minConfidence: true },
     });
   }
 
   async findAllUserIds(): Promise<string[]> {
-    const users = await this.prisma.user.findMany({ select: { id: true } });
+    const users = await this.systemDb.user.findMany({ select: { id: true } });
     return users.map((u) => u.id);
   }
 

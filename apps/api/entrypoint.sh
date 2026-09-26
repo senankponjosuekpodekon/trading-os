@@ -3,17 +3,11 @@ set -e
 
 echo "[entrypoint] Running prisma migrate deploy..."
 npx prisma migrate deploy 2>&1 || {
-  echo "[entrypoint] Migration failed, attempting to resolve failed migrations..."
-  FAILED=$(npx prisma migrate status --schema=./prisma/schema.prisma 2>&1 | grep "failed" | grep -oE '[0-9]{14}_[a-z0-9_]+' | head -1)
-  if [ -n "$FAILED" ]; then
-    echo "[entrypoint] Resolving failed migration: $FAILED"
-    npx prisma migrate resolve --applied "$FAILED" --schema=./prisma/schema.prisma 2>/dev/null || true
-    echo "[entrypoint] Retrying prisma migrate deploy..."
-    npx prisma migrate deploy
-  else
-    echo "[entrypoint] No failed migration found, re-raising error"
-    exit 1
-  fi
+  echo "[entrypoint] ERROR: prisma migrate deploy failed."
+  echo "[entrypoint] Refusing to auto-resolve: a failed migration must be inspected manually"
+  echo "[entrypoint] (prisma migrate resolve --applied/--rolled-back) after verifying"
+  echo "[entrypoint] which statements actually ran. Aborting boot."
+  exit 1
 }
 
 echo "[entrypoint] Running prisma db seed..."
@@ -82,7 +76,7 @@ async function main() {
   };
   await prisma.strategy.upsert({
     where: { name: 'EMA Trend + RSI' },
-    update: { rules: emaTrendRsiRules, analysisTimeframe: '4h', entryTimeframe: '1h', isActive: true },
+    update: {},
     create: {
       name: 'EMA Trend + RSI',
       description: 'Tendance EMA 20/50/200 avec confirmation RSI. Analyse sur 4h, entree sur 1h.',
@@ -100,7 +94,7 @@ async function main() {
   const adminPassword = await bcrypt.hash(rawPassword || crypto.randomBytes(24).toString('hex'), 12);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
-    update: { role: 'SUPER_ADMIN', ...(rawPassword ? { password: adminPassword } : {}) },
+    update: {},
     create: {
       email: 'admin@example.com',
       password: adminPassword,

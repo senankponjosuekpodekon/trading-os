@@ -5,8 +5,8 @@ API Deriv : wss://api.derivws.com/trading/v1/options/ws/public
 (les anciens frontaux ws.binaryws.com / ws.derivws.com retournent HTTP 520)
 """
 from fastapi import APIRouter
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import List, Literal
 import asyncio
 import json
 import os
@@ -22,6 +22,10 @@ from utils.deriv_client import deriv_client
 router = APIRouter()
 
 DERIV_TOKEN   = os.getenv("DERIV_API_TOKEN", "")
+# Kill-switch explicite pour le trading réel : sans DERIV_TRADING_ENABLED=1
+# l'endpoint scalp reste en mode paper même si un token est configuré.
+DERIV_TRADING_ENABLED = os.getenv("DERIV_TRADING_ENABLED", "").strip().lower() in ("1", "true", "yes")
+DERIV_MAX_STAKE = float(os.getenv("DERIV_MAX_STAKE", "25"))
 V75_SYMBOL    = "R_75"   # Volatility 75 Index
 V75_GRANULARITY = 60     # 1 minute en secondes
 
@@ -53,11 +57,11 @@ DERIV_SYMBOLS = {
 
 # ── Modèles ──────────────────────────────────────────────────
 class DerivScalpRequest(BaseModel):
-    symbol:      str = V75_SYMBOL
-    bars:        int = 100
-    stake:       float = 1.0
-    duration:    int = 5         # minutes
-    contract_type: str = "CALL"  # CALL | PUT
+    symbol:        str = V75_SYMBOL
+    bars:          int = Field(default=100, ge=30, le=500)
+    stake:         float = Field(default=1.0, gt=0, le=DERIV_MAX_STAKE)
+    duration:      int = Field(default=5, ge=1, le=60)   # minutes
+    contract_type: Literal["CALL", "PUT"] = "CALL"
 
 
 class DerivTickRequest(BaseModel):
@@ -435,7 +439,9 @@ async def scalp_v75(req: DerivScalpRequest):
 
     # Mode live : place le trade via API Deriv (avec risk gate)
     # authorize + buy sur la MÊME session WS — l'auth Deriv est par connexion.
-    if DERIV_TOKEN and source == "live":
+    # DERIV_TRADING_ENABLED=1 requis : garde-fou contre tout ordre réel
+    # déclenché par accident (endpoint, cron, ou clé moteur compromise).
+    if DERIV_TOKEN and DERIV_TRADING_ENABLED and source == "live":
         buy_params = {
             "amount":        adjusted_stake,
             "basis":         "stake",

@@ -38,6 +38,16 @@ export class BillingService {
     const plan = await this.prisma.plan.findUnique({ where: { code: planCode } });
     if (!plan) throw new NotFoundException(`Plan ${planCode} not found`);
 
+    // Aucun provider de paiement n'est intégré : le trial est limité à un seul
+    // par utilisateur (sinon cancel+subscribe en boucle = plan gratuit à vie).
+    const alreadyTrialed = await this.prisma.subscription.findFirst({
+      where: { userId },
+      select: { id: true },
+    });
+    if (alreadyTrialed) {
+      throw new BadRequestException('Trial already used. Payment required for a new subscription.');
+    }
+
     const now = new Date();
     const end = new Date(now);
     end.setDate(end.getDate() + trialDays);
