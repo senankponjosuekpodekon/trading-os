@@ -21,6 +21,12 @@ export default function HiddenGemsPage() {
     staleTime: 1000 * 60 * 10,
   });
 
+  const { data: smStatus } = useQuery({
+    queryKey: ['smart-money-status'],
+    queryFn: async () => (await api.get('/ml/smart-money/status')).data,
+    staleTime: 600_000,
+  });
+
   const handleRefresh = async () => {
     await refetch();
     queryClient.invalidateQueries({ queryKey: ['hidden-gems'] });
@@ -93,6 +99,14 @@ export default function HiddenGemsPage() {
 
         {data && (
           <div className="text-sm text-gray-400">{data.summary}</div>
+        )}
+        {smStatus?.judged_tokens > 0 && (
+          <div className="text-xs text-gray-500" title="Index smart-money construit sur les issues réelles mesurées par nos snapshots">
+            Index smart-money : {smStatus.judged_tokens} tokens jugés ·{' '}
+            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.wallets || 0), 0)} wallets ·{' '}
+            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.deployers || 0), 0)} deployers ·{' '}
+            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.rugs || 0), 0)} rugs répertoriés
+          </div>
         )}
 
         {/* Gems grid */}
@@ -197,6 +211,29 @@ export default function HiddenGemsPage() {
                       HONEYPOT
                     </span>
                   )}
+                </div>
+              )}
+
+              {gem.smart_money && (gem.smart_money.score > 0 || gem.smart_money.deployer_rugs > 0) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mb-3 pb-3 border-b border-gray-800">
+                  <span className="text-gray-500">🧠 Smart money</span>
+                  {gem.smart_money.smart_wallets > 0 && (
+                    <span className="text-emerald-400"
+                      title={(gem.smart_money.known_buyers || []).join(', ') || ''}>
+                      {gem.smart_money.smart_wallets} wallet(s) early sur d'anciens winners
+                    </span>
+                  )}
+                  {gem.smart_money.deployer_wins > 0 && (
+                    <span className="text-emerald-400">
+                      deployer : {gem.smart_money.deployer_wins} winner(s)
+                    </span>
+                  )}
+                  {gem.smart_money.deployer_rugs > 0 && (
+                    <span className="text-red-400">
+                      deployer : {gem.smart_money.deployer_rugs} rug(s)
+                    </span>
+                  )}
+                  <span className="text-gray-600">score {gem.smart_money.score}</span>
                 </div>
               )}
 
