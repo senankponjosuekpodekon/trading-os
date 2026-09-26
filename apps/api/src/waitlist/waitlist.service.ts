@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService, PrismaSystemService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { CreateWaitlistDto } from './dto/waitlist.dto';
 
@@ -9,11 +9,15 @@ export class WaitlistService {
 
   constructor(
     private prisma: PrismaService,
+    private systemPrisma: PrismaSystemService,
     private mail: MailService,
   ) {}
 
   create(dto: CreateWaitlistDto) {
-    return this.prisma.waitlistEntry.create({
+    // POST public sans contexte user : l'INSERT ... RETURNING de Prisma
+    // applique la SELECT policy (admin-only) → 42501. Le create passe par
+    // le client système ; les lectures restent sous RLS (admin policy).
+    return this.systemPrisma.waitlistEntry.create({
       data: {
         name: dto.name.trim(),
         email: dto.email.trim().toLowerCase(),
