@@ -944,6 +944,28 @@ async def discover_pre_listing(
         if score >= min_score:
             scored.append(p)
 
+    # Smart-money : overlap early-buyers + réputation deployer, limité aux
+    # projets qui ont déjà un token déployé (les presales pures n'ont pas
+    # encore d'adresse ni de transferts à analyser).
+    from ml.smart_money import check_token as _sm_check
+    sm_targets = [p for p in scored[:limit] if p.get("token_address")]
+    if sm_targets:
+        sm_results = await asyncio.gather(*(
+            _sm_check(p.get("chain", ""), p["token_address"], "")
+            for p in sm_targets
+        ), return_exceptions=True)
+        for p, sm in zip(sm_targets, sm_results):
+            if not isinstance(sm, dict):
+                continue
+            p["smart_money"] = sm
+            if sm.get("deployer_rugs", 0) > 0:
+                p["risk_flags"].append(
+                    f"Deployer lié à {sm['deployer_rugs']} token(s) perdant(s)")
+                p["asymmetric_score"] = max(0, p["asymmetric_score"] - 10)
+            if sm.get("deployer_wins", 0) > 0 or sm.get("smart_wallets", 0) > 0:
+                p["opportunity_flags"].append("Smart money détecté")
+                p["asymmetric_score"] = min(100, p["asymmetric_score"] + 5)
+
     # Sort by score
     scored.sort(key=lambda x: x["asymmetric_score"], reverse=True)
 

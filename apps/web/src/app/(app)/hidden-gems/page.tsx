@@ -103,9 +103,9 @@ export default function HiddenGemsPage() {
         {smStatus?.judged_tokens > 0 && (
           <div className="text-xs text-gray-500" title="Index smart-money construit sur les issues réelles mesurées par nos snapshots">
             Index smart-money : {smStatus.judged_tokens} tokens jugés ·{' '}
-            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.wallets || 0), 0)} wallets ·{' '}
-            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.deployers || 0), 0)} deployers ·{' '}
-            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.rugs || 0), 0)} rugs répertoriés
+            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.wallets || 0), 0)} acheteurs précoces gagnants repérés ·{' '}
+            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.deployers || 0), 0)} créateurs à track record ·{' '}
+            {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.rugs || 0), 0)} créateurs de tokens perdants
           </div>
         )}
 
@@ -135,7 +135,7 @@ export default function HiddenGemsPage() {
                     )}
                     {gem.smart_money && (gem.smart_money.smart_wallets > 0 || gem.smart_money.deployer_wins > 0) && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/50 bg-emerald-500/10 text-emerald-300 font-semibold"
-                        title={`Smart money détecté${gem.smart_money.smart_wallets > 0 ? ` — ${gem.smart_money.smart_wallets} wallet(s) early sur d'anciens winners` : ''}${gem.smart_money.deployer_wins > 0 ? ` — deployer avec ${gem.smart_money.deployer_wins} winner(s)` : ''}`}>
+                        title={`Des acteurs expérimentés sont présents :${gem.smart_money.smart_wallets > 0 ? ` ${gem.smart_money.smart_wallets} acheteur(s) précoce(s) déjà gagnant(s) sur d'autres tokens.` : ''}${gem.smart_money.deployer_wins > 0 ? ` Le créateur a déjà lancé ${gem.smart_money.deployer_wins} token(s) gagnant(s).` : ''}`}>
                         🧠 SMART MONEY
                       </span>
                     )}
@@ -215,25 +215,26 @@ export default function HiddenGemsPage() {
               )}
 
               {gem.smart_money && (gem.smart_money.score > 0 || gem.smart_money.deployer_rugs > 0) && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mb-3 pb-3 border-b border-gray-800">
-                  <span className="text-gray-500">🧠 Smart money</span>
+                <div className="text-xs mb-3 pb-3 border-b border-gray-800 space-y-0.5">
+                  <p className="text-gray-500 font-medium">
+                    🧠 Smart money <span className="text-gray-600 font-normal">— score {gem.smart_money.score}/100</span>
+                  </p>
                   {gem.smart_money.smart_wallets > 0 && (
-                    <span className="text-emerald-400"
-                      title={(gem.smart_money.known_buyers || []).join(', ') || ''}>
-                      {gem.smart_money.smart_wallets} wallet(s) early sur d'anciens winners
-                    </span>
+                    <p className="text-emerald-400/90"
+                      title={(gem.smart_money.known_buyers || []).join('\n') || ''}>
+                      {gem.smart_money.smart_wallets} acheteur(s) précoce(s) de ce token ont déjà gagné sur d'autres tokens
+                    </p>
                   )}
                   {gem.smart_money.deployer_wins > 0 && (
-                    <span className="text-emerald-400">
-                      deployer : {gem.smart_money.deployer_wins} winner(s)
-                    </span>
+                    <p className="text-emerald-400/90">
+                      Le créateur a déjà lancé {gem.smart_money.deployer_wins} token(s) gagnant(s)
+                    </p>
                   )}
                   {gem.smart_money.deployer_rugs > 0 && (
-                    <span className="text-red-400">
-                      deployer : {gem.smart_money.deployer_rugs} rug(s)
-                    </span>
+                    <p className="text-red-400/90">
+                      ⚠ Le créateur est lié à {gem.smart_money.deployer_rugs} token(s) ayant perdu ≥50%
+                    </p>
                   )}
-                  <span className="text-gray-600">score {gem.smart_money.score}</span>
                 </div>
               )}
 

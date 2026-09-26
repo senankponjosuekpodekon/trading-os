@@ -27,6 +27,13 @@ interface PresaleProject {
   source: string;
   url: string;
   tags: string[];
+  smartMoney?: {
+    score: number;
+    smart_wallets: number;
+    deployer_wins: number;
+    deployer_rugs: number;
+    known_buyers?: string[];
+  } | null;
 }
 
 interface OnChainAsym {
@@ -169,7 +176,21 @@ export default function EarlyAlphaPage() {
                       </a>
                     )}
                   </div>
-                  <div className="text-gray-500 text-xs">{p.symbol}</div>
+                  <div className="text-gray-500 text-xs flex items-center gap-1">
+                    {p.symbol}
+                    {p.smartMoney && (p.smartMoney.smart_wallets > 0 || p.smartMoney.deployer_wins > 0) && (
+                      <span className="px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px]"
+                        title={`Smart money : ${p.smartMoney.smart_wallets > 0 ? `${p.smartMoney.smart_wallets} acheteur(s) précoce(s) déjà gagnant(s) sur d'autres tokens. ` : ''}${p.smartMoney.deployer_wins > 0 ? `Créateur : ${p.smartMoney.deployer_wins} token(s) gagnant(s) précédent(s).` : ''}`}>
+                        🧠
+                      </span>
+                    )}
+                    {p.smartMoney && p.smartMoney.deployer_rugs > 0 && (
+                      <span className="px-1 py-0.5 rounded bg-red-500/15 text-red-400 text-[10px]"
+                        title={`Le créateur de ce token est lié à ${p.smartMoney.deployer_rugs} token(s) ayant perdu ≥50% — vigilance`}>
+                        ⚠ dev
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="col-span-1 text-gray-300">{p.chain}</div>
                 <div className="col-span-1 text-gray-300">{p.listingType}</div>

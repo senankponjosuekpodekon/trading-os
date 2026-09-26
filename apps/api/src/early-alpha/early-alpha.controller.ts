@@ -26,6 +26,13 @@ export interface PresaleProject {
   source: string;
   url: string;
   tags: string[];
+  smartMoney?: {
+    score: number;
+    smart_wallets: number;
+    deployer_wins: number;
+    deployer_rugs: number;
+    known_buyers?: string[];
+  } | null;
 }
 
 export interface OnChainAsym {
@@ -83,6 +90,7 @@ export class EarlyAlphaController {
         source: p.source ?? '',
         url: p.url ?? p.website ?? '',
         tags,
+        smartMoney: p.smart_money ?? null,
       };
     });
     if (chain) data = data.filter(p => p.chain.toLowerCase() === chain.toLowerCase());
