@@ -49,6 +49,10 @@ describe('SignalTrackerService', () => {
     service = module.get<SignalTrackerService>(SignalTrackerService);
     prisma = module.get<PrismaService>(PrismaService);
     candleRepo = module.get<CandleRepository>('CandleRepository');
+    // Lock distribué : jamais de vrai Redis en test — sinon le résultat
+    // dépend de l'état du lock en prod (même instance Redis sur le VPS).
+    jest.spyOn(service as any, '_acquireLock').mockResolvedValue(true);
+    jest.spyOn(service as any, '_releaseLock').mockResolvedValue(undefined);
   });
 
   afterEach(() => {

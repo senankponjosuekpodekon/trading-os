@@ -21,6 +21,7 @@ export class ReportsService {
   private async _run<T>(name: string, fn: () => Promise<T>): Promise<T | undefined> {
     const enabled = await this.cronConfig.isEnabled(name);
     if (!enabled) return undefined;
+    if (!(await this.cronConfig.acquireLock(name))) return undefined;
 
     try {
       const result = await fn();
@@ -29,6 +30,8 @@ export class ReportsService {
     } catch (error) {
       await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
       throw error;
+    } finally {
+      await this.cronConfig.releaseLock(name);
     }
   }
 

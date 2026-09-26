@@ -58,7 +58,7 @@ describe('WatcherService', () => {
         { provide: PriceAlertsService, useValue: mockPriceAlerts },
         { provide: ConfigService, useValue: { get: jest.fn((key: string, def: any) => def) } },
         { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
-        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
+        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), acquireLock: jest.fn().mockResolvedValue(true), releaseLock: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 

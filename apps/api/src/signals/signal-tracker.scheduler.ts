@@ -25,6 +25,7 @@ export class SignalTrackerScheduler {
     if (this._running) return;
     const enabled = await this.cronConfig.isEnabled(name);
     if (!enabled) return;
+    if (!(await this.cronConfig.acquireLock(name))) return;
 
     this._running = true;
     try {
@@ -35,6 +36,7 @@ export class SignalTrackerScheduler {
       throw error;
     } finally {
       this._running = false;
+      await this.cronConfig.releaseLock(name);
     }
   }
 

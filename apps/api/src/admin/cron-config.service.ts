@@ -48,6 +48,42 @@ export class CronConfigService {
     await this.redis.set(this.lastErrorKey(name), error);
   }
 
+  /**
+   * Verrou distribué best-effort : quand plusieurs instances API tournent,
+   * elles ne doivent pas exécuter le même cron en parallèle (doublons de
+   * signaux, positions double-close, events dupliqués). Fail-open si Redis
+   * est indisponible — un éventuel doublon vaut mieux qu'un cron mort.
+   */
+  private readonly lockOwner = `${process.pid}-${Math.random().toString(36).slice(2)}`;
+
+  private lockKey(name: string): string {
+    return `cron:lock:${name}`;
+  }
+
+  async acquireLock(name: string, ttlSeconds = 900): Promise<boolean> {
+    try {
+      const res = await this.redis.set(this.lockKey(name), this.lockOwner, 'EX', ttlSeconds, 'NX');
+      return res === 'OK';
+    } catch {
+      return true;
+    }
+  }
+
+  async releaseLock(name: string): Promise<void> {
+    try {
+      // Ne supprime que si c'est bien notre lock (pas celui d'un autre
+      // processus qui aurait pris la main après expiration du TTL)
+      await this.redis.eval(
+        `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
+        1,
+        this.lockKey(name),
+        this.lockOwner,
+      );
+    } catch {
+      // best-effort — le TTL purge de toute façon
+    }
+  }
+
   async getAll(): Promise<CronConfig[]> {
     const names = [
       { name: 'TRAILING_STOPS_ENABLED', description: 'Synchronisation des trailing stops (30s)' },

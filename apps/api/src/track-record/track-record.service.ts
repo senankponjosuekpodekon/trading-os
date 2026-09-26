@@ -4,6 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { PrismaSystemService } from '../prisma/prisma.service';
+import { CronConfigService } from '../admin/cron-config.service';
 
 export interface RecordCallInput {
   symbol: string;
@@ -25,6 +26,7 @@ export class TrackRecordService {
     private systemPrisma: PrismaSystemService,
     private http: HttpService,
     private config: ConfigService,
+    private cronConfig: CronConfigService,
   ) {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
@@ -111,6 +113,15 @@ export class TrackRecordService {
   /** Rafraîchit last/peak/trough de tous les calls ouverts — toutes les 15 min. */
   @Cron('0 */15 * * * *')
   async refreshPrices() {
+    if (!(await this.cronConfig.acquireLock('TRACK_RECORD_REFRESH'))) return;
+    try {
+      await this._refreshPricesLocked();
+    } finally {
+      await this.cronConfig.releaseLock('TRACK_RECORD_REFRESH');
+    }
+  }
+
+  private async _refreshPricesLocked() {
     const open = await this.db.findMany({ where: { closedAt: null } });
     if (open.length === 0) return;
     await Promise.allSettled(

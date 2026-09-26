@@ -78,7 +78,7 @@ describe('PositionsService', () => {
         { provide: AuditService, useValue: mockAudit },
         { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
         { provide: CrossPositionRiskService, useValue: { checkCorrelationRisk: jest.fn().mockResolvedValue({ allowed: true }) } },
-        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
+        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), acquireLock: jest.fn().mockResolvedValue(true), releaseLock: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 

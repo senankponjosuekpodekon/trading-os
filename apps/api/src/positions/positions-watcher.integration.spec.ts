@@ -64,7 +64,7 @@ describe('openPosition → watcher → closePosition flow', () => {
       .overrideProvider(JournalService)
       .useValue(journal as any)
       .overrideProvider(CronConfigService)
-      .useValue({ isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) })
+      .useValue({ isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), acquireLock: jest.fn().mockResolvedValue(true), releaseLock: jest.fn(), getAll: jest.fn().mockResolvedValue([]) })
       .compile();
 
     positionsService = moduleRef.get<PositionsService>(PositionsService);

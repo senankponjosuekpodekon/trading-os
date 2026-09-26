@@ -41,7 +41,7 @@ describe('SignalOutcomeService', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: FeatureStoreService, useValue: mockFeatureStore },
         { provide: SystemHealthService, useValue: { recordCronRun: jest.fn(), getCronStatus: jest.fn() } },
-        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
+        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), acquireLock: jest.fn().mockResolvedValue(true), releaseLock: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
         { provide: SignalExecutionService, useValue: { logEvent: jest.fn() } },
       ],
     }).compile();

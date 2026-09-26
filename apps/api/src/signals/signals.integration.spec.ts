@@ -79,7 +79,7 @@ describe('SignalsController (integration)', () => {
         incrementSignalUsage: jest.fn().mockResolvedValue(undefined),
       })
       .overrideProvider(CronConfigService)
-      .useValue({ isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) })
+      .useValue({ isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), acquireLock: jest.fn().mockResolvedValue(true), releaseLock: jest.fn(), getAll: jest.fn().mockResolvedValue([]) })
       .overrideProvider(MaintenanceService)
       .useValue({ isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn() })
       .overrideGuard(JwtAuthGuard)

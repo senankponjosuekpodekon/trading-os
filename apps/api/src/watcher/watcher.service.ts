@@ -43,6 +43,7 @@ export class WatcherService {
   private async _run(name: string, fn: () => Promise<void>): Promise<void> {
     const enabled = await this.cronConfig.isEnabled(name);
     if (!enabled) return;
+    if (!(await this.cronConfig.acquireLock(name))) return;
 
     try {
       await fn();
@@ -50,6 +51,8 @@ export class WatcherService {
     } catch (error) {
       await this.cronConfig.setLastError(name, (error as Error)?.message ?? 'Unknown error');
       throw error;
+    } finally {
+      await this.cronConfig.releaseLock(name);
     }
   }
 

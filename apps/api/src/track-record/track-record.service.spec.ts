@@ -12,13 +12,14 @@ const mockDb = {
 const mockPrisma = { trackedCall: mockDb };
 const mockHttp = { get: jest.fn() };
 const mockConfig = { get: jest.fn().mockReturnValue('http://engine:8000') };
+const mockCronConfig = { acquireLock: jest.fn().mockResolvedValue(true), releaseLock: jest.fn() };
 
 describe('TrackRecordService', () => {
   let service: TrackRecordService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new TrackRecordService(mockPrisma as any, mockHttp as any, mockConfig as any);
+    service = new TrackRecordService(mockPrisma as any, mockHttp as any, mockConfig as any, mockCronConfig as any);
   });
 
   it('dedups an already-open call for same source+symbol+token', async () => {

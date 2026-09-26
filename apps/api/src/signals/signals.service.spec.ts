@@ -124,7 +124,7 @@ describe('SignalsService', () => {
         { provide: ExpectedMoveService, useValue: { getExpectedMove: jest.fn().mockResolvedValue(null) } },
         { provide: SignalTrackerService, useValue: { processSignal: jest.fn().mockResolvedValue(undefined) } },
         { provide: SignalStatsService, useValue: {} },
-        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
+        { provide: CronConfigService, useValue: { isEnabled: jest.fn().mockResolvedValue(true), setEnabled: jest.fn(), setLastRun: jest.fn(), setLastError: jest.fn(), acquireLock: jest.fn().mockResolvedValue(true), releaseLock: jest.fn(), getAll: jest.fn().mockResolvedValue([]) } },
         { provide: ConfigService, useValue: { get: jest.fn((k: string, d: any) => d) } },
       ],
     }).compile();
