@@ -4,9 +4,11 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PatternStatsTable } from '@/components/patterns/PatternStatsTable';
 import { PostTradeAnalysisCard } from '@/components/patterns/PostTradeAnalysisCard';
+import { CalibrationCard } from '@/components/patterns/CalibrationCard';
+import { GroupStatsTable } from '@/components/patterns/GroupStatsTable';
 import { api } from '@/lib/api';
-import { PatternStatsResponse, PostTradeAnalysis } from '@/types';
-import { Activity, BarChart3, RefreshCw } from 'lucide-react';
+import { CalibrationResponse, ExecutionStats, PatternStatsResponse, PostTradeAnalysis } from '@/types';
+import { Activity, BarChart3, Gauge, Layers, RefreshCw } from 'lucide-react';
 
 const MARKETS = ['ALL', 'CRYPTO', 'FOREX', 'METALS', 'BRVM'];
 
@@ -22,6 +24,21 @@ export default function PatternsPage() {
     queryKey: ['post-trade-analysis', market],
     queryFn: async () => (await api.get(`/signals/post-trade-analysis?market=${market === 'ALL' ? '' : market}`)).data,
     enabled: !!stats,
+  });
+
+  const { data: calibration } = useQuery<CalibrationResponse>({
+    queryKey: ['signals-calibration'],
+    queryFn: async () => (await api.get('/signals/calibration')).data,
+  });
+
+  const { data: byTimeframe } = useQuery<Record<string, ExecutionStats>>({
+    queryKey: ['signals-stats-timeframe'],
+    queryFn: async () => (await api.get('/signals/stats/by-timeframe')).data,
+  });
+
+  const { data: byStrategy } = useQuery<Record<string, ExecutionStats>>({
+    queryKey: ['signals-stats-strategy'],
+    queryFn: async () => (await api.get('/signals/stats/by-strategy')).data,
   });
 
   return (
@@ -75,10 +92,40 @@ export default function PatternsPage() {
 
             <section className="space-y-3">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Gauge size={18} className="text-indigo-400" />
+                Calibration du scoring
+              </h2>
+              {calibration ? (
+                <CalibrationCard data={calibration} />
+              ) : (
+                <div className="rounded-xl border border-gray-800 bg-gray-950 p-6 text-sm text-gray-500">
+                  Chargement de la calibration…
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                 <RefreshCw size={18} className="text-indigo-400" />
                 Statistiques par pattern
               </h2>
               <PatternStatsTable patterns={stats?.patterns ?? {}} />
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Layers size={18} className="text-indigo-400" />
+                Win rate par timeframe
+              </h2>
+              <GroupStatsTable groups={byTimeframe ?? {}} />
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <BarChart3 size={18} className="text-indigo-400" />
+                Win rate par stratégie
+              </h2>
+              <GroupStatsTable groups={byStrategy ?? {}} />
             </section>
           </>
         )}

@@ -981,6 +981,14 @@ export class SignalsService {
     return this.stats.getStats(filters);
   }
 
+  async getStatsByStrategy() {
+    return this.stats.getStatsByStrategy();
+  }
+
+  async getStatsByTimeframe() {
+    return this.stats.getStatsByTimeframe();
+  }
+
   async getTrackingSignals(opts: { page: number; limit: number; status?: string }) {
     const where: any = {};
     if (opts.status) where.executionStatus = opts.status;

@@ -58,6 +58,18 @@ export class SignalsController {
     return this.outcomeService.getStats(market);
   }
 
+  @Get('stats/by-strategy')
+  @UseGuards(JwtAuthGuard)
+  getStatsByStrategy() {
+    return this.signalsService.getStatsByStrategy();
+  }
+
+  @Get('stats/by-timeframe')
+  @UseGuards(JwtAuthGuard)
+  getStatsByTimeframe() {
+    return this.signalsService.getStatsByTimeframe();
+  }
+
   @Get('alerts/stats')
   @UseGuards(JwtAuthGuard)
   getAlertStats(@Request() req: any) {

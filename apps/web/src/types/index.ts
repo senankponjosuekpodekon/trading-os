@@ -90,6 +90,32 @@ export interface PostTradeAnalysis {
   underestimating: boolean;
 }
 
+export interface CalibrationBucket {
+  total: number;
+  win: number;
+  loss: number;
+  other: number;
+  winRate: number | null;
+}
+
+export interface CalibrationResponse {
+  total: number;
+  buckets: Record<string, CalibrationBucket>;
+}
+
+export interface ExecutionStats {
+  total: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  expired: number;
+  winRate: number;
+  profitFactor: number;
+  avgPnl: number;
+  avgMae: number;
+  avgMfe: number;
+}
+
 export type VolatilityRegime = 'LOW' | 'NORMAL' | 'HIGH';
 
 export interface ExpectedMoveRange {
