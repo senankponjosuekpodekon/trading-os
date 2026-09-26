@@ -4,12 +4,22 @@
 # standalone containers (see `docker ps`, networks postgres_default /
 # redis_default) with real production data. Backups are handled by
 # scripts/backup-db.sh (cron), and TLS/reverse-proxy by nginx-proxy-manager.
+#
+# ⚠️ PORTS: docker-proxy bypass UFW — tout "ports:" SANS IP explicite est
+# exposé sur l'IP PUBLIQUE (Redis et Postgres l'ont été). Ne jamais écrire
+# "3000:3000" : toujours "${HOST_BIND:-127.0.0.1}:PORT:PORT" ou 172.17.0.1
+# si un autre conteneur host-network doit joindre le service.
 services:
 
   engine:
     image: trading-os-engine:latest
     container_name: trading-os-engine-prod
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - .env
     environment:
@@ -42,6 +52,11 @@ services:
     image: trading-os-api:latest
     container_name: trading-os-api-prod
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - .env
     environment:
@@ -82,6 +97,11 @@ services:
     image: trading-os-web:latest
     container_name: trading-os-web-prod
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - .env
     environment:

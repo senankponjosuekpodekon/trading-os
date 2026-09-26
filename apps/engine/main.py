@@ -69,7 +69,15 @@ from utils.errors import EngineException, format_error_response
 from config import settings  # noqa: F401 — valide les secrets au démarrage
 import asyncio
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute", "1000/hour"])
+def _rate_limit_key(request) -> str:
+    # L'API forwarde X-User-Id (contexte RLS) — clé par user pour que le
+    # quota soit par utilisateur et non global. Sans header (crons internes,
+    # healthchecks), on retombe sur l'IP appelante = bucket par instance.
+    # Le header n'est fiable que parce que l'engine n'est pas exposé publiquement.
+    return request.headers.get("x-user-id") or get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key, default_limits=["200/minute", "1000/hour"])
 
 logger = structlog.get_logger()
 

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { retryWithBackoff } from '../utils/retry';
 import { CircuitBreaker, CircuitState } from '../utils/circuit-breaker';
+import { rlsContext } from '../prisma/rls-context';
 
 // Les erreurs 4xx (hors 429) sont permanentes — inutile de retester,
 // ça ajoute ~2s de latence avant l'échec pour aucun bénéfice.
@@ -39,7 +40,15 @@ export class EngineHttpService {
   }
 
   private get headers(): Record<string, string> {
-    return this.engineApiKey ? { 'X-Engine-Key': this.engineApiKey } : {};
+    const headers: Record<string, string> = {};
+    if (this.engineApiKey) headers['X-Engine-Key'] = this.engineApiKey;
+    // Propagé à l'engine pour le rate-limit SlowAPI : sans ça, toutes les
+    // requêtes partagent l'IP du conteneur API → quota global, un user peut
+    // saturer le budget des autres. L'engine n'écoute que sur le réseau
+    // interne, le header n'est donc pas spoofable depuis l'extérieur.
+    const userId = rlsContext.getStore();
+    if (userId) headers['X-User-Id'] = userId;
+    return headers;
   }
 
   async get<T = any>(path: string, opts?: { params?: Record<string, any>; timeout?: number }): Promise<T> {
