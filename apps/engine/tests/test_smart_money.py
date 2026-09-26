@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from ml.smart_money import _chain_id, fetch_early_buyers, check_token, update_smart_money_index
+from ml.smart_money import _chain_id, fetch_early_buyers
 
 
 class FakeRedis:
