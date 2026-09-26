@@ -45,6 +45,7 @@ def _snap_features(snap: Dict[str, Any]) -> List[float]:
         float(snap.get("narr_mom") or 0) / 100.0 if snap.get("narr_mom") is not None else 0.0,
         float(snap.get("score") or 0) / 100.0,
         float(snap.get("analyst") or 50) / 100.0,   # conviction LLM (0.5 neutre)
+        float(snap.get("sm") or 0) / 100.0,          # smart-money score (0 neutre)
     ]
 
 

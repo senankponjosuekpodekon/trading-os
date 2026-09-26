@@ -99,6 +99,14 @@ async def gem_model_status(retrain: bool = Query(False)):
             "horizon_h": model.get("horizon_h"), "win_threshold": model.get("win_threshold")}
 
 
+@router.get("/ml/smart-money/status")
+async def smart_money_status_endpoint():
+    """GET /ml/smart-money/status — état de l'index smart-money :
+    wallets/deployers trackés par chaîne, tokens jugés, couverture Etherscan."""
+    from ml.smart_money import smart_money_status
+    return await smart_money_status()
+
+
 @router.get("/ml/majors/trajectory")
 async def majors_trajectory_endpoint(
     limit: int = Query(15, ge=1, le=30),

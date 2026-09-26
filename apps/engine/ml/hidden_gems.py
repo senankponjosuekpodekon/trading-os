@@ -49,6 +49,7 @@ class GemCandidate:
     manipulation: Dict[str, Any] | None = None
     token_address: str | None = None
     upside: Dict[str, Any] | None = None
+    smart_money: Dict[str, Any] | None = None
 
 
 # Narratives — taxonomie des thèmes de marché crypto.
@@ -230,6 +231,7 @@ async def _record_gem_snapshot(t: Dict[str, Any]) -> None:
             "sells": t.get("sells_24h", 0),
             "buzz": t.get("social_buzz", 0),
             "narr_mom": t.get("narrative_momentum"),
+            "creator": oc.get("creator_address"),
         }
         r = await cache.client()
         key = _gem_snapshot_key(t.get("chain", ""), addr)
@@ -272,6 +274,24 @@ async def _stamp_analyst_conviction(chain: str, addr: str, conviction: int) -> N
             return
         snap = json.loads(raw)
         snap["analyst"] = conviction
+        await r.lset(key, 0, json.dumps(snap))
+    except Exception:
+        pass
+
+
+async def _stamp_smart_money(chain: str, addr: str, score: int) -> None:
+    """Injecte le smart-money score dans le snapshot le plus récent — signal
+    entraînable du modèle (deployer track record + overlap early buyers)."""
+    import json
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        key = _gem_snapshot_key(chain, addr)
+        raw = await r.lindex(key, 0)
+        if not raw:
+            return
+        snap = json.loads(raw)
+        snap["sm"] = score
         await r.lset(key, 0, json.dumps(snap))
     except Exception:
         pass
@@ -440,6 +460,7 @@ def _parse_goplus_evm(sec: Dict[str, Any]) -> Dict[str, Any]:
         "buy_tax": _f(sec.get("buy_tax")) * 100,
         "sell_tax": _f(sec.get("sell_tax")) * 100,
         "creator_pct": _f(sec.get("creator_percent")) * 100,
+        "creator_address": sec.get("creator_address"),
         "source": "goplus",
     }
 
@@ -466,6 +487,7 @@ def _parse_goplus_solana(sec: Dict[str, Any]) -> Dict[str, Any]:
         "buy_tax": _f((sec.get("transfer_fee") or {}).get("current_fee_rate")) * 100,
         "sell_tax": 0.0,
         "creator_pct": 0.0,  # creators[] en unités token, pas fiable en %
+        "creator_address": ((sec.get("creators") or [{}])[0] or {}).get("address"),
         "source": "goplus",
     }
 
@@ -515,6 +537,7 @@ async def _fetch_rugcheck(mint: str) -> Dict[str, Any] | None:
             "buy_tax": 0.0,
             "sell_tax": 0.0,
             "creator_pct": 0.0,
+            "creator_address": d.get("creator") or (d.get("tokenMeta") or {}).get("creator"),
             "lp_min_unlock_days": lp_min_unlock_days,
             "rugcheck_score": d.get("score_normalised", d.get("score")),
             "source": "rugcheck",
@@ -547,6 +570,7 @@ def _parse_goplus_generic(sec: Dict[str, Any]) -> Dict[str, Any]:
         "buy_tax": _f(sec.get("buy_tax")) * 100,
         "sell_tax": _f(sec.get("sell_tax")) * 100,
         "creator_pct": _f(sec.get("creator_percent")) * 100,
+        "creator_address": sec.get("creator_address"),
         "source": "goplus",
     }
 
@@ -1241,6 +1265,34 @@ async def discover_hidden_gems(
     top_gems = candidates[:limit]
     moonshots = sum(1 for c in candidates if c.moonshot)
 
+    # Smart-money : réputation deployer + overlap early buyers (top gems seulement —
+    # le check coûte un appel Etherscan par token quand la clé est configurée).
+    from ml.smart_money import check_token as _sm_check
+    sm_results = await _asyncio.gather(*(
+        _sm_check(c.chain, c.token_address or "", (c.onchain or {}).get("creator_address") or "")
+        for c in top_gems
+    ), return_exceptions=True)
+    for c, sm in zip(top_gems, sm_results):
+        if not isinstance(sm, dict):
+            continue
+        c.smart_money = sm
+        if sm.get("deployer_wins", 0) > 0:
+            c.gem_score = min(100, c.gem_score + 5)
+            c.reasons.append(f"Deployer track record : {sm['deployer_wins']} token(s) gagnant(s) précédent(s)")
+        if sm.get("smart_wallets", 0) > 0:
+            c.gem_score = min(100, c.gem_score + min(10, sm["smart_wallets"] * 5))
+            c.reasons.append(f"{sm['smart_wallets']} wallet(s) early sur d'anciens winners présents")
+        if sm.get("deployer_rugs", 0) > 0:
+            c.gem_score = max(0, c.gem_score - 15)
+            c.warnings.append(f"Deployer lié à {sm['deployer_rugs']} token(s) perdant(s)")
+
+    # Smart-money score stampé dans le snapshot → feature entraînable
+    await _asyncio.gather(*(
+        _stamp_smart_money(c.chain, c.token_address, c.smart_money["score"])
+        for c in top_gems
+        if c.token_address and isinstance(c.smart_money, dict)
+    ), return_exceptions=True)
+
     # Score dans le snapshot le plus récent → calibration future (backtest)
     await _asyncio.gather(*(
         _stamp_gem_score(c.chain, c.token_address, c.gem_score)
@@ -1329,6 +1381,7 @@ async def discover_hidden_gems(
                 "moonshot": c.moonshot,
                 "under_the_radar": c.under_the_radar,
                 "manipulation": c.manipulation,
+                "smart_money": c.smart_money,
                 "upside": c.upside,
                 "llm_comment": (c_llm or {}).get("comment") if isinstance(c_llm, dict) else None,
                 "analyst_conviction": (c_llm or {}).get("conviction") if isinstance(c_llm, dict) else None,
@@ -1336,6 +1389,7 @@ async def discover_hidden_gems(
                                            c.manipulation, c.trajectory, c.onchain),
                 "ml_win_prob": predict_win_prob(
                     _snap_features({**_snap_for(c),
+                                    "sm": (c.smart_money or {}).get("score", 0),
                                     "analyst": (c_llm or {}).get("conviction") if isinstance(c_llm, dict) else None}),
                     _gem_model,
                 ),

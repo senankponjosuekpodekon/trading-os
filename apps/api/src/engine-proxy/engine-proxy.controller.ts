@@ -330,6 +330,11 @@ export class EngineProxyController {
     return this.engine.get(`/ml/hidden-gems/model-status`, { params: { retrain } });
   }
 
+  @Get('ml/smart-money/status')
+  smartMoneyStatus() {
+    return this.engine.get(`/ml/smart-money/status`);
+  }
+
   @Get('dex/new-pools')
   dexNewPools() {
     return this.engine.get('/dex/new-pools');

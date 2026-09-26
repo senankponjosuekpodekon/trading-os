@@ -119,6 +119,12 @@ export default function HiddenGemsPage() {
                         ◉ SOUS LE RADAR
                       </span>
                     )}
+                    {gem.smart_money && (gem.smart_money.smart_wallets > 0 || gem.smart_money.deployer_wins > 0) && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/50 bg-emerald-500/10 text-emerald-300 font-semibold"
+                        title={`Smart money détecté${gem.smart_money.smart_wallets > 0 ? ` — ${gem.smart_money.smart_wallets} wallet(s) early sur d'anciens winners` : ''}${gem.smart_money.deployer_wins > 0 ? ` — deployer avec ${gem.smart_money.deployer_wins} winner(s)` : ''}`}>
+                        🧠 SMART MONEY
+                      </span>
+                    )}
                     {gem.upside && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/50 bg-emerald-500/10 text-emerald-300 font-semibold" title={`Plafond théorique : mcap du leader ${gem.upside.benchmark} ($${(gem.upside.benchmark_mcap / 1e9).toFixed(1)}B) ÷ FDV du token — pas une prédiction`}>
                         Potentiel {gem.upside.bucket}

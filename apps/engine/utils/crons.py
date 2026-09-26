@@ -86,6 +86,23 @@ async def cron_gem_model():
         await asyncio.sleep(GEM_MODEL_INTERVAL)
 
 
+async def cron_smart_money():
+    """Met à jour l'index smart-money toutes les heures : juge les tokens
+    trackés dont l'issue est connue (win ≥+50% / loss ≤−50% vs premier
+    snapshot) et enrichit les index deployers + early-buyers."""
+    SMART_MONEY_INTERVAL = 3600
+    await asyncio.sleep(600)  # premier run 10min après boot
+    while True:
+        try:
+            from ml.smart_money import update_smart_money_index
+            res = await update_smart_money_index()
+            logger.info("cron_smart_money_done", **res)
+        except Exception as exc:
+            logger.warning("cron_smart_money_failed", error=str(exc))
+
+        await asyncio.sleep(SMART_MONEY_INTERVAL)
+
+
 async def cron_portfolio_rebalance():
     """
     Periodically compute portfolio rebalancing suggestions.
@@ -112,6 +129,7 @@ async def run_all_crons():
         cron_hidden_gems(),
         cron_majors_tracker(),
         cron_gem_model(),
+        cron_smart_money(),
         cron_portfolio_rebalance(),
         return_exceptions=True,
     )

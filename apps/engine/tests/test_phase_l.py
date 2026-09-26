@@ -469,14 +469,15 @@ class TestGemModel:
         f = _snap_features({"liquidity": 100_000, "volume_24h": 50_000,
                             "buys": 300, "sells": 100, "holders": 2000,
                             "top10_pct": 30, "buzz": 0.4, "score": 72})
-        assert len(f) == 9
+        assert len(f) == 10
         assert f[2] == 0.75  # buy ratio
         assert f[8] == 0.5   # analyst neutre par défaut
+        assert f[9] == 0.0   # smart-money absent par défaut
 
     def test_predict_with_fake_model(self):
         from ml.gem_model import predict_win_prob
-        model = {"w": [0.0] * 10, "mean": [0.0] * 9, "std": [1.0] * 9}
-        p = predict_win_prob([0.0] * 9, model)
+        model = {"w": [0.0] * 11, "mean": [0.0] * 10, "std": [1.0] * 10}
+        p = predict_win_prob([0.0] * 10, model)
         assert p == 0.5  # biais 0 → probabilité neutre
         assert predict_win_prob([0.0] * 9, None) is None
 
