@@ -60,12 +60,9 @@ services:
       - default
       - ollama_net
     ports:
-      # HOST_BIND=172.17.0.1 (docker0 gateway): joignable par nginx-proxy-manager
-      # et les conteneurs de l'hôte, mais PAS depuis l'extérieur — contrairement
-      # à 0.0.0.0 qui expose l'API en clair sur l'IP publique. Si le reverse
-      # proxy joind les services par un réseau docker partagé, ces ports ne
-      # servent qu'au debug local (HOST_BIND=127.0.0.1 possible).
-      - "${HOST_BIND:-172.17.0.1}:${API_PORT_HOST:-3002}:3001"
+      # nginx tourne sur l'hôte et proxy_pass vers 127.0.0.1 — bind loopback
+      # uniquement : les ports ne sont plus exposés sur l'IP publique.
+      - "${HOST_BIND:-127.0.0.1}:${API_PORT_HOST:-3002}:3001"
     volumes:
       - ./logs:/app/apps/api/logs
     depends_on:
@@ -88,7 +85,7 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
     ports:
-      - "${HOST_BIND:-172.17.0.1}:${WEB_PORT_HOST:-3000}:3000"
+      - "${HOST_BIND:-127.0.0.1}:${WEB_PORT_HOST:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
