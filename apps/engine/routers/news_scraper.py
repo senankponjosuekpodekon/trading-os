@@ -37,6 +37,7 @@ from bs4 import BeautifulSoup
 import config
 from utils.logger import get_logger
 from utils.rate_limiter import rate_limit
+from utils.cache import BoundedTTLDict
 
 router = APIRouter()
 
@@ -45,7 +46,8 @@ DATABASE_URL = config.settings.database_url
 logger = get_logger(__name__)
 
 CACHE_TTL = 900  # 15 min
-_cache: dict[str, tuple[float, list]] = {}
+
+_cache: BoundedTTLDict = BoundedTTLDict(maxsize=512)
 
 # ── Modèles ──────────────────────────────────────────────────────────────────
 

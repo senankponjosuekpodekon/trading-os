@@ -140,6 +140,11 @@ describe('SignalsService', () => {
       return Promise.resolve(null);
     });
     mockPrisma.asset.findUnique.mockResolvedValue({ id: 'a1', market: { name: 'CRYPTO' } });
+    // Lookups bulk introduits par le refactor saveSignals — vide par défaut,
+    // _ensureAsset (mocké via findUnique) prend le relais dans les tests.
+    mockPrisma.asset.findMany.mockResolvedValue([]);
+    mockPrisma.strategy.findMany.mockResolvedValue([]);
+    mockPrisma.signal.findMany.mockResolvedValue([]); // dédup : aucun signal live
   });
 
   describe('triggerScan', () => {

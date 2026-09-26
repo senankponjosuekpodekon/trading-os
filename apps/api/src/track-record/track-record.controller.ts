@@ -3,7 +3,10 @@ import {
   Param, Post, UnauthorizedException, UseGuards, Request,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { TrackRecordService } from './track-record.service';
 
 @Controller('track-record')
@@ -60,13 +63,21 @@ export class TrackRecordController {
     });
   }
 
-  @UseGuards(JwtAuthGuard)
+  /** Mutations réservées admin : un user ne doit pas pouvoir clôturer ou
+   *  effacer les calls — ça fausserait les KPIs du track record. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Post(':id/close')
-  close(@Param('id') id: string) {
-    return this.service.close(id);
+  close(@Param('id') id: string, @Body() body: any) {
+    const exitPrice = body?.exitPrice != null ? Number(body.exitPrice) : null;
+    if (exitPrice != null && (!Number.isFinite(exitPrice) || exitPrice <= 0)) {
+      throw new BadRequestException('exitPrice must be a positive number');
+    }
+    return this.service.close(id, exitPrice);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.service.remove(id);

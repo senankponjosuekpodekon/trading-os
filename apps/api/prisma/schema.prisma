@@ -311,6 +311,7 @@ model Signal {
   @@index([isActive, createdAt(sort: Desc)])
   @@index([strategyId, createdAt(sort: Desc)])
   @@index([status])
+  @@index([executionStatus])
   @@index([profileSuitability])
   @@map("signals")
 }
@@ -442,6 +443,9 @@ model SignalExecutionEvent {
   metadata        Json?
   createdAt       DateTime                   @default(now()) @map("created_at")
 
+  // Unicité logique : un même type d'événement sur une même bougie ne doit
+  // pas être inséré deux fois (crons overlappés, retries).
+  @@unique([signalId, type, candleTime])
   @@index([signalId, candleTime])
   @@index([signalId, type])
   @@map("signal_execution_events")

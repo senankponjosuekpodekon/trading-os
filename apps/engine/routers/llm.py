@@ -1,5 +1,5 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 import os
 import time
@@ -12,6 +12,15 @@ from utils.db_pool import get_shared_pool
 router = APIRouter()
 
 DATABASE_URL = settings.database_url
+
+# ── Bornes anti-abus ─────────────────────────────────────────────
+# Message/historique bornés + budget tokens/jour par user (somme de
+# llm_usage sur 24h). Sans ça, un user authentifié peut envoyer des
+# prompts arbitrairement gros → coût provider illimité.
+LLM_MAX_MESSAGE_CHARS   = 4_000
+LLM_MAX_HISTORY_ITEMS   = 20
+LLM_MAX_PROMPT_CHARS    = int(os.getenv("LLM_MAX_PROMPT_CHARS", "60000"))
+LLM_DAILY_TOKEN_LIMIT   = int(os.getenv("LLM_DAILY_TOKEN_LIMIT", "200000"))
 
 # ── Provider config (défauts .env — surchageables à chaud par l'admin,
 #    voir _get_llm_config ci-dessous) ──────────────────────────────
@@ -115,6 +124,7 @@ class ExplainRequest(BaseModel):
     scraper_sentiment: Optional[dict] = None
     sentiment_pending: bool = False
     language:     str = "fr"
+    user_id:      Optional[str] = None  # injecté serveur-side par l'API (JWT)
 
 
 class Candle(BaseModel):
@@ -149,13 +159,14 @@ class ReviewPositionRequest(BaseModel):
     opened_at:       Optional[str]   = None
     closed_at:       Optional[str]   = None
     signal_context:  Optional[dict]  = None
-    candles_before:  List[Candle]    = []
-    candles_during:  List[Candle]    = []
+    candles_before:  List[Candle]    = Field(default=[], max_length=200)
+    candles_during:  List[Candle]    = Field(default=[], max_length=200)
     language:        str = "fr"
+    user_id:         Optional[str]   = None  # injecté serveur-side par l'API (JWT)
 
 
 class WeeklyReportRequest(BaseModel):
-    trades:      list
+    trades:      list = Field(max_length=200)
     win_rate:    float
     total_pnl:   float
     total_cost:  Optional[float] = None
@@ -163,11 +174,12 @@ class WeeklyReportRequest(BaseModel):
     best_trade:  Optional[dict] = None
     worst_trade: Optional[dict] = None
     language:    str = "fr"
+    user_id:     Optional[str] = None  # injecté serveur-side par l'API (JWT)
 
 
 class ChatRequest(BaseModel):
-    message:        str
-    history:        List[dict] = []
+    message:        str = Field(min_length=1, max_length=LLM_MAX_MESSAGE_CHARS)
+    history:        List[dict] = Field(default=[], max_length=LLM_MAX_HISTORY_ITEMS)
     language:       str = "fr"
     asset:          Optional[str] = None
     signal_context: Optional[dict] = None
@@ -558,6 +570,16 @@ async def _call_llm_with_fallback(
     if messages is None:
         messages = [{"role": "user", "content": prompt or ""}]
 
+    # Cap central : quel que soit l'endpoint, le prompt total envoyé au
+    # provider reste borné (protection coût/tokens même pour les payloads
+    # dict non-Field-validés).
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    if total_chars > LLM_MAX_PROMPT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Prompt trop volumineux ({total_chars} chars > {LLM_MAX_PROMPT_CHARS})",
+        )
+
     try:
         from openai import AsyncOpenAI
     except Exception as e:
@@ -672,6 +694,7 @@ async def _cache_set(cache_key: str, endpoint: str, response: dict, provider: st
 
 @router.post("/llm/explain")
 async def explain_signal(req: ExplainRequest):
+    await _check_token_budget(req.user_id)
     cache_key = _cache_key("explain", req.model_dump())
     cached = await _cache_get(cache_key)
     if cached:
@@ -693,6 +716,7 @@ async def explain_signal(req: ExplainRequest):
 
 @router.post("/llm/review-position")
 async def review_position(req: ReviewPositionRequest):
+    await _check_token_budget(req.user_id)
     is_closed = req.status != "OPEN"
     cache_key = _cache_key("review", req.model_dump()) if is_closed else None
     if cache_key:
@@ -720,6 +744,7 @@ async def review_position(req: ReviewPositionRequest):
 
 @router.post("/llm/weekly-report")
 async def weekly_report(req: WeeklyReportRequest):
+    await _check_token_budget(req.user_id)
     prompt = _build_report_prompt(req)
     report, provider, model = await _call_llm_with_fallback(prompt, max_tokens=500)
     return {
@@ -844,6 +869,31 @@ async def _chat_with_tools(messages: List[dict], max_tokens: int = 500, max_roun
     return None, "mock", "mock", None
 
 
+async def _check_token_budget(user_id: Optional[str]) -> None:
+    """Budget tokens/jour par user (somme llm_usage sur 24h glissantes).
+    Fail-open si la DB est indisponible — le logging est déjà best-effort."""
+    if not user_id or LLM_DAILY_TOKEN_LIMIT <= 0:
+        return
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(total_tokens), 0) AS used
+                   FROM llm_usage
+                   WHERE user_id = $1
+                     AND created_at > now() - interval '24 hours'""",
+                user_id,
+            )
+            used = int(row["used"]) if row else 0
+    except Exception:
+        return  # DB down → ne pas bloquer l'IA pour un problème de quota
+    if used >= LLM_DAILY_TOKEN_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Budget tokens IA quotidien atteint ({LLM_DAILY_TOKEN_LIMIT})",
+        )
+
+
 async def _log_llm_usage(user_id: Optional[str], endpoint: str, provider: str,
                          model: str, usage: dict) -> None:
     """Best-effort : persiste la conso tokens dans llm_usage."""
@@ -865,6 +915,7 @@ async def _log_llm_usage(user_id: Optional[str], endpoint: str, provider: str,
 
 @router.post("/llm/chat")
 async def chat(req: ChatRequest):
+    await _check_token_budget(req.user_id)
     system = _build_chat_system_prompt(req)
 
     # RAG : injecter les docs pertinents de la base de connaissances
@@ -880,6 +931,15 @@ async def chat(req: ChatRequest):
         pass  # RAG indisponible → le chat fonctionne sans
 
     messages = [{"role": "system", "content": system}] + req.history[-5:] + [{"role": "user", "content": req.message}]
+
+    # Cap taille (identique à _call_llm_with_fallback — _chat_with_tools
+    # appelle les providers directement sans passer par ce point central)
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    if total_chars > LLM_MAX_PROMPT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Conversation trop volumineuse ({total_chars} chars > {LLM_MAX_PROMPT_CHARS})",
+        )
 
     reply, provider, model, usage = await _chat_with_tools(messages, max_tokens=500, ctx={"user_id": req.user_id} if req.user_id else None)
     if reply is None:
@@ -936,7 +996,7 @@ async def llm_health():
 # ── Text-to-Strategy (Phase C) ──────────────────────────────────────
 
 class StrategyFromTextRequest(BaseModel):
-    description: str
+    description: str = Field(min_length=3, max_length=2000)
     language: str = "fr"
 
 

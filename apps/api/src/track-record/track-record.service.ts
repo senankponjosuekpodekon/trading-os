@@ -86,10 +86,21 @@ export class TrackRecordService {
     return { calls: enriched, kpis: this._kpis(enriched) };
   }
 
-  async close(id: string) {
+  async close(id: string, exitPrice?: number | null) {
     const call = await this.db.findUnique({ where: { id } });
     if (!call) return null;
-    return this.db.update({ where: { id }, data: { closedAt: new Date() } });
+    const data: any = { closedAt: new Date() };
+    if (exitPrice != null && exitPrice > 0) {
+      data.lastPrice = exitPrice;
+      if (exitPrice > (call.peakPrice ?? 0)) {
+        data.peakPrice = exitPrice;
+        data.peakAt = new Date();
+      }
+      if (call.troughPrice == null || exitPrice < call.troughPrice) {
+        data.troughPrice = exitPrice;
+      }
+    }
+    return this.db.update({ where: { id }, data });
   }
 
   async remove(id: string) {

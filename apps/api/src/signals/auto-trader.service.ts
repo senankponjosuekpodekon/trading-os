@@ -162,8 +162,11 @@ export class AutoTraderService {
 
   /** Ferme sizePct% de la taille ORIGINALE (sémantique tracker : 33.3% par TP). */
   private async partialClose(signalId: string, rawPrice: number, tp: 'TP1_HIT' | 'TP2_HIT' | 'TP3_HIT'): Promise<void> {
+    // Filtrer par portfolioId : sans ça, une position USER ouverte depuis le
+    // même signal serait modifiée par l'AutoPilot (écriture cross-user).
+    const portfolio = await this.getAutopilotPortfolio();
     const position = await this.prisma.position.findFirst({
-      where: { signalId, status: 'OPEN' },
+      where: { signalId, portfolioId: portfolio.id, status: 'OPEN' },
     });
     if (!position) return;
 
@@ -206,8 +209,10 @@ export class AutoTraderService {
   }
 
   private async closeRemaining(signalId: string, rawPrice: number): Promise<void> {
+    // Même garde : restreindre au portfolio AutoPilot (cf. partialClose).
+    const portfolio = await this.getAutopilotPortfolio();
     const position = await this.prisma.position.findFirst({
-      where: { signalId, status: 'OPEN' },
+      where: { signalId, portfolioId: portfolio.id, status: 'OPEN' },
     });
     if (!position) return;
 

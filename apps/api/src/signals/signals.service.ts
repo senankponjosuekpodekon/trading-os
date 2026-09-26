@@ -505,6 +505,50 @@ export class SignalsService {
     const defaultStrategy = await this.prisma.strategy.findFirst({ where: { name: 'EMA Trend + RSI' } });
     const marketContext = await this._buildMarketContext();
 
+    // ── Lookups bulk : 1 requête assets + 1 requête strategies pour tout
+    //    le batch, au lieu de 2 requêtes par signal ─────────────────────
+    const actionable = results.filter(r => r.signal && r.signal !== 'NEUTRAL');
+    const persistable = actionable.filter(r => r.confidence >= 50);
+    const symbols = [...new Set(actionable.map(r => r.symbol))];
+    const assetMap = new Map<string, any>(
+      (symbols.length
+        ? await this.prisma.asset.findMany({
+            where: { symbol: { in: symbols } },
+            include: { market: { select: { name: true } } },
+          })
+        : []
+      ).map(a => [a.symbol, a]),
+    );
+    // Crée les assets manquants (rare) — seuls les signaux persistés en ont
+    // besoin ; le pre-pass SignalLog retombe sur 'UNKNOWN' sinon.
+    for (const r of persistable) {
+      if (!assetMap.has(r.symbol)) {
+        const created = await this._ensureAsset(r);
+        if (created) {
+          assetMap.set(r.symbol, created);
+          this.logger.log(`auto-created asset ${r.symbol} (market=${created.market?.name})`);
+        }
+      }
+    }
+    const stratIds = [...new Set(persistable.map(r => r.strategy_id).filter(Boolean))] as string[];
+    const strategyMap = new Map<string, any>(
+      (stratIds.length
+        ? await this.prisma.strategy.findMany({ where: { id: { in: stratIds } } })
+        : []
+      ).map(s => [s.id, s]),
+    );
+
+    // ── Dédup : un signal (assetId, signal, timeframe) déjà ACTIVE/PENDING
+    //    est suivi par le tracker — ne pas le recréer à chaque scan ────────
+    const assetIds = [...assetMap.values()].map((a: any) => a.id);
+    const liveSignals = assetIds.length
+      ? await this.prisma.signal.findMany({
+          where: { assetId: { in: assetIds }, status: { in: ['ACTIVE', 'PENDING'] }, isActive: true },
+          select: { assetId: true, signal: true, timeframe: true },
+        })
+      : [];
+    const liveSignalKeys = new Set(liveSignals.map(s => `${s.assetId}:${s.signal}:${s.timeframe}`));
+
     const saved: any[] = [];
     let quotaRemaining = opts?.signalAllowance?.limit != null
       ? Math.max(0, opts?.signalAllowance?.limit - opts?.signalAllowance?.used)
@@ -516,12 +560,9 @@ export class SignalsService {
     // by the engine (even confidence < 50) so the Outcome Tracker can measure
     // the real win rate per confidence bucket and optimize the threshold.
     // signalId=null means the signal was not persisted as a Signal entity.
-    for (const r of results) {
-      if (!r.signal || r.signal === 'NEUTRAL' || !r.entry_price) continue;
-      const _asset = await this.prisma.asset.findUnique({
-        where: { symbol: r.symbol },
-        select: { market: { select: { name: true } } },
-      });
+    for (const r of actionable) {
+      if (!r.entry_price) continue;
+      const _asset = assetMap.get(r.symbol);
       Promise.resolve(
         this.outcomeService.logSignal(
           { ...r, signalId: null, marketContext: marketContext ?? r.context ?? null },
@@ -530,26 +571,19 @@ export class SignalsService {
       ).catch(() => {});
     }
 
-    for (const r of results) {
-      // Ne pas persister les signaux encore en attente de confirmation hystérésis
-      if (!r.signal || r.signal === 'NEUTRAL' || r.confidence < 50) continue;
+    for (const r of persistable) {
       // signal_pending from hysteresis is now persisted with PENDING status
       // so it appears as a SignalCard and can be tracked through confirmation
 
-      let asset = await this.prisma.asset.findUnique({
-        where: { symbol: r.symbol },
-        include: { market: { select: { name: true } } },
-      });
-      if (!asset) {
-        asset = await this._ensureAsset(r);
-        if (asset) this.logger.log(`auto-created asset ${r.symbol} (market=${asset.market?.name})`);
-      }
+      const asset = assetMap.get(r.symbol);
       if (!asset) continue;
 
-      let strategy: any = null;
-      if (r.strategy_id) {
-        strategy = await this.prisma.strategy.findUnique({ where: { id: r.strategy_id } });
-      }
+      // Dédup batch + cross-scan : un signal identique déjà live n'est pas recréé
+      const liveKey = `${asset.id}:${r.signal}:${r.timeframe}`;
+      if (liveSignalKeys.has(liveKey)) continue;
+      liveSignalKeys.add(liveKey);
+
+      let strategy: any = r.strategy_id ? strategyMap.get(r.strategy_id) : null;
       if (!strategy) {
         // BRVM signals have no strategy_id — don't mislabel them as 'EMA Trend + RSI'
         // Only use defaultStrategy for crypto/forex signals that should have one
@@ -564,18 +598,15 @@ export class SignalsService {
       const sentimentPresent = !!(r.news_sentiment || r.scraper_sentiment);
       const decisionTrace = this._buildDecisionTrace(r, marketContext);
 
-      let expectedMoveDetails: any = null;
-      let expectedMoveSummary: any = null;
-      if (r.signal && r.signal !== 'NEUTRAL' && r.timeframe) {
-        expectedMoveDetails = await this.fetchExpectedMove(r.symbol, r.timeframe).catch(() => null);
-        expectedMoveSummary = this.buildExpectedMoveSummary(expectedMoveDetails) ?? this.buildExpectedMoveSummary(r.expected_move);
-      } else if (r.expected_move) {
-        expectedMoveSummary = this.buildExpectedMoveSummary(r.expected_move);
-      }
+      // Enrichissements indépendants en parallèle (3 round-trips → 1)
+      const [expectedMoveDetails, mlConfidence, mlRegime] = await Promise.all([
+        r.timeframe ? this.fetchExpectedMove(r.symbol, r.timeframe).catch(() => null) : Promise.resolve(null),
+        this.predictMlConfidence(r),
+        this.predictMlRegime(r.symbol, r.timeframe),
+      ]);
+      const expectedMoveSummary =
+        this.buildExpectedMoveSummary(expectedMoveDetails) ?? this.buildExpectedMoveSummary(r.expected_move);
       const expectedMoveSnapshot = expectedMoveSummary ?? r.expected_move ?? null;
-
-      const mlConfidence = await this.predictMlConfidence(r);
-      const mlRegime = await this.predictMlRegime(r.symbol, r.timeframe);
 
       const signal = await this.prisma.signal.create({
         data: {

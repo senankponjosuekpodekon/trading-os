@@ -44,6 +44,7 @@ describe('SignalsController (integration)', () => {
     },
     asset: {
       findUnique: jest.fn().mockResolvedValue(asset),
+      findMany: jest.fn().mockResolvedValue([asset]),
     },
     userStrategy: {
       findMany: jest.fn().mockResolvedValue([]),

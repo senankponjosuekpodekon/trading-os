@@ -54,6 +54,36 @@ _last_prices:    dict = {}
 _last_signals:   list = []
 _last_patterns:  list = []
 
+# Loop asyncio principale, capturée au lifespan (main.py). Nécessaire pour
+# diffuser depuis un thread worker (analyze_candles tourne dans un
+# ThreadPoolExecutor → asyncio.get_running_loop() y lève RuntimeError).
+_main_loop: "asyncio.AbstractEventLoop | None" = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    global _main_loop
+    _main_loop = loop
+
+
+def _schedule_on_main(coro) -> None:
+    """Planifie une coroutine sur la loop principale depuis n'importe quel
+    thread (ou directement si déjà sur la loop). Sans-op si la loop est
+    indisponible — loggué au lieu d'être avalé en silence."""
+    global _main_loop
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is not None and running.is_running():
+        running.create_task(coro)
+        return
+    loop = _main_loop
+    if loop is not None and loop.is_running():
+        loop.call_soon_threadsafe(lambda: loop.create_task(coro))
+    else:
+        logger.warning("ws_broadcast_no_loop", detail="main event loop not captured")
+        coro.close()
+
 
 async def broadcast(clients: Set[WebSocket], payload: dict):
     dead = set()
@@ -206,7 +236,7 @@ def set_latest_signals(signals: list):
     """Appelé par scan.py après chaque scan pour diffuser aux clients WS."""
     global _last_signals
     _last_signals = signals
-    asyncio.create_task(_broadcast_signals(signals))
+    _schedule_on_main(_broadcast_signals(signals))
 
 
 async def _broadcast_signals(signals: list):
@@ -221,12 +251,8 @@ def broadcast_pattern(pattern: dict):
     _last_patterns.append(pattern)
     if len(_last_patterns) > 100:
         _last_patterns = _last_patterns[-100:]
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_broadcast_patterns(pattern))
-        loop.create_task(_notify_api_pattern(pattern))
-    except RuntimeError:
-        pass
+    _schedule_on_main(_broadcast_patterns(pattern))
+    _schedule_on_main(_notify_api_pattern(pattern))
 
 
 async def _broadcast_patterns(pattern: dict):

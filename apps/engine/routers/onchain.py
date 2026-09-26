@@ -9,6 +9,7 @@ from typing import Optional
 
 from utils.rate_limiter import rate_limit
 from utils.http import retry_async
+from utils.cache import BoundedTTLDict
 
 router = APIRouter()
 
@@ -16,7 +17,7 @@ BINANCE_SPOT = "https://api.binance.com/api/v3"
 BINANCE_FUT = "https://fapi.binance.com/fapi/v1"
 COINGECKO_GLOBAL = "https://api.coingecko.com/api/v3/global"
 
-_cache: dict[str, tuple[float, any]] = {}
+_cache: BoundedTTLDict = BoundedTTLDict(maxsize=256)
 CACHE_TTL = 300  # 5 min
 
 

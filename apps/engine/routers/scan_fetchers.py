@@ -16,6 +16,7 @@ import pandas as pd
 from utils.rate_limiter import rate_limit
 from utils.http import retry_async
 from utils.logger import get_logger
+from utils.cache import BoundedTTLDict
 from routers.symbol_mappings import (
     SYMBOL_TO_BINANCE, SYMBOL_TO_TWELVEDATA, SYMBOL_TO_YFINANCE, SYMBOL_TO_DERIV,
     TF_TO_TD, TF_TO_DERIV_GRANULARITY, TF_TO_YF, TF_TO_YF_PERIOD, TF_TO_MS,
@@ -36,7 +37,7 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 # ── Klines cache ──
-_klines_cache: dict = {}
+_klines_cache: BoundedTTLDict = BoundedTTLDict(maxsize=512)
 _CACHE_TTL = 60
 _CACHE_TTL_TD = 300
 _CACHE_TTL_YF = 300

@@ -40,6 +40,7 @@ describe('openPosition → watcher → closePosition flow', () => {
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       count: jest.fn().mockResolvedValue(0),
     },
     $transaction: jest.fn(async (ops: any) =>
@@ -115,9 +116,9 @@ describe('openPosition → watcher → closePosition flow', () => {
 
     await watcherService.watchPositions();
 
-    expect(prismaMock.position.update).toHaveBeenCalledWith(
+    expect(prismaMock.position.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'pos-1' },
+        where: expect.objectContaining({ id: 'pos-1' }),
         data: expect.objectContaining({ status: 'CLOSED', exitPrice: 115 }),
       }),
     );

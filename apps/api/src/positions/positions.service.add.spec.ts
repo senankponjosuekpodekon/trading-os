@@ -37,6 +37,7 @@ describe('PositionsService additional', () => {
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findMany: jest.fn(),
       count: jest.fn(),
     },
@@ -171,7 +172,11 @@ describe('PositionsService additional', () => {
 
       expect(result.positionId).toBe('p1');
       expect(parseFloat(result.pnl)).toBe(10);
-      expect(mockPrisma.position.update).toHaveBeenCalled();
+      expect(mockPrisma.position.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 'p1', status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } }),
+        }),
+      );
     });
 
     it('closes a SELL position', async () => {

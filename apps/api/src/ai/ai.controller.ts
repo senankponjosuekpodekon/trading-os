@@ -76,20 +76,22 @@ export class AiController {
       scraper_sentiment: meta.scraper_sentiment ?? null,
       sentiment_pending: meta.sentiment_pending ?? false,
       language:     'fr',
+      user_id:      req.user.id,
     };
 
     return this.ai.explainSignal(payload);
   }
 
   @Post('explain')
-  explainRaw(@Body() body: any) {
-    return this.ai.explainSignal({ ...body, language: body.language ?? 'fr' });
+  async explainRaw(@Request() req: any, @Body() body: any) {
+    await this.consumeQuota(req);
+    return this.ai.explainSignal({ ...body, language: body.language ?? 'fr', user_id: req.user.id });
   }
 
   @Post('weekly-report')
   async weeklyReport(@Request() req: any, @Body() body: any) {
     await this.consumeQuota(req);
-    return this.ai.weeklyReport(body);
+    return this.ai.weeklyReport({ ...body, user_id: req.user.id });
   }
 
   @Post('chat')
@@ -371,6 +373,7 @@ export class AiController {
       candles_before,
       candles_during,
       language:        'fr',
+      user_id:         req.user.id,
     };
 
     return this.ai.reviewPosition(payload);

@@ -37,6 +37,7 @@ describe('PositionsService', () => {
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findMany: jest.fn(),
       count: jest.fn(),
     },
@@ -204,6 +205,45 @@ describe('PositionsService', () => {
       // pnl total = partialPnl (50) + pnl restant (5 * 10 = 50) = 100
       expect(result.pnl).toBe('100.00');
       expect(result.pnlPercent).toBe('10.00');
+    });
+
+    it('close() should throw ConflictException and not credit capital when position already closed concurrently', async () => {
+      mockPrisma.position.findFirst.mockResolvedValue({
+        id: 'pos-race',
+        portfolioId: 'p1',
+        status: 'OPEN',
+        direction: 'BUY',
+        entryPrice: 100,
+        quantity: 10,
+        portfolio: { id: 'p1', currentCapital: 10000 },
+        asset: { symbol: 'BTC/USDT' },
+      });
+      // Le watcher a fermé entre le findFirst et l'update atomique
+      mockPrisma.position.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(service.close('u1', 'pos-race', 110)).rejects.toThrow(ConflictException);
+      expect(mockPrisma.portfolio.update).not.toHaveBeenCalled();
+    });
+
+    it('closeByWatcher() should return null without crediting capital when position already closed concurrently', async () => {
+      mockPrisma.position.findFirst.mockResolvedValue({
+        id: 'pos-race2',
+        portfolioId: 'p1',
+        status: 'OPEN',
+        direction: 'BUY',
+        entryPrice: 100,
+        quantity: 10,
+        asset: { symbol: 'BTC/USDT' },
+        portfolio: { userId: 'u1', id: 'p1', currentCapital: 10000, user: {} },
+      });
+      // Le close manuel a gagné la course
+      mockPrisma.position.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      const result = await service.closeByWatcher('pos-race2', 110, 'TP');
+
+      expect(result).toBeNull();
+      expect(mockPrisma.portfolio.update).not.toHaveBeenCalled();
+      expect(mockJournal.createAuto).not.toHaveBeenCalled();
     });
 
     it('closeByWatcher() should aggregate partialPnl when closing remaining quantity', async () => {

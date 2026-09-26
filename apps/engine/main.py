@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI):
 
     from utils.deriv_client import deriv_client
     await deriv_client.start()
+    ws.set_main_loop(asyncio.get_running_loop())
     price_task = asyncio.create_task(ws.price_broadcaster())
     binance_task = asyncio.create_task(ws.binance_price_listener())
     warmup_task = asyncio.create_task(scan_warmup.warmup_features())

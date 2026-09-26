@@ -311,8 +311,11 @@ export class PositionsService {
     const proceeds = exitPrice * qty;
 
     await this.rlsTransaction(async (tx) => {
-      await tx.position.update({
-        where: { id: positionId },
+      // Garde atomique : un concurrent (watcher, trailing sync) peut avoir
+      // fermé la position entre le findFirst et ici — sans filtre de statut
+      // dans le WHERE, le capital serait crédité deux fois.
+      const closed = await tx.position.updateMany({
+        where: { id: positionId, status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } },
         data: {
           status: 'CLOSED',
           exitPrice,
@@ -321,6 +324,9 @@ export class PositionsService {
           closedAt: new Date(),
         },
       });
+      if (closed.count === 0) {
+        throw new ConflictException('Position already closed');
+      }
       await tx.portfolio.update({
         where: { id: position.portfolioId },
         data: { currentCapital: { increment: proceeds } },
@@ -949,16 +955,23 @@ export class PositionsService {
     const pnl   = realizedPartial + realizedSecondPartial + pnlOnRemaining;
     const pnlPct = originalQty > 0 ? (pnl / (entry * originalQty)) * 100 : 0;
 
+    let closedAtomically = false;
     await this.rlsTransaction(async (tx) => {
-      await tx.position.update({
-        where: { id: positionId },
+      // Garde atomique : close() manuel ou un autre watcher peut avoir fermé
+      // entre le findFirst et ici — sans filtre de statut, le capital serait
+      // crédité deux fois.
+      const closed = await tx.position.updateMany({
+        where: { id: positionId, status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } },
         data: { status: 'CLOSED', exitPrice, pnl, pnlPercent: pnlPct, closedAt: new Date() },
       });
+      if (closed.count === 0) return;
+      closedAtomically = true;
       await tx.portfolio.update({
         where: { id: pos.portfolioId },
         data:  { currentCapital: { increment: exitPrice * qty } },
       });
     });
+    if (!closedAtomically) return null;
 
     const userId = pos.portfolio.userId;
 

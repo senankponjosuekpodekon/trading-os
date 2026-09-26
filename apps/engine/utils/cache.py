@@ -1,6 +1,7 @@
 """Cache Redis centralisé pour l'engine."""
 import json
 import time
+from collections import OrderedDict
 from typing import Any, Optional, Callable, Awaitable
 
 import redis.asyncio as redis
@@ -8,8 +9,31 @@ import redis.asyncio as redis
 import config
 
 
+class BoundedTTLDict(OrderedDict):
+    """dict LRU borné — éviction de l'entrée la moins récemment utilisée quand
+    `maxsize` est atteint. Empêche les clés arbitraires (symboles user) de
+    faire croître la mémoire indéfiniment."""
+
+    def __init__(self, maxsize: int = 1024):
+        super().__init__()
+        self.maxsize = maxsize
+
+    def __setitem__(self, key, value):
+        if key in self:
+            super().pop(key)
+        elif len(self) >= self.maxsize:
+            self.popitem(last=False)
+        super().__setitem__(key, value)
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+
 # ── In-memory TTL cache for external data fetchers ──────────────
-_mem_cache: dict[str, tuple[Any, float]] = {}
+_MEM_CACHE_MAX = 2048
+_mem_cache: BoundedTTLDict = BoundedTTLDict(maxsize=_MEM_CACHE_MAX)
 
 
 def mem_get(key: str) -> Any | None:

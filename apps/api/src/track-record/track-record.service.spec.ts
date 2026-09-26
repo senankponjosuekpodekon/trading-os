@@ -65,4 +65,33 @@ describe('TrackRecordService', () => {
     expect(coach.hitRate).toBe(0);
     expect(coach.avgPerfPct).toBe(-50);
   });
+
+  it('close() stamps closedAt and applies exitPrice as final price', async () => {
+    mockDb.findUnique.mockResolvedValue({ id: 'c1', peakPrice: 2, troughPrice: 0.8 });
+    mockDb.update.mockImplementation(({ data }) => ({ id: 'c1', ...data }));
+
+    const res = await service.close('c1', 3.5);
+
+    expect(res.closedAt).toBeDefined();
+    expect(res.lastPrice).toBe(3.5);
+    // nouveau pic → peakPrice + peakAt mis à jour
+    expect(res.peakPrice).toBe(3.5);
+    expect(res.peakAt).toBeDefined();
+  });
+
+  it('close() without exitPrice only stamps closedAt', async () => {
+    mockDb.findUnique.mockResolvedValue({ id: 'c1', peakPrice: 2, troughPrice: 0.8 });
+    mockDb.update.mockImplementation(({ data }) => ({ id: 'c1', ...data }));
+
+    const res = await service.close('c1');
+
+    expect(res.closedAt).toBeDefined();
+    expect(res.lastPrice).toBeUndefined();
+  });
+
+  it('close() returns null for unknown id', async () => {
+    mockDb.findUnique.mockResolvedValue(null);
+    expect(await service.close('nope')).toBeNull();
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
 });

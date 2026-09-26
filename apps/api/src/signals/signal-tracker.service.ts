@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import Redis from 'ioredis';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignalExecutionService } from './signal-execution.service';
 import { CandleRepository, Candle as RepoCandle } from './candle.repository';
@@ -21,6 +22,17 @@ const ENTRY_ZONE_ATR_COEF = 0.5;
 @Injectable()
 export class SignalTrackerService {
   private readonly logger = new Logger(SignalTrackerService.name);
+  // Lock distribué : processActiveSignals peut être déclenché par le cron,
+  // l'event candle.closed et le webhook HTTP — et par plusieurs instances
+  // API. Sans verrou partagé, deux runs concurrents créent des events en
+  // double et des updates d'outcome contradictoires.
+  private readonly redis = new Redis(
+    process.env.REDIS_URL ?? 'redis://localhost:6379',
+    { lazyConnect: true, maxRetriesPerRequest: 1 },
+  );
+  private static readonly LOCK_KEY = 'lock:signal-tracker';
+  private static readonly LOCK_TTL_S = 300;
+  private readonly lockValue = `${process.pid}-${Math.random().toString(36).slice(2)}`;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -30,7 +42,51 @@ export class SignalTrackerService {
     private readonly autoTrader: AutoTraderService,
   ) {}
 
+  private async _acquireLock(): Promise<boolean> {
+    try {
+      const res = await this.redis.set(
+        SignalTrackerService.LOCK_KEY,
+        this.lockValue,
+        'EX',
+        SignalTrackerService.LOCK_TTL_S,
+        'NX',
+      );
+      return res === 'OK';
+    } catch {
+      // Redis indisponible → fail-open (mieux vaut un éventuel doublon
+      // protégé par l'unique index qu'un tracker complètement arrêté)
+      return true;
+    }
+  }
+
+  private async _releaseLock(): Promise<void> {
+    try {
+      // Ne supprime que si c'est bien notre lock (pas celui d'un autre
+      // processus qui aurait pris la main après expiration du TTL)
+      await this.redis.eval(
+        `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
+        1,
+        SignalTrackerService.LOCK_KEY,
+        this.lockValue,
+      );
+    } catch {
+      // best-effort — le TTL purge de toute façon
+    }
+  }
+
   async processActiveSignals(limit = 200): Promise<void> {
+    if (!(await this._acquireLock())) {
+      this.logger.log('SignalTracker déjà en cours sur une autre instance — skip');
+      return;
+    }
+    try {
+      await this._processActiveSignalsLocked(limit);
+    } finally {
+      await this._releaseLock();
+    }
+  }
+
+  private async _processActiveSignalsLocked(limit = 200): Promise<void> {
     const active = await this.prisma.signal.findMany({
       where: { executionStatus: { in: ['PENDING', 'ACTIVE'] } },
       select: { id: true },
@@ -83,6 +139,13 @@ export class SignalTrackerService {
     for (const raw of newCandles) {
       const candle: Candle = { openTime: raw.openTime, open: raw.open, high: raw.high, low: raw.low, close: raw.close };
 
+      // Pré-fetch AVANT la transaction : un fetch externe dans une tx
+      // ouverte retient les locks Postgres inutilement. lowerTf n'est
+      // utilisé que dans la branche où entryAlreadyHit est déjà vrai.
+      const lowerTf = entryAlreadyHit
+        ? await this.candles.getLowerTimeframeWindow?.(signal.asset.symbol, signal.timeframe, candle.openTime)
+        : undefined;
+
       await this.prisma.$transaction(async (tx) => {
         if (!entryAlreadyHit && signal.expiresAt && candle.openTime >= signal.expiresAt.getTime()) {
           await tx.signalExecutionEvent.create({
@@ -116,7 +179,6 @@ export class SignalTrackerService {
         }
 
         const levels: PriceLevels = { entryLow, entryHigh, stopLoss: currentSL, takeProfits };
-        const lowerTf = await this.candles.getLowerTimeframeWindow?.(signal.asset.symbol, signal.timeframe, candle.openTime);
         const result = resolveIntrabarOrder(direction, levels, candle, lowerTf as Candle[] | undefined);
 
         for (const touch of result.order) {
