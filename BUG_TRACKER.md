@@ -38,7 +38,7 @@
 
 ## Priorités restantes
 
-1. **⚠️ Tests NestJS** — Les tests `signals.service.spec.ts` utilisent `_scanActiveAssets` qui n'existe plus (renommé `_scanActiveAssetsByTimeframe`). À mettre à jour.
+1. ~~**⚠️ Tests NestJS**~~ — Résolu : la suite `src/signals` passe en entier (15 suites, 126 tests). `_scanActiveAssetsByTimeframe` est la seule référence restante, aucun test stale.
 
 ## Notes
 
