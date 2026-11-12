@@ -14,7 +14,9 @@ from utils.http import retry_async
 router = APIRouter()
 
 LUNARCRUSH_API_KEY = settings.lunarcrush_api_key
-LUNARCRUSH_BASE = "https://api.lunarcrush.com/v2"
+# LunarCrush API v4 — api.lunarcrush.com (v2) est hors-ligne ; v4 exige un
+# Bearer token sur lunarcrush.com/api4. La même clé fonctionne.
+LUNARCRUSH_BASE = "https://lunarcrush.com/api4/public/coins"
 
 # Mock social metrics by symbol for demo / API-fail fallback
 _SOCIAL_MOCK = {
@@ -42,41 +44,37 @@ def _symbol_base(symbol: str) -> str:
 
 
 @rate_limit(max_concurrent=5, min_delay=0.1)
-async def _http_get(url: str, params: Optional[dict] = None, source: str = "lunarcrush"):
+async def _http_get(url: str, params: Optional[dict] = None, headers: Optional[dict] = None, source: str = "lunarcrush"):
     async def _do():
         async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(url, params=params or {})
+            r = await client.get(url, params=params or {}, headers=headers or {})
             r.raise_for_status()
             return r.json()
     return await retry_async(_do, max_retries=1, base_delay=0.5, source=source)
 
 
 async def fetch_social_metrics(symbol: str) -> dict:
-    """Fetch LunarCrush social metrics for a symbol. Fallback to mock if no key/failure."""
+    """Fetch LunarCrush v4 social metrics for a symbol. Fallback to mock if no key/failure."""
     base = _symbol_base(symbol)
     if not LUNARCRUSH_API_KEY:
         return _mock_metrics(base)
 
     try:
         data = await _http_get(
-            f"{LUNARCRUSH_BASE}",
-            params={
-                "data": "assets",
-                "key": LUNARCRUSH_API_KEY,
-                "symbol": base,
-                "interval": "day",
-                "data_points": 1,
-            },
+            f"{LUNARCRUSH_BASE}/{base}/time-series/v2",
+            params={"interval": "day"},
+            headers={"Authorization": f"Bearer {LUNARCRUSH_API_KEY}"},
         )
-        assets = data.get("data") if isinstance(data, dict) else data
-        if assets and isinstance(assets, list):
-            asset = assets[0]
+        series = data.get("data") if isinstance(data, dict) else None
+        if series:
+            asset = series[-1]  # point le plus récent
             return {
                 "symbol": base,
-                "galaxy_score": float(asset.get("galaxy_score", 0)),
-                "alt_rank": int(asset.get("alt_rank", 0)),
-                "social_dominance": float(asset.get("social_dominance", 0)),
-                "interactions_per_post": float(asset.get("average_interactions_per_post", 0)),
+                "galaxy_score": float(asset.get("galaxy_score") or 0),
+                "alt_rank": int(asset.get("alt_rank") or 0),
+                "social_dominance": float(asset.get("social_dominance") or 0),
+                "interactions_per_post": float(asset.get("interactions") or 0),
+                "sentiment": asset.get("sentiment"),
                 "source": "lunarcrush",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }

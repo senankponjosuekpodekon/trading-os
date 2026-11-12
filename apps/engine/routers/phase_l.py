@@ -43,7 +43,7 @@ async def hidden_gems(
     # Le backtest sur 63 tokens trackés montre que volume_24h > ~800k est
     # corrélé à des perfs négatives (token déjà pompé / exit liquidity).
     max_volume: float | None = Query(800_000, ge=0),
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=100),
     refresh: bool = Query(False),
 ):
     from ml.hidden_gems import discover_hidden_gems, _cache, _CACHE_TTL

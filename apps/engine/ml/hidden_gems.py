@@ -1214,7 +1214,7 @@ async def discover_hidden_gems(
     # vol >500k → -33% avg / 14% WR. Un plafond évite les tokens déjà pompés.
     max_volume: float | None = 800_000,
     max_age_hours: float = 168,  # 1 week
-    limit: int = 25,
+    limit: int = 50,
 ) -> Dict[str, Any]:
     """
     Discover hidden gem tokens from DEX data.

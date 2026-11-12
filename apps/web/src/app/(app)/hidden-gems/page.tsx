@@ -9,7 +9,7 @@ export default function HiddenGemsPage() {
   const [minLiquidity, setMinLiquidity] = useState(50000);
   const [minVolume, setMinVolume] = useState(150000);
   const [maxVolume, setMaxVolume] = useState(800000);
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit] = useState(50);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['hidden-gems', minLiquidity, minVolume, maxVolume, limit],
