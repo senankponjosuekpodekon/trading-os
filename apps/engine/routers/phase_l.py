@@ -39,15 +39,18 @@ async def rebalance(body: RebalanceRequest):
 @router.get("/ml/hidden-gems")
 async def hidden_gems(
     min_liquidity: float = Query(50_000, ge=0),
-    min_volume: float = Query(100_000, ge=0),
-    limit: int = Query(10, ge=1, le=100),
+    min_volume: float = Query(150_000, ge=0),
+    # Le backtest sur 63 tokens trackés montre que volume_24h > ~800k est
+    # corrélé à des perfs négatives (token déjà pompé / exit liquidity).
+    max_volume: float | None = Query(800_000, ge=0),
+    limit: int = Query(25, ge=1, le=100),
     refresh: bool = Query(False),
 ):
     from ml.hidden_gems import discover_hidden_gems, _cache, _CACHE_TTL
     import time
 
     now = time.monotonic()
-    key = f"hiddengems:{min_liquidity}:{min_volume}"
+    key = f"hiddengems:{min_liquidity}:{min_volume}:{max_volume}"
     data = _cache.get("gems")
     if not refresh and data and (now - _cache["ts"]) < _CACHE_TTL and _cache.get("key") == key:
         return dict(data, gems=(data.get("gems") or [])[:limit])
@@ -64,6 +67,7 @@ async def hidden_gems(
         result = await discover_hidden_gems(
             min_liquidity=min_liquidity,
             min_volume=min_volume,
+            max_volume=max_volume,
             limit=limit,
         )
         _cache["gems"] = result

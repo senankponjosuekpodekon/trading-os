@@ -7,14 +7,15 @@ import { useState } from 'react';
 export default function HiddenGemsPage() {
   const queryClient = useQueryClient();
   const [minLiquidity, setMinLiquidity] = useState(50000);
-  const [minVolume, setMinVolume] = useState(100000);
-  const [limit, setLimit] = useState(10);
+  const [minVolume, setMinVolume] = useState(150000);
+  const [maxVolume, setMaxVolume] = useState(800000);
+  const [limit, setLimit] = useState(25);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['hidden-gems', minLiquidity, minVolume, limit],
+    queryKey: ['hidden-gems', minLiquidity, minVolume, maxVolume, limit],
     queryFn: async () => {
       const res = await api.get('/ai/ml/hidden-gems', {
-        params: { min_liquidity: minLiquidity, min_volume: minVolume, limit },
+        params: { min_liquidity: minLiquidity, min_volume: minVolume, max_volume: maxVolume || undefined, limit },
       });
       return res.data;
     },
@@ -78,6 +79,15 @@ export default function HiddenGemsPage() {
               type="number"
               value={minVolume}
               onChange={(e) => setMinVolume(Number(e.target.value))}
+              className="w-28 px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded text-white"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-400" title="Plafond anti exit-liquidity : au-delà, le token est déjà pompé">Max Volume</label>
+            <input
+              type="number"
+              value={maxVolume}
+              onChange={(e) => setMaxVolume(Number(e.target.value))}
               className="w-28 px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded text-white"
             />
           </div>

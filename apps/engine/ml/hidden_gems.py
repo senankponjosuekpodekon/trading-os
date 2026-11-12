@@ -1113,9 +1113,12 @@ async def _fetch_dex_search(query: str = "trending") -> List[Dict[str, Any]]:
 async def discover_hidden_gems(
     *,
     min_liquidity: float = 50_000,
-    min_volume: float = 100_000,
+    min_volume: float = 150_000,
+    # Empirique (63 tokens trackés) : vol 150-500k → +86% avg / 58% WR ;
+    # vol >500k → -33% avg / 14% WR. Un plafond évite les tokens déjà pompés.
+    max_volume: float | None = 800_000,
     max_age_hours: float = 168,  # 1 week
-    limit: int = 10,
+    limit: int = 25,
 ) -> Dict[str, Any]:
     """
     Discover hidden gem tokens from DEX data.
@@ -1133,11 +1136,12 @@ async def discover_hidden_gems(
             "fetched_at": _now_iso(),
         }
 
-    # Filter by minimum criteria
+    # Filter by minimum criteria (+ plafond volume anti-exit-liquidity)
     filtered = [
         t for t in tokens
         if t.get("liquidity", 0) >= min_liquidity
         and t.get("volume_24h", 0) >= min_volume
+        and (max_volume is None or t.get("volume_24h", 0) <= max_volume)
     ]
 
     # Also include tokens below thresholds if they're very new (age check skipped since we don't have it)
@@ -1432,6 +1436,8 @@ async def gems_backtest(min_hours: float = 24) -> Dict[str, Any]:
 
     rows = []
     for key in tracked:
+        if isinstance(key, bytes):
+            key = key.decode()
         chain, addr = key.split(":", 1)
         hist = await _load_gem_history(chain, addr)
         if len(hist) < 4:
