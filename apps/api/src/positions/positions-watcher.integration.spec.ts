@@ -49,8 +49,10 @@ describe('openPosition → watcher → closePosition flow', () => {
     $executeRaw: jest.fn(),
   };
 
+  let moduleRef: TestingModule;
+
   beforeAll(async () => {
-    const moduleRef: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, WatcherModule],
     })
       .overrideProvider(HttpService)
@@ -69,6 +71,10 @@ describe('openPosition → watcher → closePosition flow', () => {
 
     positionsService = moduleRef.get<PositionsService>(PositionsService);
     watcherService = moduleRef.get<WatcherService>(WatcherService);
+  });
+
+  afterAll(async () => {
+    if (moduleRef) await moduleRef.close();
   });
 
   beforeEach(() => {
