@@ -1367,27 +1367,10 @@ async def discover_hidden_gems(
     # Sort by gem_score descending
     candidates.sort(key=lambda c: c.gem_score, reverse=True)
 
-    # Diversité par chaîne : solana truste ~85% du flux DexScreener alors que
-    # le backtest montre les gems non-solana en meilleure perf. Cap 60% par
-    # chaîne dans le top, complété si la diversité manque.
-    max_per_chain = max(1, round(limit * 0.6))
-    per_chain: Dict[str, int] = {}
-    top_gems: List[GemCandidate] = []
-    for c in candidates:
-        if per_chain.get(c.chain, 0) >= max_per_chain:
-            continue
-        per_chain[c.chain] = per_chain.get(c.chain, 0) + 1
-        top_gems.append(c)
-        if len(top_gems) >= limit:
-            break
-    if len(top_gems) < limit:
-        chosen = {(c.chain, c.token_address or c.symbol) for c in top_gems}
-        for c in candidates:
-            if (c.chain, c.token_address or c.symbol) in chosen:
-                continue
-            top_gems.append(c)
-            if len(top_gems) >= limit:
-                break
+    # Pas de cap par chaîne : le plafond volume élimine déjà les tokens
+    # déjà pompés (souvent solana) sans pénaliser les bons solana en
+    # phase d'accumulation. GeckoTerminal reste un supplément de candidats.
+    top_gems = candidates[:limit]
 
     moonshots = sum(1 for c in candidates if c.moonshot)
 
