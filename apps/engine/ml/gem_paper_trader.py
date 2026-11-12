@@ -4,7 +4,10 @@ Règles calibrées sur le backtest réel (63 tokens, nov. 2026) :
 - Entrée : top gems score ≥60, pas de flag manipulation bloquant.
 - TP1 +50%  → vendre 40% (sécurise le capital)
 - TP2 +100% → vendre 35% (les ×2-×5 mesurés)
-- Runner    → 25% restant, trailing stop -30% depuis le pic
+- TP3 +200% → vendre 15% (les ×3+ réels : +341% à +6569% mesurés)
+- TP4 +500% → vendre 5% — reste une "moon bag" de 5%
+- Runner    → trailing -30% depuis le pic dès TP1 : la moitié des tokens
+  ayant peaké ≥300% a rendu presque tous les gains (+1189% → -1%)
 - Stop loss → -25% depuis l'entrée (la moitié des losers ne revient pas)
 - Time stop → 72h sans TP1 → sortie (pas de pump en 3j = probablement jamais)
 
@@ -29,6 +32,8 @@ VIRTUAL_SIZE_USD = 100.0
 
 TP1_PCT, TP1_SELL = 50.0, 40
 TP2_PCT, TP2_SELL = 100.0, 35
+TP3_PCT, TP3_SELL = 200.0, 15
+TP4_PCT, TP4_SELL = 500.0, 5   # moon bag de 5% après
 TRAIL_DD_PCT = 30.0        # depuis le pic
 STOP_LOSS_PCT = -25.0      # depuis l'entrée
 TIME_STOP_H = 72.0         # sans TP1
@@ -71,6 +76,8 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
             "status": "OPEN",
             "tp1_hit": False,
             "tp2_hit": False,
+            "tp3_hit": False,
+            "tp4_hit": False,
             "realized_pct": 0.0,
         }
         await r.set(f"{POSITION_PREFIX}{pid}", json.dumps(pos), ex=30 * 24 * 3600)
@@ -126,6 +133,8 @@ async def _notify(pid: str, pos: Dict[str, Any], price: float, level: str, sell_
     messages = {
         "TP1": "🎯 TP1 +50% — vendre 40%",
         "TP2": "🎯 TP2 +100% — vendre 35% supplémentaires",
+        "TP3": "🚀 TP3 +200% — vendre 15%, runner activé",
+        "TP4": "🌙 TP4 +500% — vendre 5%, moon bag conservée",
         "TRAIL": "📉 Trailing stop -30% depuis le pic — sortir",
         "SL": "🛑 Stop loss -25% — sortir",
         "TIME": "⏰ Time stop 72h sans mouvement — sortir",
@@ -210,6 +219,18 @@ async def check_positions() -> Dict[str, int]:
                 pos["remaining_pct"] -= TP2_SELL
                 pos["realized_pct"] += TP2_PCT * TP2_SELL / 100
                 await _notify(pid, pos, price, "TP2")
+                stats["tp"] += 1
+            if pos["tp2_hit"] and not pos["tp3_hit"] and perf >= TP3_PCT:
+                pos["tp3_hit"] = True
+                pos["remaining_pct"] -= TP3_SELL
+                pos["realized_pct"] += TP3_PCT * TP3_SELL / 100
+                await _notify(pid, pos, price, "TP3")
+                stats["tp"] += 1
+            if pos["tp3_hit"] and not pos["tp4_hit"] and perf >= TP4_PCT:
+                pos["tp4_hit"] = True
+                pos["remaining_pct"] -= TP4_SELL
+                pos["realized_pct"] += TP4_PCT * TP4_SELL / 100
+                await _notify(pid, pos, price, "TP4")
                 stats["tp"] += 1
 
             await r.set(f"{POSITION_PREFIX}{pid}", json.dumps(pos))

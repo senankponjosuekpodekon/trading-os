@@ -1,7 +1,7 @@
 'use client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Gem, RefreshCw, TrendingUp, AlertTriangle, ExternalLink, Filter } from 'lucide-react';
+import { Gem, RefreshCw, TrendingUp, AlertTriangle, ExternalLink, Filter, FlaskConical } from 'lucide-react';
 import { useState } from 'react';
 
 export default function HiddenGemsPage() {
@@ -20,6 +20,12 @@ export default function HiddenGemsPage() {
       return res.data;
     },
     staleTime: 1000 * 60 * 10,
+  });
+
+  const { data: paper } = useQuery({
+    queryKey: ['gem-paper-stats'],
+    queryFn: async () => (await api.get('/ai/ml/gem-paper/stats')).data,
+    refetchInterval: 60_000,
   });
 
   const { data: smStatus } = useQuery({
@@ -116,6 +122,54 @@ export default function HiddenGemsPage() {
             {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.wallets || 0), 0)} acheteurs précoces gagnants repérés ·{' '}
             {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.deployers || 0), 0)} créateurs à track record ·{' '}
             {Object.values(smStatus.chains || {}).reduce((a: number, c: any) => a + (c.rugs || 0), 0)} créateurs de tokens perdants
+          </div>
+        )}
+
+        {/* Paper trading */}
+        {paper && (paper.open_count > 0 || paper.closed_count > 0) && (
+          <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-cyan-400" />
+                Paper Trading — stratégie TP/SL calibrée sur le backtest
+              </h2>
+              <div className="text-xs text-gray-500">
+                {paper.open_count} ouverte(s) · {paper.closed_count} close(s)
+                {paper.win_rate_pct != null && (
+                  <span> · WR <span className={paper.win_rate_pct >= 50 ? 'text-emerald-400' : 'text-red-400'}>{paper.win_rate_pct}%</span> · avg {paper.avg_perf_pct}%</span>
+                )}
+              </div>
+            </div>
+            {paper.open?.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                {paper.open.slice(0, 8).map((p: any) => (
+                  <div key={p.id} className="px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-white">{p.symbol}</span>
+                      <span className="text-gray-500">{p.chain}</span>
+                    </div>
+                    <div className="text-gray-400 mt-0.5">
+                      score {p.entry_score} · restant {p.remaining_pct}%
+                    </div>
+                    <div className="flex gap-1 mt-1">
+                      {p.tp1_hit && <span className="px-1 rounded bg-emerald-500/15 text-emerald-400">TP1</span>}
+                      {p.tp2_hit && <span className="px-1 rounded bg-emerald-500/15 text-emerald-400">TP2</span>}
+                      {p.tp3_hit && <span className="px-1 rounded bg-cyan-500/15 text-cyan-400">TP3</span>}
+                      {p.tp4_hit && <span className="px-1 rounded bg-purple-500/15 text-purple-400">🌙</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {paper.closed?.length > 0 && (
+              <div className="text-xs text-gray-500">
+                Dernières sorties : {paper.closed.slice(0, 5).map((c: any) => (
+                  <span key={c.id} className={c.total_perf_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                    {' '}{c.symbol} {c.total_perf_pct >= 0 ? '+' : ''}{c.total_perf_pct}% ·
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

@@ -81,11 +81,19 @@ export class AiService {
     return this.engine.post('/ml/rebalance', { positions, profile, total_capital: totalCapital, portfolio_risk: portfolioRisk }, { timeout: 15_000 });
   }
 
-  async hiddenGems(minLiquidity = 50_000, minVolume = 100_000, limit = 10, refresh = false): Promise<any> {
+  async hiddenGems(minLiquidity = 50_000, minVolume = 150_000, maxVolume: number | null = 800_000, limit = 50, refresh = false): Promise<any> {
     return this.engine.get('/ml/hidden-gems', {
-      params: { min_liquidity: minLiquidity, min_volume: minVolume, limit, ...(refresh ? { refresh: 'true' } : {}) },
+      params: {
+        min_liquidity: minLiquidity, min_volume: minVolume,
+        ...(maxVolume != null ? { max_volume: maxVolume } : {}),
+        limit, ...(refresh ? { refresh: 'true' } : {}),
+      },
       timeout: 30_000,
     });
+  }
+
+  async gemPaperStats(): Promise<any> {
+    return this.engine.get('/ml/gem-paper/stats', { timeout: 15_000 });
   }
 
   async aiDefense(data: any): Promise<any> {

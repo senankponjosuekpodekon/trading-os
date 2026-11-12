@@ -161,15 +161,22 @@ export class AiController {
   hiddenGems(
     @Query('min_liquidity') minLiquidity?: string,
     @Query('min_volume') minVolume?: string,
+    @Query('max_volume') maxVolume?: string,
     @Query('limit') limit?: string,
     @Query('refresh') refresh?: string,
   ) {
     return this.ai.hiddenGems(
       minLiquidity ? parseFloat(minLiquidity) : 50_000,
-      minVolume ? parseFloat(minVolume) : 100_000,
-      limit ? parseInt(limit, 10) : 10,
+      minVolume ? parseFloat(minVolume) : 150_000,
+      maxVolume ? parseFloat(maxVolume) : 800_000,
+      limit ? parseInt(limit, 10) : 50,
       refresh === 'true',
     );
+  }
+
+  @Get('ml/gem-paper/stats')
+  gemPaperStats() {
+    return this.ai.gemPaperStats();
   }
 
   @Post('ml/ai-defense')
