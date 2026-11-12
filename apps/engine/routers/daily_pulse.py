@@ -191,6 +191,105 @@ def _build_prompt(data: dict) -> str:
 
 # ── Endpoint ─────────────────────────────────────────────────────────────────
 
+def _try_loads(candidate: str):
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """Parse le JSON du brief LLM. Répare les sorties tronquées en
+    supprimant la queue incomplète puis en fermant les accolades/chaînes
+    ouvertes. Retourne un brief de fallback si tout échoue."""
+    import re
+
+    cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r'\s*```$', '', cleaned.strip())
+
+    for candidate in (cleaned, raw.strip()):
+        parsed = _try_loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+        match = re.search(r'\{[\s\S]*\}', candidate)
+        if match:
+            parsed = _try_loads(match.group())
+            if isinstance(parsed, dict):
+                return parsed
+
+    # Réparation : garder jusqu'à la dernière structure complète puis fermer
+    text = match.group() if match else cleaned
+    repaired = _close_truncated_json(text)
+    parsed = _try_loads(repaired) if repaired else None
+    if isinstance(parsed, dict):
+        return parsed
+
+    # Dernier recours : extraire au moins le headline
+    hm = re.search(r'"headline"\s*:\s*"([^"]+)"', text)
+    brief = {
+        "headline": hm.group(1) if hm else "Daily Pulse — Erreur de compilation",
+        "raw": raw,
+    }
+    if not hm:
+        brief["error"] = "LLM did not return valid JSON"
+    return brief
+
+
+def _scan_json_state(text: str):
+    """Retourne (in_str, stack, commas) — commas = positions des virgules
+    hors-string, stack = caractères ouvrants `{`/`[` non fermés."""
+    in_str = esc = False
+    stack: list[str] = []
+    commas: list[int] = []
+    for i, ch in enumerate(text):
+        if esc:
+            esc = False
+            continue
+        if in_str:
+            if ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in '{[':
+            stack.append(ch)
+        elif ch in '}]':
+            if stack:
+                stack.pop()
+        elif ch == ',':
+            commas.append(i)
+    return in_str, stack, commas
+
+
+def _close_truncated_json(text: str) -> str | None:
+    """Referme un JSON tronqué en coupant progressivement jusqu'à la
+    dernière virgule hors-string puis en ajoutant les `}`/`]`/`"` manquants.
+    Retourne le premier candidat qui parse, sinon None."""
+    if not text.startswith('{'):
+        return None
+
+    cut = text
+    while True:
+        in_str, stack, commas = _scan_json_state(cut)
+        if not stack:
+            break  # déjà équilibré (parse géré en amont)
+
+        candidate = cut + ('"' if in_str else '')
+        candidate += ''.join('}' if c == '{' else ']' for c in reversed(stack))
+        if _try_loads(candidate) is not None:
+            return candidate
+
+        # Coupe après la dernière virgule complète (on jette le token coupé)
+        if not commas:
+            return None
+        cut = cut[: commas[-1]].rstrip(' \n\t,:')
+        if not cut or cut.lstrip('{[') == '':
+            return None
+    return None
+
+
 class DailyPulseResponse(BaseModel):
     brief: dict
     raw_data: dict
@@ -216,32 +315,12 @@ async def get_daily_pulse(refresh: bool = False):
     from routers.llm import _call_llm_with_fallback
     prompt = _build_prompt(data)
 
-    raw, provider, model = await _call_llm_with_fallback(prompt, max_tokens=1200)
+    raw, provider, model = await _call_llm_with_fallback(prompt, max_tokens=3000)
 
-    # Parse JSON response
-    import re
-    raw_clean = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
-    raw_clean = re.sub(r'\s*```$', '', raw_clean.strip())
-
-    try:
-        brief = json.loads(raw_clean)
-    except json.JSONDecodeError:
-        match = re.search(r'\{[\s\S]*\}', raw)
-        if match:
-            try:
-                brief = json.loads(match.group())
-            except json.JSONDecodeError:
-                brief = {
-                    "headline": "Daily Pulse — Erreur de compilation",
-                    "raw": raw,
-                    "error": "LLM did not return valid JSON",
-                }
-        else:
-            brief = {
-                "headline": "Daily Pulse — Erreur de compilation",
-                "raw": raw,
-                "error": "LLM did not return valid JSON",
-            }
+    # Parse JSON response — le LLM peut retourner du JSON tronqué (max_tokens
+    # atteint) ou entouré de fences markdown. On tente le brut, puis la
+    # réparation du JSON coupé (fermeture des accolades ouvertes).
+    brief = _parse_llm_json(raw)
 
     result = {
         "brief": brief,
