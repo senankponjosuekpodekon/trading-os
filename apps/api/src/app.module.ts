@@ -63,9 +63,12 @@ import { TrackRecordModule } from './track-record/track-record.module';
       inject: [ConfigService],
     }),
     ThrottlerModule.forRoot([
-      { name: 'short',  ttl: 1_000,  limit: 10  },
-      { name: 'medium', ttl: 10_000, limit: 50  },
-      { name: 'long',   ttl: 60_000, limit: 200 },
+      // Le tracker est par user (JWT sub) via UserThrottlerGuard — le
+      // dashboard polle plusieurs endpoints en parallèle, 200/min/user
+      // générait des ThrottlerException sur les vues denses.
+      { name: 'short',  ttl: 1_000,  limit: 15  },
+      { name: 'medium', ttl: 10_000, limit: 120 },
+      { name: 'long',   ttl: 60_000, limit: 600 },
     ]),
     ScheduleModule.forRoot(),
     WatcherModule,

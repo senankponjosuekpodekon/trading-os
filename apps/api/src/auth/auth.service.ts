@@ -252,6 +252,23 @@ export class AuthService {
     });
   }
 
+  async resendVerification(email: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    // Réponse uniforme : ne jamais révéler si le compte existe/déjà vérifié
+    if (!user || user.emailVerified) return { queued: true };
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerificationToken: token },
+    });
+
+    const verificationUrl = `https://trading.stiamond.net/auth/verify-email?token=${token}`;
+    const mailResult = await this.mail.sendVerificationEmail(email, verificationUrl);
+    this.fileLogger.log('Verification email resent', { userId: user.id, email, sent: mailResult.sent });
+    return { queued: true };
+  }
+
   async verifyEmail(token: string) {
     const user = await this.prisma.user.findFirst({
       where: { emailVerificationToken: token },

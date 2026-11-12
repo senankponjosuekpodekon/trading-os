@@ -53,7 +53,7 @@ export class MailService {
       return { sent: true };
     }
 
-    this.logger.warn({ to: email, resetUrl }, 'Password reset email not sent (SMTP disabled)');
+    this.logger.warn({ to: email }, 'Password reset email not sent (SMTP disabled)');
     return { sent: false, reason: 'SMTP not configured' };
   }
 
@@ -74,7 +74,7 @@ export class MailService {
       return { sent: true };
     }
 
-    this.logger.warn({ to: email, verificationUrl }, 'Verification email not sent (SMTP disabled)');
+    this.logger.warn({ to: email }, 'Verification email not sent (SMTP disabled)');
     return { sent: false, reason: 'SMTP not configured' };
   }
 }

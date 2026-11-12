@@ -8,6 +8,7 @@ import { deriveSignalOutcome, computeMaxAdverseExcursion, SignalExecutionStatus 
 import { SignalExecutionStatus as PrismaSignalExecutionStatus } from '@prisma/client';
 import { FeatureStoreService } from './feature-store.service';
 import { AutoTraderService } from './auto-trader.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 
 const DEFAULT_PARTIAL_EXIT_PCT = 33.3;
 // Zone d'entrée : le prix manque l'entrée de 0.37% en médiane (47% < 0.3%)
@@ -40,7 +41,20 @@ export class SignalTrackerService {
     private readonly executionService: SignalExecutionService,
     private readonly featureStore: FeatureStoreService,
     private readonly autoTrader: AutoTraderService,
+    private readonly engineHttp: EngineHttpService,
   ) {}
+
+  // Notifie la Market Memory engine de l'outcome — fire-and-forget,
+  // l'échec ne doit jamais bloquer la résolution du signal.
+  private _resolveMemory(signalId: string, outcome: string, pnlPct: number | null): void {
+    void this.engineHttp.post('/memory/resolve', {
+      pattern_id: signalId,
+      outcome,
+      pnl_pct: pnlPct ?? 0,
+    }, { timeout: 3000 }).catch((err) => {
+      this.logger.debug(`market_memory resolve failed for ${signalId}: ${(err as Error)?.message}`);
+    });
+  }
 
   private async _acquireLock(): Promise<boolean> {
     try {
@@ -139,6 +153,7 @@ export class SignalTrackerService {
           data: { executionStatus: 'EXPIRED', isActive: false },
         });
         await Promise.resolve(this.featureStore.attachOutcome(signal.id, 'EXPIRED', null)).catch(() => {});
+        this._resolveMemory(signal.id, 'EXPIRED', null);
       }
       return;
     }
@@ -177,6 +192,7 @@ export class SignalTrackerService {
           newEvents.push({ type: 'EXPIRED', price: candle.close });
           await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'EXPIRED', lastProcessedCandle: new Date(candle.openTime) } });
           await this.featureStore.attachOutcome(signalId, 'EXPIRED', null);
+          this._resolveMemory(signalId, 'EXPIRED', null);
           expired = true;
           return;
         }
@@ -294,6 +310,7 @@ export class SignalTrackerService {
         : null;
     if (label) {
       await this.featureStore.attachOutcome(signalId, label, outcome.pnlPct);
+      this._resolveMemory(signalId, label, outcome.pnlPct);
     }
   }
 }

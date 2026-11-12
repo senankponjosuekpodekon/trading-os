@@ -120,6 +120,7 @@ export class NotificationsController {
   }
 
   @Post('internal/pattern')
+  @SkipThrottle() // trafic interne engine→API (X-Engine-Key) — pas de quota user
   internalPatternAlert(@Body() body: any, @Headers() headers: any) {
     const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
     const providedKey = headers['x-engine-key'] || '';
@@ -146,6 +147,7 @@ export class NotificationsController {
    * onchain, early-alpha forte conviction. Protégé par X-Engine-Key.
    */
   @Post('internal/broadcast')
+  @SkipThrottle() // trafic interne engine→API (X-Engine-Key) — pas de quota user
   async internalBroadcast(@Body() body: any, @Headers() headers: any) {
     const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
     const providedKey = headers['x-engine-key'] || '';

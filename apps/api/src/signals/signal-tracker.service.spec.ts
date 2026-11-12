@@ -5,6 +5,7 @@ import { CandleRepository } from './candle.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import { FeatureStoreService } from './feature-store.service';
 import { AutoTraderService } from './auto-trader.service';
+import { EngineHttpService } from '../engine/engine-http.service';
 import { SignalExecutionEventType, SignalExecutionStatus } from '@prisma/client';
 
 describe('SignalTrackerService', () => {
@@ -43,6 +44,7 @@ describe('SignalTrackerService', () => {
         { provide: SignalExecutionService, useValue: mockExecutionService },
         { provide: FeatureStoreService, useValue: { attachOutcome: jest.fn() } },
         { provide: AutoTraderService, useValue: { handleSignalEvent: jest.fn() } },
+        { provide: EngineHttpService, useValue: { post: jest.fn().mockResolvedValue({}) } },
       ],
     }).compile();
 

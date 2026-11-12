@@ -127,7 +127,7 @@ async def store_pattern(
 
     # Try to persist to DB
     try:
-        from db import get_pool
+        from utils.db_pool import get_shared_pool as get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -138,10 +138,10 @@ async def store_pattern(
                 """,
                 pattern_id, symbol, timeframe, signal_type, setup_type,
                 json.dumps(features), pattern["confidence"],
-                pattern["created_at"], signal_id,
+                datetime.now(timezone.utc), signal_id,
             )
     except Exception as exc:
-        logger.debug("market_memory_db_store_failed", error=str(exc))
+        logger.warning("market_memory_db_store_failed", error=str(exc))
 
     logger.info("market_pattern_stored", pattern_id=pattern_id, key=key, setup=setup_type)
     return pattern_id
@@ -170,18 +170,18 @@ async def resolve_pattern(pattern_id: str, outcome: str, pnl_pct: float) -> None
 
     # Try to update DB
     try:
-        from db import get_pool
+        from utils.db_pool import get_shared_pool as get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE market_memory SET outcome = $1, pnl_pct = $2, resolved_at = $3
-                WHERE pattern_id = $4
+                WHERE pattern_id = $4 OR signal_id = $4
                 """,
-                outcome, pnl_pct, datetime.now(timezone.utc).isoformat(), pattern_id,
+                outcome, pnl_pct, datetime.now(timezone.utc), pattern_id,
             )
     except Exception as exc:
-        logger.debug("market_memory_db_resolve_failed", error=str(exc))
+        logger.warning("market_memory_db_resolve_failed", error=str(exc))
 
     logger.info("market_pattern_resolved", pattern_id=pattern_id, outcome=outcome, pnl=pnl_pct)
 
@@ -202,7 +202,7 @@ async def recall_similar_patterns(
 
     # Try DB first
     try:
-        from db import get_pool
+        from utils.db_pool import get_shared_pool as get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -217,7 +217,7 @@ async def recall_similar_patterns(
             if rows:
                 return [dict(r) for r in rows]
     except Exception as exc:
-        logger.debug("market_memory_db_recall_failed", error=str(exc))
+        logger.warning("market_memory_db_recall_failed", error=str(exc))
 
     # Fallback to cache
     patterns = _memory_cache.get(key, [])
@@ -308,7 +308,7 @@ def get_memory_summary() -> Dict[str, Any]:
 async def init_market_memory_db() -> None:
     """Create the market_memory table if it doesn't exist."""
     try:
-        from db import get_pool
+        from utils.db_pool import get_shared_pool as get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute("""

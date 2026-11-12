@@ -421,6 +421,23 @@ export class SignalPersistenceService {
       (signal as any)._raw = r;
       saved.push(signal);
 
+      // Market Memory : stocker le pattern pour le rappel de setups similaires
+      // (fire-and-forget — un échec ne doit jamais bloquer la persistance)
+      void this.engineHttp.post('/memory/store', {
+        symbol: r.symbol,
+        timeframe: r.timeframe,
+        signal_type: r.signal,
+        signal_id: signal.id,
+        metadata: {
+          price_action: r.price_action, smc: r.smc, patterns: r.patterns,
+          regime: r.regime, mtf_context: r.mtf_context,
+          risk_reward: r.risk_reward, confidence: r.confidence,
+          news_sentiment: r.news_sentiment ?? r.scraper_sentiment ?? null,
+        },
+      }, { timeout: 3000 }).catch((err) => {
+        this.logger.debug(`market_memory store failed for ${signal.id}: ${(err as Error)?.message}`);
+      });
+
       // Always store features in FeatureStore for every BUY/SELL signal
       const indicators = r.indicators ?? {};
       const autoFeatureVector = r.feature_vector ?? {

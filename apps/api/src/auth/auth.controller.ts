@@ -173,8 +173,7 @@ export class AuthController {
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body() dto: ResendVerificationDto) {
-    // TODO: wire SMTP sender (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
-    return { queued: true, email: dto.email };
+    return this.authService.resendVerification(dto.email);
   }
 
   @Post('change-password')

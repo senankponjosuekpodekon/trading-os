@@ -3,6 +3,7 @@ import {
   Param, Post, UnauthorizedException, UseGuards, Request,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SkipThrottle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -43,6 +44,7 @@ export class TrackRecordController {
 
   /** Enregistrement automatique par l'engine (moonshot, gem, early-alpha). */
   @Post('internal')
+  @SkipThrottle() // trafic interne engine→API (X-Engine-Key) — pas de quota user
   async internal(@Body() body: any, @Headers() headers: any) {
     const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
     if (!engineKey || (headers['x-engine-key'] || '') !== engineKey) {
