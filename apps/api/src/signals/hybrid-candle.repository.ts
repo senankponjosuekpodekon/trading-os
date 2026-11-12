@@ -60,10 +60,10 @@ export class HybridCandleRepository extends CandleRepository {
     this.failStreak.delete(provider);
   }
 
-  private async tryRepo(provider: string, repo: CandleRepository, symbol: string, timeframe: string, since: Date): Promise<Candle[] | null> {
+  private async tryRepo(provider: string, repo: CandleRepository, symbol: string, timeframe: string, since: Date, until?: Date): Promise<Candle[] | null> {
     if (this.cooledDown(provider) || this.cooledDown(`${provider}:${symbol}`)) return null;
     this.logger.log(`${provider} fallback for ${symbol} ${timeframe}`);
-    const candles = await repo.getSince(symbol, timeframe, since);
+    const candles = await repo.getSince(symbol, timeframe, since, until);
     if (candles.length === 0) {
       this.fail(provider, symbol);
       return null;
@@ -73,16 +73,16 @@ export class HybridCandleRepository extends CandleRepository {
     return candles;
   }
 
-  async getSince(symbol: string, timeframe: string, since: Date): Promise<Candle[]> {
+  async getSince(symbol: string, timeframe: string, since: Date, until?: Date): Promise<Candle[]> {
     // 1. Essayer le cache local
-    const local = await this.localRepo.getSince(symbol, timeframe, since);
+    const local = await this.localRepo.getSince(symbol, timeframe, since, until);
     if (local.length > 0) {
       this.logger.log(`Cache hit: ${local.length} candles for ${symbol} ${timeframe}`);
       return local;
     }
 
     // 2. Essayer l'engine (live)
-    const engine = await this.engineRepo.getSince(symbol, timeframe, since);
+    const engine = await this.engineRepo.getSince(symbol, timeframe, since, until);
     if (engine.length > 0) {
       this.logger.log(`Engine hit: ${engine.length} candles for ${symbol} ${timeframe}`);
       return engine;
@@ -90,19 +90,19 @@ export class HybridCandleRepository extends CandleRepository {
 
     // 3. Fallback sur le bon provider selon le marché
     if (isCrypto(symbol)) {
-      return (await this.tryRepo('Binance', this.binanceRepo, symbol, timeframe, since)) ?? [];
+      return (await this.tryRepo('Binance', this.binanceRepo, symbol, timeframe, since, until)) ?? [];
     }
 
     // Non-crypto: Twelve Data, puis Alpha Vantage (XAG/USD), puis Yahoo
-    const twelveData = await this.tryRepo('TwelveData', this.twelveDataRepo, symbol, timeframe, since);
+    const twelveData = await this.tryRepo('TwelveData', this.twelveDataRepo, symbol, timeframe, since, until);
     if (twelveData) return twelveData;
 
     if (symbol === 'XAG/USD') {
-      const alphaVantage = await this.tryRepo('AlphaVantage', this.alphaVantageRepo, symbol, timeframe, since);
+      const alphaVantage = await this.tryRepo('AlphaVantage', this.alphaVantageRepo, symbol, timeframe, since, until);
       if (alphaVantage) return alphaVantage;
     }
 
-    return (await this.tryRepo('Yahoo', this.yahooRepo, symbol, timeframe, since)) ?? [];
+    return (await this.tryRepo('Yahoo', this.yahooRepo, symbol, timeframe, since, until)) ?? [];
   }
 
   async getLowerTimeframeWindow(symbol: string, timeframe: string, candleOpenTime: number): Promise<Candle[]> {

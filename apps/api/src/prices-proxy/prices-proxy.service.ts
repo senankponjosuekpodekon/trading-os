@@ -26,6 +26,7 @@ class ChannelProxy {
     private readonly channel: Channel,
     private readonly upstreamUrl: string,
     private readonly allowedOrigins: string[],
+    private readonly upstreamHeaders: Record<string, string>,
     private readonly logger: Logger,
   ) {}
 
@@ -57,7 +58,10 @@ class ChannelProxy {
   private connectUpstream() {
     if (this.stopped) return;
     try {
-      this.upstream = new WsClient(this.upstreamUrl, { perMessageDeflate: false });
+      this.upstream = new WsClient(this.upstreamUrl, {
+        perMessageDeflate: false,
+        headers: this.upstreamHeaders,
+      });
       this.upstream.on('open', () => {
         this.logger.log(`prices_proxy_upstream_connected channel=${this.channel}`);
         this.reconnectDelay = 2000;
@@ -116,11 +120,13 @@ export class PricesProxyService implements OnModuleDestroy {
       .split(',')
       .map(o => o.trim())
       .filter(Boolean);
+    const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
+    const upstreamHeaders: Record<string, string> = engineKey ? { 'X-Engine-Key': engineKey } : {};
 
     this.channels = [
-      new ChannelProxy('prices', `${wsBase}/ws/prices`, allowedOrigins, this.logger),
-      new ChannelProxy('signals', `${wsBase}/ws/signals`, allowedOrigins, this.logger),
-      new ChannelProxy('patterns', `${wsBase}/ws/patterns`, allowedOrigins, this.logger),
+      new ChannelProxy('prices', `${wsBase}/ws/prices`, allowedOrigins, upstreamHeaders, this.logger),
+      new ChannelProxy('signals', `${wsBase}/ws/signals`, allowedOrigins, upstreamHeaders, this.logger),
+      new ChannelProxy('patterns', `${wsBase}/ws/patterns`, allowedOrigins, upstreamHeaders, this.logger),
     ];
 
     const wssByPath = new Map<string, WebSocketServer>();

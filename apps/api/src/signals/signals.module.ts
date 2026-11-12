@@ -17,6 +17,7 @@ import { HybridCandleRepository } from './hybrid-candle.repository';
 import { MaintenanceService } from '../admin/maintenance.service';
 import { FeatureFlagsService } from '../common/services/feature-flags.service';
 import { SignalStatsService } from './signal-stats.service';
+import { SignalPersistenceService } from './signal-persistence.service';
 import { SignalPredictorService } from './signal-predictor.service';
 import { PatternPredictorService } from './pattern-predictor.service';
 import { FeatureStoreService } from './feature-store.service';
@@ -41,6 +42,7 @@ import { CronConfigModule } from '../admin/cron-config.module';
     SignalTrackerService,
     SignalTrackerScheduler,
     SignalStatsService,
+    SignalPersistenceService,
     LocalCandleRepository,
     EngineCandleRepository,
     BinanceCandleRepository,

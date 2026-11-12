@@ -1,8 +1,9 @@
 """
 Shared-secret authentication middleware for the FastAPI engine.
 
-Every HTTP request (except /health, /metrics, and WebSocket handshakes)
-must carry an `X-Engine-Key` header matching ENGINE_API_KEY.
+Every HTTP request (except /health and /metrics) must carry an
+`X-Engine-Key` header matching ENGINE_API_KEY. WebSocket handshakes are
+exempt here but authenticate themselves in routers/ws.py (`_ws_auth`).
 
 If ENGINE_API_KEY is not set, the middleware is bypassed with a warning
 (development mode).  In production the key MUST be configured.

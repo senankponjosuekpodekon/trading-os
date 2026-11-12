@@ -3,6 +3,10 @@
 > ⚠️ **Ce fichier est le master list historique. Le backlog actif est maintenu dans `docs/todo2.md`.**
 >
 > Légende : 🤖 = Cascade fait | 👤 = Toi (action externe) | ⚡ = Priorité haute | 🔁 = Récurrent
+>
+> 📋 **Triage du 12/11/2026** : les 211 items non cochés ont été revérifiés
+> contre le code — 80 implémentés (cochés ci-dessous), ~70 partiels
+> (restent ouverts), ~45 réellement à faire, 16 actions externes.
 
 ---
 
@@ -491,7 +495,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Par actif + par timeframe
   - Améliore le `regime.py` actuel (actuellement règles statiques)
 
-- [ ] 🤖 **Migration pandas-ta**
+- [x] 🤖 **Migration pandas-ta**
   - Remplacer calculs manuels EMA/RSI/MACD/BB/ATR par `pandas-ta`
   - `df.ta.ema()`, `df.ta.rsi()`, `df.ta.macd()` etc.
   - Gain vitesse ~3-5x sur le calcul des features
@@ -551,13 +555,13 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Output : `pre_listing_score` + `risk_flags[]`
   - Page dédiée "Early Alpha" dans le frontend
 
-- [ ] 🤖 **`engine/routers/whale_tracker.py`** — Tracking smart money
+- [x] 🤖 **`engine/routers/whale_tracker.py`** — Tracking smart money
   - Via Nansen API (free tier) ou Arkham Intelligence
   - Wallets labellisés "Smart Money" qui accumulent un token
   - Wallets fonds VC connus → mouvement de tokens = signal
   - Alerte : "Wallet Binance Labs accumule TOKEN depuis 7j"
 
-- [ ] 🤖 **`engine/routers/developer_activity.py`** — Santé fondamentale
+- [x] 🤖 **`engine/routers/developer_activity.py`** — Santé fondamentale
   - GitHub API publique (gratuite) → commits, contributors, releases
   - Projet avec 0 commits depuis 60j → `zombie_flag = True`
   - Nouveau release majeur → signal positif fondamental
@@ -674,7 +678,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - `signals.service.ts` : push notif quand signal BUY/SELL confiance ≥ 70 ✅
   - `watcher.service.ts` : push notif userId quand SL/TP touché ✅
   - `journal.service.ts` : notification fusionnée avec watcher (trade fermé auto)
-  - [ ] Frontend : badge compteur + toast notification dans `AppLayout`
+  - [x] Frontend : badge compteur + toast notification dans `AppLayout`
 
 ### RAG & IA (enrichissement)
 
@@ -692,7 +696,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 ### Scrapers
 
-- [ ] 🤖 **`engine/scrapers/crypto_news_scraper.py`**
+- [x] 🤖 **`engine/scrapers/crypto_news_scraper.py`**
   - CoinDesk RSS, CryptoCompare public, Decrypt RSS
   - Fallback si NewsAPI quota épuisé
 
@@ -793,10 +797,10 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Page Signaux (200+ signaux) → liste virtualisée
   - Page Journal (historique long) → virtualisée
   - Page BRVM "Tous les titres" → déjà `max-h` mais doit être virtualisée
-- [ ] 🤖 **Code splitting par route** — déjà partiel, compléter
+- [x] 🤖 **Code splitting par route** — déjà partiel, compléter
   - Toutes les pages lourdes : `dynamic(() => import(...), { ssr: false, loading: () => <Skeleton/> })`
   - Cibler : `chart/`, `backtest/`, `ai/`, `deriv/`, futures : `scanner/`, `copilot/`, `memory/`
-- [ ] 🤖 **Image optimization** — `next/image` obligatoire, pas de `<img>` natif
+- [x] 🤖 **Image optimization** — `next/image` obligatoire, pas de `<img>` natif
 
 #### Scalabilité & Performance Python Engine
 - [x] 🤖 **Semaphores par source API** ✅
@@ -813,7 +817,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Jamais retourner de liste non bornée
 
 #### Responsivité
-- [ ] 🤖 **Breakpoints Tailwind standardisés** — `sm:640 md:768 lg:1024 xl:1280`
+- [x] 🤖 **Breakpoints Tailwind standardisés** — `sm:640 md:768 lg:1024 xl:1280`
   - Chaque nouvelle page doit être validée sur : 375px (iPhone SE), 768px (iPad), 1280px (desktop)
   - Règle : tester mobile **en premier** (Mobile First)
 - [ ] 🤖 **Touch targets ≥ 44px** sur mobile — boutons, liens, onglets
@@ -828,7 +832,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [ ] 🤖 **Fermeture propre des connexions Python**
   - WS Deriv : `on_disconnect` handler → cleanup subscriptions
   - Pools asyncio : bounded `ThreadPoolExecutor` avec shutdown sur SIGTERM
-- [ ] 🤖 **Limiter le volume de données WebSocket**
+- [x] 🤖 **Limiter le volume de données WebSocket**
   - Ne pusher que les diffs (`{symbol, price, delta}`) pas les objets complets
   - Batch updates : regrouper les updates de prix toutes les 500ms côté serveur
 
@@ -838,10 +842,10 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [x] 🤖 **Optimistic UI** sur mutations critiques (portfolio : `closePosition` + `updateTrailingStop`)
   - Ouvrir/fermer position : UI update immédiat, rollback si erreur ✅
   - Lancer scan : spinner inline sur le bouton, pas de page freeze
-- [ ] 🤖 **Prefetch intelligent** — charger les données probables avant navigation
+- [x] 🤖 **Prefetch intelligent** — charger les données probables avant navigation
   - Hover sur "Chart" → prefetch klines de l'actif sélectionné
   - Hover sur signal → prefetch détails du signal
-- [ ] 🤖 **SWR / TanStack Query staleTime par type de donnée**
+- [x] 🤖 **SWR / TanStack Query staleTime par type de donnée**
   - Prix live : `staleTime: 0` (toujours frais via WS)
   - Signaux : `staleTime: 30_000`
   - Historique backtest : `staleTime: 300_000`
@@ -875,20 +879,20 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 #### Authentification & Autorisation
 - [x] 🤖 **JWT + Refresh token rotation** ✅
 - [x] 🤖 **Rate limiting brute force** ✅ (10 req/min sur `/auth/login`)
-- [ ] 🤖 **2FA TOTP**
+- [x] 🤖 **2FA TOTP**
   - `speakeasy` (Node) → QR code + vérification 6 chiffres
   - 10 backup codes à usage unique, hashés en DB
   - Obligatoire si compte avec trades réels
-- [ ] 🤖 **Row Level Security (RLS) — PostgreSQL**
+- [x] 🤖 **Row Level Security (RLS) — PostgreSQL**
   - Isolation des données user au niveau DB (pas uniquement ORM) — critique multi-tenant
   - Tables concernées : `signals`, `positions`, `journal_entries`, `strategies`, `portfolios`
   - Policy : `USING (user_id = current_setting('app.current_user_id')::uuid)`
-- [ ] 🤖 **Scopes d'autorisation par plan**
+- [x] 🤖 **Scopes d'autorisation par plan**
   - Middleware NestJS `@RequiresPlan('pro')` sur routes avancées (on-chain, synthetic, memory)
   - Vérification plan en DB (pas dans le JWT — évite tokens périmés)
 
 #### Données sensibles
-- [ ] 🤖 **Chiffrement données sensibles en DB**
+- [x] 🤖 **Chiffrement données sensibles en DB**
   - Tokens Deriv / clés API stockées par user → `AES-256-GCM` avant insert
   - Clé de chiffrement dans `.env` uniquement (jamais en DB)
 - [ ] 🤖 **Logs sans données sensibles**
@@ -950,11 +954,11 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 #### Canaux
 - [x] 🤖 **SSE** ✅ — signaux + SL/TP déjà actifs
-- [ ] 🤖 **Web Push (PWA)** — notification navigateur même app fermée
+- [x] 🤖 **Web Push (PWA)** — notification navigateur même app fermée
   - `web-push` (Node) + Service Worker Next.js
   - Permission après 1ère connexion réussie
   - Payload : `{title: "BTC BUY 82%", body: "Entrée: 104200-104500", url: "/chart/BTC"}`
-- [ ] 🤖 **Telegram Bot**
+- [x] 🤖 **Telegram Bot**
   - `node-telegram-bot-api` + commandes `/alerts on|off`, `/status`
   - Lier compte via code temporaire 6 chiffres (expire 10min)
   - Format : `📈 BTC/USDT BUY | Confiance: 82% | SL: 103100 | TP1: 105800`
@@ -972,7 +976,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Notifier seulement si `Opportunity Score > seuil_user` (configurable)
   - Max N notifications/heure par canal (1 / 3 / 5 / illimité selon plan)
   - Regroupement : 3 signaux en 30s → 1 notif groupée
-- [ ] 🤖 **Page `/settings/notifications`**
+- [x] 🤖 **Page `/settings/notifications`**
   - Toggle par type + par canal + quiet hours (`from: 22:00, to: 07:00`)
   - Seuil minimum confiance pour recevoir une alerte (ex: ≥ 70%)
 - [ ] 🤖 **Notification dégradation signal**
@@ -1008,7 +1012,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Jamais renommer directement : ajouter nouvelle → migrer data → supprimer ancienne
 
 #### Connection Pooling
-- [ ] 🤖 **PgBouncer** — pool de connexions
+- [x] 🤖 **PgBouncer** — pool de connexions
   - Sans pooler : chaque requête = 1 connexion PostgreSQL (limite ~100)
   - `transaction mode` : pool partagé tous workers — critique dès >10 users simultanés
   - Config : `max_client_conn=100`, `default_pool_size=20`
@@ -1062,7 +1066,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - 70% **Unitaires** : fonctions pures, services isolés (rapides, nombreux)
   - 20% **Intégration** : service + DB (Prisma in-memory / test DB)
   - 10% **E2E** : flux utilisateur complet (lents, peu nombreux)
-- [ ] 🤖 **Coverage reporting** — activer et surveiller
+- [x] 🤖 **Coverage reporting** — activer et surveiller
   - NestJS : `jest --coverage` → rapport HTML dans `coverage/`
   - Python : `pytest --cov=. --cov-report=html`
   - Next.js : `jest --coverage`
@@ -1128,7 +1132,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [ ] `calibration_score()` : prédictions 80% gagnent 50% → calibration FAIL
 
 ##### `test_scan.py` — Compléments (tests existants à étendre)
-- [ ] `analyze_candles()` sur actif `SYNTHETIC` → pipeline synthétique appelé (pas SMC)
+- [x] `analyze_candles()` sur actif `SYNTHETIC` → pipeline synthétique appelé (pas SMC)
 - [ ] `analyze_candles()` sur actif `CRYPTO` → on-chain bonus appliqué si data dispo
 - [ ] `analyze_candles()` sur actif `FOREX` → macro calendar factor appliqué
 - [ ] `regime_filter()` : signal BUY en régime BEAR_STRONG → `allowed = False`
@@ -1153,7 +1157,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [x] `resolveOutcomes()` : SL atteint avant TP → outcome `LOSS_SL` ✅
 - [x] `resolveOutcomes()` : TP2 atteint → outcome `WIN_TP2` ✅
 - [x] `resolveOutcomes()` : symbole non-Binance + âge > 5j → outcome `EXPIRED` ✅
-- [ ] `resolveOutcomes()` : N bougies sans résultat → outcome `EXPIRED`
+- [x] `resolveOutcomes()` : N bougies sans résultat → outcome `EXPIRED`
 - [x] `getStats()` : win rates calculés + cas vide (null) ✅
 - [x] Bonus : résilience — erreur DB dans `logSignal` et erreur Binance dans `resolveOutcomes` ne cassent pas le flux ✅
 
@@ -1169,31 +1173,31 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [ ] `scan()` : rate limit dépassé → erreur `RATE_LIMITED` (pas 500)
 - [ ] `scan()` : engine down → erreur gracieuse avec message clair
 - [ ] `findAll()` : pagination curseur correcte — `lastId` retourne suite correcte
-- [ ] `findAll()` : filtre `market=CRYPTO` → uniquement signaux crypto
+- [x] `findAll()` : filtre `market=CRYPTO` → uniquement signaux crypto
 
 ##### `portfolios.service.spec.ts` — Compléments
-- [ ] `openPosition()` : RR < 1.0 → rejeté avec erreur `RR_TOO_LOW`
-- [ ] `openPosition()` : drawdown > 10% → bloqué par `DrawdownGuard`
-- [ ] `openPosition()` : position déjà ouverte sur même actif → erreur `DUPLICATE_POSITION`
-- [ ] `closePosition()` : position inexistante → `NotFoundException`
+- [x] `openPosition()` : RR < 1.0 → rejeté avec erreur `RR_TOO_LOW`
+- [x] `openPosition()` : drawdown > 10% → bloqué par `DrawdownGuard`
+- [x] `openPosition()` : position déjà ouverte sur même actif → erreur `DUPLICATE_POSITION`
+- [x] `closePosition()` : position inexistante → `NotFoundException`
 
 ---
 
 #### ⚛️ Next.js — Tests à ajouter
 
 ##### `SignalCard.spec.tsx` — Nouveau composant enrichi
-- [ ] Render avec signal `ACTIVE` → badge vert visible
-- [ ] Render avec signal `INVALIDATED` → badge rouge + card grisée
-- [ ] `entry_zone` affichée → deux valeurs visibles (range)
+- [x] Render avec signal `ACTIVE` → badge vert visible
+- [x] Render avec signal `INVALIDATED` → badge rouge + card grisée
+- [x] `entry_zone` affichée → deux valeurs visibles (range)
 - [x] TP1/TP2/TP3 avec probabilités → 3 lignes affichées ✅
-- [ ] Clic "Pourquoi ?" → section raisons scorées s'expand
-- [ ] Clic "Pourquoi PAS ?" → section risques s'expand
+- [x] Clic "Pourquoi ?" → section raisons scorées s'expand
+- [x] Clic "Pourquoi PAS ?" → section risques s'expand
 - [ ] `React.memo` : prix change mais signal inchangé → pas de re-render (test avec `renderCount`)
 
 ##### `useTradingStore.spec.ts` — Store Zustand
 - [ ] `setPrice()` : mise à jour d'un seul symbole → autres symboles inchangés
 - [ ] `fetchSignals()` : appel en cours → deuxième appel ignoré (`signalsLoading = true`)
-- [ ] `fetchSignals()` : cache valide (< 30s) → pas de nouveau fetch réseau
+- [x] `fetchSignals()` : cache valide (< 30s) → pas de nouveau fetch réseau
 - [ ] `fetchSignals()` : force=true → fetch même si cache valide
 - [ ] `setSignals()` : met à jour `signalsFetchedAt` avec timestamp actuel
 
@@ -1210,10 +1214,10 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 - [ ] Actif CRYPTO passé par erreur → message d'erreur "Marché non synthétique"
 
 ##### `MarketScanner.spec.tsx` (à créer avec la page)
-- [ ] 0 résultats → empty state "Aucune opportunité détectée"
-- [ ] Tri par Opportunity Score → ordre décroissant vérifié
+- [x] 0 résultats → empty state "Aucune opportunité détectée"
+- [x] Tri par Opportunity Score → ordre décroissant vérifié
 - [ ] Filtre FOREX sélectionné → seuls les signaux FOREX affichés
-- [ ] Loading state → skeleton visible (pas de flash blanc)
+- [x] Loading state → skeleton visible (pas de flash blanc)
 
 ---
 
@@ -1221,9 +1225,9 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 - [ ] 🤖 **`scan → signalLog → resolveOutcomes`** — flux complet
   - Lancer un scan → vérifier `SignalLog` créé → simuler prix → vérifier outcome mis à jour
-- [ ] 🤖 **`auth → refresh → logout`** — flux token
+- [x] 🤖 **`auth → refresh → logout`** — flux token
   - Register → login → refresh → vérifier ancien token révoqué → logout → vérifier tous révoqués
-- [ ] 🤖 **`openPosition → watcher → closePosition`** — flux paper trading
+- [x] 🤖 **`openPosition → watcher → closePosition`** — flux paper trading
   - Ouvrir position BUY → simuler prix SL → vérifier position fermée + journal créé
 - [ ] 🤖 **`notification → canaux`** — flux notification
   - Signal créé confiance > 70 → vérifier `notifications` table + SSE envoyé
@@ -1237,11 +1241,11 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - [x] `ruff check` Python ajouté au job engine ✅
   - [x] Coverage check : seuils anti-régression dans `jest.config` (api + web), CI passe en `--coverage` ✅
     - Actuel : API ~45% lignes / Web ~68% lignes — objectif 80% encore loin, seuils remontés progressivement
-- [ ] 🤖 **Test database isolée**
+- [x] 🤖 **Test database isolée**
   - NestJS tests : `DATABASE_URL` pointe sur DB test (pas prod)
   - `beforeEach` : reset DB avec fixtures minimales
   - `afterAll` : cleanup complet
-- [ ] 🤖 **Mocks standardisés**
+- [x] 🤖 **Mocks standardisés**
   - `__mocks__/prisma.ts` — mock Prisma réutilisable dans tous les `.spec.ts`
   - `__mocks__/redis.ts` — mock Redis pour les tests engine
   - `fixtures/signals.ts`, `fixtures/positions.ts` — données de test réutilisables
@@ -1320,12 +1324,12 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 - [x] 🤖 **Refresh token rotation** ✅ — déjà implémenté (voir section Sécurité MVP)
 
-- [ ] 🤖 **Audit trail**
+- [x] 🤖 **Audit trail**
   - Table `audit_logs(userId, action, entity, entityId, metadata, timestamp)`
   - Logger : login, open/close position, strategy change, backtest lancé
   - Endpoint admin : `GET /admin/audit-logs`
 
-- [ ] 🤖 **2FA TOTP**
+- [x] 🤖 **2FA TOTP**
   - Optionnel MVP, obligatoire si compte avec trades réels
   - `speakeasy` (Node) → QR code → vérification code 6 chiffres
 
@@ -1337,11 +1341,11 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Région : Nuremberg ou Helsinki
   - OS : Ubuntu 24.04 LTS
 - [ ] 👤 Pointer domaine DNS → IP VPS
-- [ ] 🤖 `docker-compose.prod.yml` avec tous les services
-- [ ] 🤖 `Dockerfile` NestJS API + Next.js Web
+- [x] 🤖 `docker-compose.prod.yml` avec tous les services
+- [x] 🤖 `Dockerfile` NestJS API + Next.js Web
 - [ ] 🤖 Nginx reverse proxy + SSL Let's Encrypt
-- [ ] 🤖 Script `deploy.sh` (pull → build → restart)
-- [ ] 🤖 Health checks Docker Compose
+- [x] 🤖 Script `deploy.sh` (pull → build → restart)
+- [x] 🤖 Health checks Docker Compose
 - [ ] 🤖 Backup automatique PostgreSQL (pg_dump cron quotidien)
 - [ ] 👤 Configurer secrets GitHub pour CI/CD optionnel
 
@@ -1350,11 +1354,11 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 ## 📊 Features UX (post-déploiement)
 
 - [ ] 🤖 **Alertes prix** — notif SSE + email quand prix cible atteint
-- [ ] 🤖 **Multi-compte** — plusieurs portfolios par user
+- [x] 🤖 **Multi-compte** — plusieurs portfolios par user
 - [ ] 🤖 **Export CSV/PDF** — journal + rapport performance
-- [ ] 🤖 **Calendrier économique** — page dédiée FOMC, NFP, CPI, BRVM events
-- [ ] 🤖 **Page "Early Alpha"** — presale scanner + on-chain asymétrique
-- [ ] 🤖 **Heatmap marchés** — vue globale état on-chain par actif
+- [x] 🤖 **Calendrier économique** — page dédiée FOMC, NFP, CPI, BRVM events
+- [x] 🤖 **Page "Early Alpha"** — presale scanner + on-chain asymétrique
+- [x] 🤖 **Heatmap marchés** — vue globale état on-chain par actif
 - [ ] 👤 **Application mobile** — React Native ou PWA (futur)
 
 ### 🗺️ Nouvelles Pages & Composants — Carte complète
@@ -1395,7 +1399,7 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Toggle indicateurs / niveaux / annotations
   - `/chart` continue à fonctionner en mode `search` avec Suspense
 
-- [ ] 🤖 **Refactor `components/signals/SignalCard.tsx`** — Signal Object vivant complet
+- [x] 🤖 **Refactor `components/signals/SignalCard.tsx`** — Signal Object vivant complet
   - Remplacer la card actuelle par le format enrichi
   - Sous-composants :
     - `SignalCardHeader.tsx` — symbol + direction + status badge `ACTIVE/WAIT/APPROACHING/INVALIDATED`
@@ -1486,11 +1490,11 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
   - Log `{timestamp, probability, reason}` à chaque recalcul
   - Affichage courbe probabilité dans la carte signal
 
-- [ ] 🤖 **Mode débutant / professionnel**
+- [x] 🤖 **Mode débutant / professionnel**
   - Débutant : `BUY USDJPY ⭐⭐⭐⭐ | Risque: Modéré | Attendre: 162.20`
   - Pro : BOS_score 91, liquidity_swept, FVG 64% fill, Order Flow delta+, confidence 78.4%
 
-- [ ] 🤖 **AI Conversation Layer — Market Copilot** (Ch.18 + Ch.21)
+- [x] 🤖 **AI Conversation Layer — Market Copilot** (Ch.18 + Ch.21)
   - L'utilisateur demande : "Analyse BTC maintenant / Compare avec 2021 / Pourquoi ce signal ?"
   - L'IA utilise données live + mémoire historique + modèles — pas un chatbot classique
   - Différence produit : analyste connecté au marché en temps réel
@@ -1701,10 +1705,10 @@ Phase D+           → Trading Copilot UX (Signal vivant + Why/Why not + Timelin
 
 #### Tâches à faire
 
-- [ ] 🤖 **Champ `profileSuitability` sur `Signal`** : tableau de profils compatibles, calculé par `scan.py`.
-- [ ] 🤖 **Fonction `compute_profile_suitability`** : mappe timeframe / confiance / R/R vers profils.
-- [ ] 🤖 **Endpoint `/signals` avec filtre `?profile=`** : permet de filtrer par profil cible.
-- [ ] 🤖 **Badges profils sur les cartes signaux** : affichage visuel dans le frontend.
+- [x] 🤖 **Champ `profileSuitability` sur `Signal`** : tableau de profils compatibles, calculé par `scan.py`.
+- [x] 🤖 **Fonction `compute_profile_suitability`** : mappe timeframe / confiance / R/R vers profils.
+- [x] 🤖 **Endpoint `/signals` avec filtre `?profile=`** : permet de filtrer par profil cible.
+- [x] 🤖 **Badges profils sur les cartes signaux** : affichage visuel dans le frontend.
 - [x] 🤖 **Sizing et R/R adaptés au profil** ✅
   - `risk.py` : paramètre `profile` (conservative/moderate/aggressive) dans `RiskCalcRequest`
   - `profile_risk_adjustment` modifie `risk_pct`, R/R min/max et hard cap selon le profil
@@ -2005,22 +2009,22 @@ Une stratégie peut être approuvée uniquement pour les profils où elle perfor
 ### ⚡ Nouvelles priorités — Août 2026
 
 #### Phase A — Outcome Tracker + Feature Store automatique (CRITIQUE)
-- [ ] 🤖 **Outcome Tracker** : job périodique qui vérifie les signaux BUY/SELL des dernières 24h
+- [x] 🤖 **Outcome Tracker** : job périodique qui vérifie les signaux BUY/SELL des dernières 24h
   - Récupère le prix actuel, compare avec entry/SL/TP1/TP2
   - Label: WIN_TP1, WIN_TP2, LOSS_SL, EXPIRED, STILL_OPEN
   - Stocke dans `signal_features.outcome` + `pnl`
   - Objectif: 5000+ signaux labellisés pour entraîner le ML
-- [ ] 🤖 **Feature Store automatique** : à chaque signal BUY/SELL, stocker features dans `signal_features`
+- [x] 🤖 **Feature Store automatique** : à chaque signal BUY/SELL, stocker features dans `signal_features`
   - Pas juste 14 records — tous les signaux
   - Inclure sentiment news, on-chain, volume profile, time since last BOS
 
 #### Phase B — Position Management Engine (RENTABLE)
 - [ ] 🤖 **Pyramiding** : ajouter des positions quand le signal se confirme
 - [ ] 🤖 **Scaling out** : sortir en plusieurs tranches (50% à TP1, 30% à TP2, 20% à TP3)
-- [ ] 🤖 **Trailing stop adaptatif** : déjà implémenté (4 méthodes) — connecter au position management
+- [x] 🤖 **Trailing stop adaptatif** : déjà implémenté (4 méthodes) — connecter au position management
 
 #### Phase C — Text-to-Strategy (DIFFÉRENCIATEUR SaaS)
-- [ ] 🤖 **Endpoint `/strategies/from-text`** : LLM génère le JSON rules depuis une description texte
+- [x] 🤖 **Endpoint `/strategies/from-text`** : LLM génère le JSON rules depuis une description texte
   - User: "J'analyse les support et résistance en D1, H4, H1 avant de penser à l'analyse chartiste"
   - LLM → génère rules JSON compatible `Strategy.rules`
   - Validation du JSON + sauvegarde en base
@@ -2029,20 +2033,20 @@ Une stratégie peut être approuvée uniquement pour les profils où elle perfor
 #### Phase D — Dashboard Admin enrichi
 - [ ] 🤖 **Vue temps réel** des scans en cours (WebSocket)
 - [ ] 🤖 **Vue historique** des signaux (graphes, pas juste compteurs)
-- [ ] 🤖 **Vue performance par stratégie** (win rate, PnL)
+- [x] 🤖 **Vue performance par stratégie** (win rate, PnL)
 - [ ] 🤖 **Vue data flow** (source → fetch → analyze → cache → DB → signal)
-- [ ] 🤖 **Vue santé système** (Redis, DB, API sources)
+- [x] 🤖 **Vue santé système** (Redis, DB, API sources)
 Timing engine?  Thinking engine?
 le superadmin pourrait recevoir des conseils d'optimisation? supposons aussi qu'un user met une strategie dont les element n'etait pas implementer dans notre systeme
 
 #### Phase E — Gold Specialist Strategy
-- [ ] 🤖 **Stratégie dédiée XAU/USD** : corrélation DXY inverse, sessions London/NY, safe haven en VOLATILE, ATR adapté
+- [x] 🤖 **Stratégie dédiée XAU/USD** : corrélation DXY inverse, sessions London/NY, safe haven en VOLATILE, ATR adapté
 
 #### Phase F — News filter tous marchés
-- [ ] 🤖 **Étendre news filter** à crypto/commodités (pas juste forex)
+- [x] 🤖 **Étendre news filter** à crypto/commodités (pas juste forex)
 
 #### Phase G — Risk cross-position
-- [ ] 🤖 **Corrélation entre positions simultanées** : limiter l'exposition sur actifs corrélés
+- [x] 🤖 **Corrélation entre positions simultanées** : limiter l'exposition sur actifs corrélés
 
 ### 0. Passer de la lecture du marché à la prédiction du prochain pas
 
@@ -2104,7 +2108,7 @@ le superadmin pourrait recevoir des conseils d'optimisation? supposons aussi qu'
   - [x] 🤖 Score `P(bullish_next_X_bars)` / `P(bearish_next_X_bars)` — v1 heuristique via `compute_dps()` (confidence + regime + mtf + volume), pas encore un modèle statistique entraîné sur outcomes réels
   - [x] 🤖 Expected move : projection haut/bas basée sur ATR + structure. ✅ `compute_expected_move()`
   - [x] 🤖 Trigger Probability Score (TPS) pour les modes RETEST/LIMIT. ✅ `compute_tps()`
-  - [ ] 🤖 ML Signal Success Predictor (`P(win)`) — nécessite un modèle entraîné (XGBoost/logistic) sur `SignalLog`/outcomes, pas fait
+  - [x] 🤖 ML Signal Success Predictor (`P(win)`) — nécessite un modèle entraîné (XGBoost/logistic) sur `SignalLog`/outcomes, pas fait
   - [x] 🤖 Liquidity Sweep Predictor ✅ — `ml/predictive_features.py::detect_liquidity_sweep()`
     - EQH/EQL proches, détection de fakeout (mèche au-delà + clôture retour), direction et niveau cible
   - [x] 🤖 Compression → Expansion Detector ✅ — `ml/predictive_features.py::detect_compression_expansion()`
@@ -2207,15 +2211,15 @@ le superadmin pourrait recevoir des conseils d'optimisation? supposons aussi qu'
 - **Problème** : le moteur est principalement technique/sentiment.
 - **Conséquence** : pas d'alpha asymétrique réel (crypto on-chain, macro forex, fondamentaux BRVM).
 - **À faire** :
-  - [ ] 🤖 Fear & Greed, funding rates, exchange flows, MVRV, OI.
+  - [x] 🤖 Fear & Greed, funding rates, exchange flows, MVRV, OI.
   - [ ] 🤖 Calendrier économique Forex + DXY momentum + COT report.
   - [ ] 🤖 Fondamentaux BRVM (P/E, dividendes, revenus, rapports émetteurs).
-  - [ ] 🤖 Début DEX / memecoins (Helius/Birdeye/dRPC) — Phase C/D.
+  - [x] 🤖 Début DEX / memecoins (Helius/Birdeye/dRPC) — Phase C/D.
 
 ### 9. Fiabilité et scalabilité
 
 - **À surveiller** :
-  - [ ] WebSocket Binance : reconnexion, heartbeat, gestion des déconnexions.
+  - [x] WebSocket Binance : reconnexion, heartbeat, gestion des déconnexions.
   - [ ] Rate limiting Twelve Data / Coinglass / CryptoQuant.
   - [x] Tests unitaires NestJS critiques (auth, positions, watcher) manquants. ✅
   - [ ] Migrations Prisma strictes (`prisma migrate deploy` en prod).
@@ -2507,7 +2511,7 @@ Nouveau router `engine/routers/options.py` (~100 lignes) :
 
 ### Phase H — Daily Pulse & News Aggregation
 
-- [ ] 🤖 **`engine/routers/daily_pulse.py`** — Brief matinal automatisé
+- [x] 🤖 **`engine/routers/daily_pulse.py`** — Brief matinal automatisé
   - Cron 6h UTC : compile news + market summary via LLM
   - Sources : RSS feeds (CoinDesk, Bloomberg, Reuters, CoinTelegraph) + economic calendar + market data
   - Output : brief structuré (What changed overnight, Why it matters, What to watch next)
@@ -2515,26 +2519,26 @@ Nouveau router `engine/routers/options.py` (~100 lignes) :
   - Push notification aux users actifs
   - Dépendances : `_call_llm_with_fallback` (existant), nouveaux scrapers RSS
 
-- [ ] 🤖 **`engine/scrapers/rss_aggregator.py`** — RSS feeds multi-sources
+- [x] 🤖 **`engine/scrapers/rss_aggregator.py`** — RSS feeds multi-sources
   - CoinDesk, CoinTelegraph, Bloomberg Markets, Reuters Finance, Decrypt
   - Cache 1h, deduplication par hash titre
   - Alimente Daily Pulse + RAG
 
 ### Phase I — ML Scoring Avancé (XGBoost + FinBERT)
 
-- [ ] 🤖 **XGBoost sur SignalFeature** — entraîner P(TP1 hit) sur nos outcomes
+- [x] 🤖 **XGBoost sur SignalFeature** — entraîner P(TP1 hit) sur nos outcomes
   - Dataset : `SignalFeature` + `SignalLog` (outcome) déjà en DB
   - Remplace progressivement le k-NN actuel
   - Shadow mode d'abord → comparer ML vs rule-based
   - `POST /ml/train-xgboost` → fit → save → deploy
 
-- [ ] 🤖 **FinBERT local** — sentiment NLP à bas coût
+- [x] 🤖 **FinBERT local** — sentiment NLP à bas coût
   - HuggingFace `ProsusAI/finbert` ou `yiyanghkust/finbert-tone`
   - Batch processing : des milliers de tweets/articles sans payer OpenAI
   - LLM (GPT-4o) réservé au Daily Pulse et analyses approfondies
   - Intégré dans `social_sentiment.py` comme fallback/complément LunarCrush
 
-- [ ] 🤖 **Token Grade 0-100** — score agrégé multi-couches
+- [x] 🤖 **Token Grade 0-100** — score agrégé multi-couches
   - Note technique (notre score actuel normalisé)
   - Note on-chain (onchain_bonus normalisé)
   - Note sociale (social_bonus normalisé)
@@ -2544,7 +2548,7 @@ Nouveau router `engine/routers/options.py` (~100 lignes) :
 
 ### Phase J — US Stocks & Indices
 
-- [ ] 🤖 **Ajout US stocks/indices** — NASDAQ, S&P500, AAPL, TSLA, etc.
+- [x] 🤖 **Ajout US stocks/indices** — NASDAQ, S&P500, AAPL, TSLA, etc.
   - `get_asset_type()` → nouveau type `US_STOCK`
   - Data : YFinance (15min delay gratuit) ou Polygon.io (temps réel, free tier 5 req/min)
   - Seed : ajouter actifs US majeurs
@@ -2554,13 +2558,13 @@ Nouveau router `engine/routers/options.py` (~100 lignes) :
 
 ### Phase K — YouTube & Social Sentiment
 
-- [ ] 🤖 **`engine/routers/youtube_sentiment.py`** — Transcript analysis
+- [x] 🤖 **`engine/routers/youtube_sentiment.py`** — Transcript analysis
   - YouTube Data API v3 (gratuit, 10k quota/jour)
   - Chaînes : Coin Bureau, Token Metrics podcast, Bloomberg Crypto
   - Pipeline : transcript → FinBERT/LLM → sentiment score → bonus dans scan.py
   - Cache 24h par vidéo
 
-- [ ] 🤖 **Reddit API sentiment** — r/CryptoCurrency, r/Bitcoin, r/StockMarket
+- [x] 🤖 **Reddit API sentiment** — r/CryptoCurrency, r/Bitcoin, r/StockMarket
   - Reddit API (gratuit, 100 req/min)
   - Hot posts → FinBERT → sentiment score
   - Intégré dans `social_sentiment.py`
@@ -2573,12 +2577,12 @@ Nouveau router `engine/routers/options.py` (~100 lignes) :
   - Adaptation bull/bear cycle
   - `engine/routers/portfolio_rebalancing.py`
 
-- [ ] 🤖 **Hidden Gems screener** — détection altcoins sous-évalués
+- [x] 🤖 **Hidden Gems screener** — détection altcoins sous-évalués
   - Critères : TVL croissant + price flat + developer activity + low market cap
   - `engine/routers/hidden_gems.py`
   - Page dédiée "Early Alpha" dans le frontend
 
-- [ ] 🤖 **AI Portfolio Defense Report** — analyse automatique du portefeuille
+- [x] 🤖 **AI Portfolio Defense Report** — analyse automatique du portefeuille
   - LLM analyse : exposition, corrélation, drawdown, suggestions
   - `POST /ai/portfolio-defense`
   - Rapport hebdomadaire pushé aux users Premium

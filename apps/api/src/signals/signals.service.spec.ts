@@ -15,11 +15,13 @@ import { EngineHttpService } from '../engine/engine-http.service';
 import { SystemHealthService } from '../system-health/system-health.service';
 import { SignalTrackerService } from './signal-tracker.service';
 import { SignalStatsService } from './signal-stats.service';
+import { SignalPersistenceService } from './signal-persistence.service';
 import { CronConfigService } from '../admin/cron-config.service';
 import { ConfigService } from '@nestjs/config';
 
 describe('SignalsService', () => {
   let service: SignalsService;
+  let persistence: SignalPersistenceService;
 
   const mockPrisma = {
     asset: {
@@ -108,6 +110,7 @@ describe('SignalsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SignalsService,
+        SignalPersistenceService,
         SignalOutcomeService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EngineHttpService, useValue: mockEngineHttp },
@@ -130,6 +133,7 @@ describe('SignalsService', () => {
     }).compile();
 
     service = module.get<SignalsService>(SignalsService);
+    persistence = module.get<SignalPersistenceService>(SignalPersistenceService);
     jest.clearAllMocks();
     mockEngineHttp.get.mockImplementation((path: string) => {
       // Return mock candle data for /candles/ endpoints (used by predictMlRegime)
@@ -167,7 +171,7 @@ describe('SignalsService', () => {
     it('should save high-confidence BUY signals and notify', async () => {
       mockRegimePredict.mockResolvedValueOnce({ regimes: ['NORMAL'] });
       const fetchSpy = jest
-        .spyOn<any, any>(service as any, 'fetchExpectedMove')
+        .spyOn<any, any>(persistence as any, 'fetchExpectedMove')
         .mockResolvedValue({ close: 100, ranges: [{ move_pct: 2 }, { move_pct: 1.5 }, { move_pct: 0.8 }] });
       mockEngineHttp.post.mockResolvedValue({
           results: [
@@ -202,7 +206,7 @@ describe('SignalsService', () => {
 
     it('handles missing expected move data', async () => {
       const fetchSpy = jest
-        .spyOn<any, any>(service as any, 'fetchExpectedMove')
+        .spyOn<any, any>(persistence as any, 'fetchExpectedMove')
         .mockResolvedValue(null);
       mockEngineHttp.post.mockResolvedValue({
         results: [
@@ -515,14 +519,14 @@ describe('SignalsService', () => {
     });
 
     it('returns saved signal on success', async () => {
-      const saveSpy = jest.spyOn(service as any, 'saveSignals').mockResolvedValue([{ id: 's1' }]);
+      const saveSpy = jest.spyOn(persistence as any, 'saveSignals').mockResolvedValue([{ id: 's1' }]);
       const result = await service.ingestSignal({ signal: 'BUY', confidence: 80, symbol: 'BTC/USDT' });
       expect(result).toEqual({ id: 's1' });
       expect(saveSpy).toHaveBeenCalledWith([{ signal: 'BUY', confidence: 80, symbol: 'BTC/USDT' }], '*');
     });
 
     it('returns null and warns when save fails', async () => {
-      jest.spyOn(service as any, 'saveSignals').mockRejectedValue(new Error('db'));
+      jest.spyOn(persistence as any, 'saveSignals').mockRejectedValue(new Error('db'));
       const result = await service.ingestSignal({ signal: 'BUY', confidence: 80, symbol: 'BTC/USDT' });
       expect(result).toBeNull();
     });

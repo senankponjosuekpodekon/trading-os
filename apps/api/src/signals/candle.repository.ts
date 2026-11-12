@@ -7,6 +7,6 @@ export interface Candle {
 }
 
 export abstract class CandleRepository {
-  abstract getSince(symbol: string, timeframe: string, since: Date): Promise<Candle[]>;
+  abstract getSince(symbol: string, timeframe: string, since: Date, until?: Date): Promise<Candle[]>;
   abstract getLowerTimeframeWindow(symbol: string, timeframe: string, candleOpenTime: number): Promise<Candle[]>;
 }

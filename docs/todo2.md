@@ -171,10 +171,10 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 **Objectif** : production sereine.
 
 - [x] CI/CD tests + build. ✅ jobs `api`/`web`/`engine`/`docker` verts dans `.github/workflows/ci.yml`
-- [ ] Déploiement auto (push image + run VPS) — hors repo, à configurer côté hébergeur
-- [ ] Sécurité (authz, CORS, secrets, validation inputs).
-- [ ] Performance : workers, queue Redis, pagination, DB.
-- [ ] Monitoring : métriques, alertes, error tracking.
+- [x] Déploiement auto (push image + run VPS). ✅ `deploy.yml` (workflow_dispatch → SSH VPS → `docker-compose.prod.yml up -d`) + GHCR via `build-and-push.yml`
+- [x] Sécurité (authz, CORS, secrets, validation inputs). ✅ 2FA TOTP, RLS Postgres, chiffrement exchange keys, rate-limit par user, WS auth engine, CSRF origin-check, CSP/security headers (audit 11/2026)
+- [ ] Performance : workers, queue Redis, pagination, DB. ⚠️ partiel — BullMQ présent ; manque : pagination curseur, `connection_limit`, archivage données froides, soft-delete
+- [x] Monitoring : métriques, alertes, error tracking. ✅ Sentry (api+web), Prometheus `/metrics`, Loki/Grafana, SystemHealthService
 
 **DOD** : déploiement auto, scan < 2 min pour actifs prioritaires.
 
@@ -208,6 +208,42 @@ Plan de sprints remanié après audit de `TODO.md` et de l’état du code. Visi
 
 - Vulnérabilités npm : 5 signalées dans le web (1 moderate, 4 high)
 - Tests E2E réels contre Postgres
-- Couverture tests > 80 % sur `signals`, `positions`, `auth`
+- Couverture tests > 80 % sur `signals`, `positions`, `auth` (seuils Jest relevés à 55/45/48/55 — palier suivant 80)
 - Migration Next.js 15 / ESLint 9
 - Dockerfile API multi-stage + lockfile
+
+---
+
+## 5. Backlog consolidé — triage TODO.md du 12/11/2026
+
+211 items historiques revérifiés contre le code : **80 implémentés** (cochés
+dans `TODO.md`), ~70 partiels, ~45 réellement ouverts, 16 actions externes
+(clés API, DNS, tests manuels d'acceptation).
+
+### À faire — priorité haute
+
+- [ ] **SMTP** : `mail.service.ts` existe, mais `auth.controller.ts:176` non câblé + ne plus logger `resetUrl` (`mail.service.ts:56`)
+- [ ] **Tests correctness critiques** : anti-lookahead BOS, SL-avant-TP même bougie, déduction spread+commission, exclusion dernière bougie non-clôturée, `regime_filter` BUY/BEAR_STRONG, calibration 80%→win-rate
+- [ ] **Pagination curseur** sur grandes tables (`signals.service.ts` utilise encore `skip`/OFFSET)
+- [ ] **Barrel exports** `components/`, `hooks/`, `lib/` (web)
+- [ ] **`@tanstack/react-virtual`** pour les listes longues
+- [ ] **Error boundaries par section** (aujourd'hui global uniquement)
+- [ ] **Dead Letter Queue** pour les tâches background engine
+- [ ] **Timeout global sur requêtes Prisma**
+- [ ] **Ingestion RAG quotidienne** (news → pgvector, dédup hash) + vectorisation du journal
+- [ ] **Notification dégradation de signal** (confidence drop → alerte user)
+
+### À faire — différenciateurs / long terme
+
+- [ ] **Market Memory vectoriel** : `market_memory.py` fait du matching catégoriel, pas de cosine similarity sur embeddings pgvector
+- [ ] **Rebalancing Markowitz** : `portfolio_rebalancing.py` = allocations fixes, cron placeholder
+- [ ] **Volume profile** (distribution volumes par niveau de prix) + momentum leading complet (ROC/Stoch/Williams %R)
+- [ ] **Multi-agents** : `ml/multi_agent.py` a 4 agents + orchestrateur, pas les 10 spécialisés visés
+- [ ] **Signal vivant** : recalcul de confidence post-émission
+- [ ] **PWA/mobile**, **Market Graph Engine** (pivots/GNN), read replicas, archivage cold data, soft-delete
+
+### Externe (hors repo)
+
+- [ ] Clés API : Coinglass, LunarCrush, CryptoQuant, Glassnode, DERIV_TOKEN
+- [ ] DNS → IP VPS, secrets GitHub, cron backup installé + test de restore
+- [ ] 9 tests manuels d'acceptation (auth, scan, portfolio, backtest, BRVM, Deriv, RAG, SSE)

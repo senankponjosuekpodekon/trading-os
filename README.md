@@ -32,16 +32,20 @@ trading-os/
 │   │   └── prisma/
 │   │       ├── schema.prisma  modèles DB
 │   │       └── seed.ts        données initiales
-│   ├── engine/       → FastAPI Python (port 8000)
+│   ├── engine/       → FastAPI Python (port 8000) — ~77 routers, principaux :
 │   │   ├── routers/
-│   │   │   ├── scan.py        scan multi-actifs (EMA/RSI/MACD/BB/SMC)
+│   │   │   ├── scan*.py       scan multi-actifs (14 modules : TA, SMC, hysteresis, moonshot…)
 │   │   │   ├── backtest.py    backtesting sur données historiques
-│   │   │   ├── llm.py         explications IA (GPT-4o / Ollama)
-│   │   │   ├── brvm.py        cours BRVM + signaux UEMOA
-│   │   │   ├── deriv.py       Deriv multi-indices (17 symboles)
-│   │   │   ├── rag.py         RAG embeddings + pgvector
-│   │   │   ├── risk.py        risk engine (position sizing)
-│   │   │   └── ws.py          WebSocket prix temps réel
+│   │   │   ├── llm.py / rag.py explications IA (GPT-4o / Ollama) + RAG pgvector
+│   │   │   ├── brvm.py        cours BRVM + rapports sociétés UEMOA
+│   │   │   ├── deriv.py       Deriv multi-indices + synthetic_engine / boom_crash_model
+│   │   │   ├── risk.py / portfolio_risk.py  risk engine (position sizing)
+│   │   │   ├── ml_*.py        ML : XGBoost, FinBERT, régimes, feedback loop
+│   │   │   ├── patterns.py / smc.py / sr_zones.py  détection de patterns
+│   │   │   ├── onchain*.py / whale_tracker.py / dex_discovery.py  crypto on-chain
+│   │   │   ├── news*.py / *_sentiment.py   sentiment (news, Reddit, X, YouTube)
+│   │   │   └── ws.py          WebSocket prix temps réel (auth X-Engine-Key)
+│   │   ├── ml/ patterns/ risk/ indicators/ features/ backtest/ scrapers/
 │   │   └── requirements.txt
 │   └── web/          → Next.js frontend (port 3000)
 │       └── src/app/
@@ -50,10 +54,9 @@ trading-os/
 │           ├── chart/         graphique bougies + marqueurs
 │           ├── portfolio/     positions ouvertes + historique + PnL live
 │           ├── backtest/      formulaire + courbe de capital
-│           ├── ai/            assistant IA + rapport hebdo
+│           ├── ai/            assistant IA + chat RAG + rapport hebdo
 │           ├── brvm/          marché BRVM (cours + movers)
 │           ├── deriv/         Deriv multi-indices (Boom/Crash/Jump/Step/Volatility)
-│           ├── ai/            assistant IA + chat RAG + rapport hebdo
 │           └── journal/       journal de trading auto
 ├── docker-compose.yml
 ├── dev.sh            → démarre tout en une commande
@@ -162,10 +165,15 @@ OPENAI_MODEL=gpt-4o
 | Service | Port | URL |
 |---------|------|-----|
 | Next.js Web | 3000 | http://localhost:3000 |
-| NestJS API | 3001 | http://localhost:3001/api |
+| NestJS API | 3001 (dev) / **3002** (docker host) | http://localhost:3001/api |
 | Python Engine | 8000 | http://localhost:8000/docs |
 | PostgreSQL | 5433 | localhost:5433 |
 | Redis | 6380 | localhost:6380 |
+| Grafana | 3003 | http://localhost:3003 |
+| Loki | 3100 | http://localhost:3100 |
+
+> En mode Docker Compose, l'API écoute en interne sur 3001 et est exposée sur
+> l'hôte via **3002** (`NEXT_PUBLIC_API_URL=http://localhost:3002`).
 
 ---
 
@@ -179,7 +187,7 @@ DB Password: trading_pass
 
 Compte super admin:
   Email:    admin@example.com
-  Password: admin123
+  Password: SEED_ADMIN_PASSWORD (ou ChangeMe123! en dev — à changer)
   Role:     SUPER_ADMIN
 ```
 
@@ -380,12 +388,13 @@ curl http://localhost:8000/health             # Engine
 
 Le seed (markets, assets, stratégies, super admin) s'exécute automatiquement au premier démarrage.
 
-### Compte super admin par défaut
+### Compte super admin
 ```
 Email:    admin@example.com
-Password: admin123
+Password: valeur de SEED_ADMIN_PASSWORD (obligatoire en production,
+          ChangeMe123! par défaut en dev uniquement)
 ```
-**⚠️ Changer le mot de passe après le premier déploiement.**
+**⚠️ En production le seed refuse de démarrer sans `SEED_ADMIN_PASSWORD`.**
 
 ---
 

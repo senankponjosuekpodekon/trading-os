@@ -114,7 +114,14 @@ async function main() {
     });
   }
 
-  const adminPassword = await bcrypt.hash('ChangeMe123!', 12);
+  // En production le mot de passe admin DOIT venir de SEED_ADMIN_PASSWORD —
+  // jamais de credential par défaut en environnement exposé.
+  const isProd = process.env.NODE_ENV === 'production';
+  const seedPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (isProd && !seedPassword) {
+    throw new Error('SEED_ADMIN_PASSWORD is required when seeding in production');
+  }
+  const adminPassword = await bcrypt.hash(seedPassword || 'ChangeMe123!', 12);
   const userPassword = await bcrypt.hash('ChangeMe123!', 12);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
@@ -536,7 +543,10 @@ async function main() {
   logger.info(`   Markets: ${markets.length}`);
   logger.info(`   Assets:  ${assets.length}`);
   logger.info(`   Strategies: ${allStrategies.length} (EMA Trend+RSI, MACD Momentum, BB Squeeze, SMC Retest, Scalper RSI, Swing Trend, BRVM Value Swing, Synthetic Mean Reversion)`);
-  logger.info(`   User: ${admin.email} / admin123 (role: ${admin.role})`);
+  logger.info(`   User: ${admin.email} (role: ${admin.role})`);
+  if (!seedPassword) {
+    logger.warn('   ⚠️  Admin seeded with default password — change it immediately (or set SEED_ADMIN_PASSWORD)');
+  }
 }
 
 main()

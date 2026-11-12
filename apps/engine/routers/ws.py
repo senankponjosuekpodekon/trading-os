@@ -4,7 +4,9 @@ WebSocket /ws/prices — prix live depuis Binance (via poll 3s)
 """
 import asyncio
 import json
+import os
 import random
+import secrets
 import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Set
@@ -16,6 +18,30 @@ from utils.logger import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+_ENGINE_KEY = os.getenv("ENGINE_API_KEY", "")
+_PRODUCTION = os.getenv("ENVIRONMENT", os.getenv("NODE_ENV", "")).strip().lower() in ("production", "prod")
+
+
+async def _ws_auth(websocket: WebSocket) -> bool:
+    """Vérifie X-Engine-Key (header ou ?key=) avant d'accepter la connexion.
+
+    Les clients WS ne passent pas par EngineAuthMiddleware (les upgrades sont
+    exemptés) — chaque endpoint doit donc s'authentifier lui-même. En dev sans
+    clé configurée on laisse passer ; en production une clé absente ferme tout.
+    """
+    if not _ENGINE_KEY:
+        if _PRODUCTION:
+            logger.error("ws_auth_no_key_production", path=websocket.url.path)
+            await websocket.close(code=1008)
+            return False
+        return True
+    provided = websocket.headers.get("x-engine-key") or websocket.query_params.get("key", "")
+    if not provided or not secrets.compare_digest(provided, _ENGINE_KEY):
+        logger.warning("ws_auth_rejected", path=websocket.url.path)
+        await websocket.close(code=1008)
+        return False
+    return True
 
 SYMBOLS_BINANCE = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
@@ -294,6 +320,8 @@ async def prices_latest(symbols: str = ""):
 
 @router.websocket("/ws/prices")
 async def ws_prices(websocket: WebSocket):
+    if not await _ws_auth(websocket):
+        return
     await websocket.accept()
     _price_clients.add(websocket)
     if _last_prices:
@@ -309,6 +337,8 @@ async def ws_prices(websocket: WebSocket):
 
 @router.websocket("/ws/signals")
 async def ws_signals(websocket: WebSocket):
+    if not await _ws_auth(websocket):
+        return
     await websocket.accept()
     _signal_clients.add(websocket)
     if _last_signals:
@@ -324,6 +354,8 @@ async def ws_signals(websocket: WebSocket):
 
 @router.websocket("/ws/patterns")
 async def ws_patterns(websocket: WebSocket):
+    if not await _ws_auth(websocket):
+        return
     await websocket.accept()
     _pattern_clients.add(websocket)
     if _last_patterns:

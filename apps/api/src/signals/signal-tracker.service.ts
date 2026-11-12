@@ -119,8 +119,29 @@ export class SignalTrackerService {
     }
 
     const since = signal.lastProcessedCandle ?? signal.createdAt;
-    const newCandles = (await this.candles.getSince(signal.asset.symbol, signal.timeframe, since)) as RepoCandle[];
-    if (newCandles.length === 0) return;
+    // Un signal ne peut pas se résoudre après son expiresAt — on borne la
+    // fenêtre à expiresAt + 1 bougie (nécessaire pour déclencher l'event
+    // EXPIRED), ce qui évite de fetcher des semaines de bougies inutiles
+    // sur les signaux stale (le backfill 429é en boucle sans ça).
+    const until = signal.expiresAt
+      ? new Date(signal.expiresAt.getTime() + this._timeframeMs(signal.timeframe))
+      : undefined;
+    const newCandles = (await this.candles.getSince(signal.asset.symbol, signal.timeframe, since, until)) as RepoCandle[];
+    if (newCandles.length === 0) {
+      // Aucune bougie disponible mais signal expiré → clôturer quand même
+      // sinon il reste PENDING/ACTIVE indéfiniment et bloque la dédup scan.
+      if (signal.expiresAt && signal.expiresAt.getTime() < Date.now()) {
+        await this.prisma.signalExecutionEvent.create({
+          data: { signalId: signal.id, type: 'EXPIRED', price: signal.entryPrice ?? 0, candleTime: signal.expiresAt, candleTimeframe: signal.timeframe },
+        }).catch(() => {});
+        await this.prisma.signal.update({
+          where: { id: signal.id },
+          data: { executionStatus: 'EXPIRED', isActive: false },
+        });
+        await Promise.resolve(this.featureStore.attachOutcome(signal.id, 'EXPIRED', null)).catch(() => {});
+      }
+      return;
+    }
 
     const direction: Direction = signal.signal === 'BUY' ? 'LONG' : 'SHORT';
     let entryAlreadyHit = signal.executionEvents.some((e) => e.type === 'ENTRY_HIT');
@@ -136,7 +157,9 @@ export class SignalTrackerService {
     const entryLow = direction === 'SHORT' ? entryBase * (1 - bufferPct) : entryBase;
     const entryHigh = direction === 'LONG' ? entryBase * (1 + bufferPct) : entryBase;
 
+    let expired = false;
     for (const raw of newCandles) {
+      if (expired) break;  // Un seul event EXPIRED — sinon duplication massive par bougie restante
       const candle: Candle = { openTime: raw.openTime, open: raw.open, high: raw.high, low: raw.low, close: raw.close };
 
       // Pré-fetch AVANT la transaction : un fetch externe dans une tx
@@ -154,6 +177,7 @@ export class SignalTrackerService {
           newEvents.push({ type: 'EXPIRED', price: candle.close });
           await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'EXPIRED', lastProcessedCandle: new Date(candle.openTime) } });
           await this.featureStore.attachOutcome(signalId, 'EXPIRED', null);
+          expired = true;
           return;
         }
 
@@ -212,6 +236,14 @@ export class SignalTrackerService {
   }
 
   // ATR(14) des bougies récentes → taille de zone proportionnelle à la volatilité
+  private _timeframeMs(tf: string | null | undefined): number {
+    const map: Record<string, number> = {
+      '1m': 60_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000,
+      '1h': 3_600_000, '2h': 7_200_000, '4h': 14_400_000, '1d': 86_400_000,
+    };
+    return map[tf ?? ''] ?? 3_600_000;
+  }
+
   private _entryBufferPct(candles: RepoCandle[], entryBase: number): number {
     if (entryBase <= 0 || candles.length < 5) return ENTRY_ZONE_FALLBACK_PCT;
     const recent = candles.slice(-14);

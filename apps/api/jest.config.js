@@ -19,10 +19,10 @@ module.exports = {
   // Relevés progressivement à mesure que la couverture augmente.
   coverageThreshold: {
     global: {
-      statements: 40,
-      branches: 35,
-      functions: 30,
-      lines: 40,
+      statements: 55,
+      branches: 45,
+      functions: 48,
+      lines: 55,
     },
   },
 };

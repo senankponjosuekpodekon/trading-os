@@ -245,7 +245,12 @@ app.include_router(poocoin.router, prefix="/poocoin", tags=["PooCoin"])
 # ── Candles endpoint (used by API predictMlRegime) ───────────────────
 
 
+# Endpoints bougies = infrastructure interne appelée en masse par le tracker
+# (backfill signal outcomes) — le bucket 1000/h par IP les faisait 429 en
+# boucle et gelait tout le pipeline. L'engine n'étant pas exposé publiquement
+# (X-Engine-Key obligatoire), l'exemption est sûre.
 @app.get("/candles/{symbol:path}/deriv-history", tags=["Market Data"])
+@limiter.exempt
 async def get_deriv_history(
     symbol: str,
     timeframe: str = _Query("1h"),
@@ -279,6 +284,7 @@ async def get_deriv_history(
 
 
 @app.get("/candles/{symbol:path}/history", tags=["Market Data"])
+@limiter.exempt
 async def get_candles_history(
     symbol: str,
     timeframe: str = _Query("1h"),

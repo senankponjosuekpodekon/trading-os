@@ -23,7 +23,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Basculer vers pgbouncer:6432 en définissant DB_HOST=pgbouncer DB_PORT=6432
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST:-postgres}:${DB_PORT:-5432}/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD}@host.docker.internal:6379
       ENGINE_API_KEY: ${ENGINE_API_KEY:?ENGINE_API_KEY is required}
       ENVIRONMENT: production
@@ -60,9 +61,10 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST:-postgres}:${DB_PORT:-5432}/${POSTGRES_DB}
       # Sans ça, l'API tourne avec le rôle owner (BYPASSRLS) et toute la RLS
       # PostgreSQL est du code mort — voir prisma/rls-context.
+      # ⚠️ Si DB_HOST=pgbouncer : Prisma exige ?pgbouncer=true dans les URLs.
       APP_RUNTIME_DATABASE_URL: ${APP_RUNTIME_DATABASE_URL:?APP_RUNTIME_DATABASE_URL is required for RLS}
       REDIS_URL: redis://:${REDIS_PASSWORD}@host.docker.internal:6379
       ENGINE_URL: http://engine:8000
@@ -118,6 +120,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
+
+  # Pooler de connexions — opt-in : définir DB_HOST=pgbouncer DB_PORT=6432
+  # dans .env pour router api+engine à travers lui. PGBOUNCER_AUTH_* doit
+  # correspondre à POSTGRES_USER/POSTGRES_PASSWORD. Garder les migrations
+  # Prisma en connexion directe (passthrough prisma migrate).
+  pgbouncer:
+    image: edoburu/pgbouncer:1.24.1-p1
+    container_name: trading-os-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "500"
+      DEFAULT_POOL_SIZE: "25"
+      # Required for asyncpg/Prisma prepared statements in transaction mode
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits
+      MAX_PREPARED_STATEMENTS: "200"
+    networks:
+      - default
+    profiles:
+      - pooling
 
 networks:
   default:

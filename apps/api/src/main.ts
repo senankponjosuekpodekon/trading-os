@@ -49,6 +49,22 @@ async function bootstrap() {
     maxAge:             86400,
   });
 
+  // ── CSRF défense en profondeur ─────────────────────────────────────
+  // Les cookies sont déjà sameSite=strict/lax ; on vérifie en plus que les
+  // requêtes mutantes authentifiées par cookie proviennent d'une origine
+  // autorisée (Origin ou Referer). Les clients non-navigateur (sans Origin)
+  // passent — ils n'envoient de toute façon pas de cookies cross-site.
+  const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+  app.use((req: any, res: any, next: any) => {
+    if (SAFE_METHODS.has(req.method) || !req.headers.cookie) return next();
+    const source = req.headers.origin || req.headers.referer;
+    if (!source) return next();
+    try {
+      if (allowedOrigins.includes(new URL(source).origin)) return next();
+    } catch { /* malformed header → reject below */ }
+    return res.status(403).json({ statusCode: 403, message: 'Forbidden origin', error: 'Forbidden' });
+  });
+
   // ── Validation globale ───────────────────────────────────────────
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({

@@ -10,13 +10,13 @@ export class LocalCandleRepository extends CandleRepository {
     super();
   }
 
-  async getSince(symbol: string, timeframe: string, since: Date): Promise<Candle[]> {
+  async getSince(symbol: string, timeframe: string, since: Date, until?: Date): Promise<Candle[]> {
     try {
       const rows = await this.prisma.candle.findMany({
         where: {
           symbol,
           timeframe,
-          openTime: { gte: since },
+          openTime: until ? { gte: since, lte: until } : { gte: since },
         },
         orderBy: { openTime: 'asc' },
       });

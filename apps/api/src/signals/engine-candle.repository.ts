@@ -20,9 +20,9 @@ export class EngineCandleRepository extends CandleRepository {
     this.engineUrl = this.config.get<string>('ENGINE_URL', 'http://localhost:8000');
   }
 
-  async getSince(symbol: string, timeframe: string, since: Date): Promise<Candle[]> {
+  async getSince(symbol: string, timeframe: string, since: Date, until?: Date): Promise<Candle[]> {
     const sinceMs = since.getTime();
-    const nowMs = Date.now();
+    const nowMs = until?.getTime() ?? Date.now();
     const url = `${this.engineUrl}/candles/${encodeURIComponent(symbol)}/history?timeframe=${timeframe}&start=${sinceMs}&end=${nowMs}`;
     try {
       const { data } = await firstValueFrom(this.http.get(url, { headers: engineHeaders(this.config) }));
