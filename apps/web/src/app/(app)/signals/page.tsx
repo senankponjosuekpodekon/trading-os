@@ -501,19 +501,52 @@ function ScannerView({ entries, loading, pollingEnabled, pollingInterval }: {
   pollingEnabled: boolean;
   pollingInterval: number;
 }) {
+  const [source, setSource] = useState<'live' | 'history'>('live');
+  const [histPage, setHistPage] = useState(1);
+  const [histSignal, setHistSignal] = useState<'ALL' | 'BUY' | 'SELL' | 'NEUTRAL'>('ALL');
+
+  const { data: histData, isFetching: histLoading } = useQuery({
+    queryKey: ['scan-history-db', histPage, histSignal],
+    queryFn: async () => (await api.get('/signals/scan-history/db', {
+      params: {
+        page: histPage,
+        limit: 50,
+        ...(histSignal !== 'ALL' ? { signal: histSignal } : {}),
+      },
+    })).data,
+    enabled: source === 'history',
+    staleTime: 30_000,
+  });
+
   const signalColors: Record<string, string> = {
     BUY: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
     SELL: 'text-red-400 bg-red-500/10 border-red-500/30',
     NEUTRAL: 'text-gray-400 bg-gray-700/30 border-gray-700',
   };
 
+  // Normalise les entrées DB (camelCase Prisma) au format Redis (snake_case)
+  const displayEntries = source === 'live'
+    ? entries
+    : (histData?.items ?? []).map((e: any) => ({
+        symbol: e.symbol,
+        timeframe: e.timeframe,
+        signal: e.signal,
+        confidence: e.confidence,
+        explanation: e.explanation,
+        strategy_name: e.strategyName,
+        signal_pending: e.signalPending,
+        persistence_score: e.persistenceScore,
+        scanned_at: e.scannedAt,
+      }));
+  const displayLoading = source === 'live' ? loading : histLoading;
+
   const sorted = useMemo(() => {
-    return [...entries].sort((a, b) => {
+    return [...displayEntries].sort((a, b) => {
       const ta = new Date(a.scanned_at || 0).getTime();
       const tb = new Date(b.scanned_at || 0).getTime();
       return tb - ta;
     });
-  }, [entries]);
+  }, [displayEntries]);
 
   const activeSignals = sorted.filter(e => e.signal === 'BUY' || e.signal === 'SELL');
   const pendingSignals = sorted.filter(e => e.signal_pending);
@@ -521,13 +554,38 @@ function ScannerView({ entries, loading, pollingEnabled, pollingInterval }: {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-emerald-400" />
-          <span className="text-sm text-gray-400">
-            {pollingEnabled ? `Temps réel — polling ${pollingInterval / 1000}s` : 'Temps réel — polling désactivé'}
-          </span>
-          {loading && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
+            <button onClick={() => setSource('live')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${source === 'live' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}>
+              Temps réel
+            </button>
+            <button onClick={() => setSource('history')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${source === 'history' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}>
+              Historique
+            </button>
+          </div>
+          {source === 'live' ? (
+            <span className="text-sm text-gray-400 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-emerald-400" />
+              {pollingEnabled ? `polling ${pollingInterval / 1000}s` : 'polling désactivé'}
+            </span>
+          ) : (
+            <div className="flex items-center gap-2">
+              <select value={histSignal} onChange={e => { setHistSignal(e.target.value as any); setHistPage(1); }}
+                className="bg-gray-800 text-gray-300 text-xs rounded px-2 py-1 border border-gray-700">
+                <option value="ALL">Tous signaux</option>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="NEUTRAL">NEUTRAL</option>
+              </select>
+              <span className="text-xs text-gray-500">
+                {histData?.total != null && `${histData.total} scans`}
+              </span>
+            </div>
+          )}
+          {displayLoading && <RefreshCw className="w-3 h-3 text-gray-500 animate-spin" />}
         </div>
         <div className="flex items-center gap-3 text-xs">
           <span className="flex items-center gap-1 text-emerald-400">
@@ -542,7 +600,21 @@ function ScannerView({ entries, loading, pollingEnabled, pollingInterval }: {
         </div>
       </div>
 
-      {sorted.length === 0 && !loading && (
+      {source === 'history' && histData && histData.totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-gray-400">
+          <button onClick={() => setHistPage(p => Math.max(1, p - 1))} disabled={histPage <= 1}
+            className="flex items-center gap-1 px-3 py-1.5 rounded bg-gray-800 disabled:opacity-40 hover:bg-gray-700">
+            <ChevronLeft className="w-3 h-3" /> Précédent
+          </button>
+          <span>Page {histData.page} / {histData.totalPages}</span>
+          <button onClick={() => setHistPage(p => Math.min(histData.totalPages, p + 1))} disabled={histPage >= histData.totalPages}
+            className="flex items-center gap-1 px-3 py-1.5 rounded bg-gray-800 disabled:opacity-40 hover:bg-gray-700">
+            Suivant <ChevronRight className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {sorted.length === 0 && !displayLoading && (
         <div className="flex flex-col items-center justify-center py-20 text-gray-600 bg-gray-900 border border-gray-800 rounded-xl">
           <Radar className="w-10 h-10 mb-3" />
           <p className="font-medium">Aucun scan récent</p>

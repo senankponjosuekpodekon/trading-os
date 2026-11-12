@@ -18,7 +18,9 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-SCAN_HISTORY_REDIS_TTL = 3600
+SCAN_HISTORY_REDIS_TTL = 21600  # 6h — évite la disparition des résultats en journée
+SCAN_HISTORY_REDIS_MAX = 1999   # ltrim garde les indices 0..1999 (~2000 entrées)
+NEUTRAL_SAMPLE_RATE = 0.05      # ~5% des scans NEUTRAL conf=0 conservés en DB (statistiques)
 
 _scan_db_pool = None
 _scan_db_lock = asyncio.Lock()
@@ -66,7 +68,7 @@ async def _persist_scan_redis(result: dict, timeframe: str) -> None:
         key = "scan_history:recent"
         r = await cache.client()
         await r.lpush(key, json.dumps(entry, default=str))
-        await r.ltrim(key, 0, 499)  # keep last 500 entries
+        await r.ltrim(key, 0, SCAN_HISTORY_REDIS_MAX)  # keep last ~2000 entries
         await r.expire(key, SCAN_HISTORY_REDIS_TTL)
     except Exception:
         pass
@@ -131,8 +133,17 @@ async def _scan_batch_flusher():
 
 
 async def _persist_scan(result: dict, timeframe: str) -> None:
-    """Persist scan result to Redis (real-time) + queue for DB batch."""
+    """Persist scan result to Redis (real-time) + queue for DB batch.
+
+    NEUTRAL conf=0 scans (~96% du volume, aucune valeur métier individuelle)
+    ne sont pas insérés en DB — seul un échantillon ~5% est conservé pour les stats.
+    Redis garde tout en temps réel.
+    """
     await _persist_scan_redis(result, timeframe)
+    if result.get("signal", "NEUTRAL") == "NEUTRAL" and not result.get("confidence"):
+        import random
+        if random.random() >= NEUTRAL_SAMPLE_RATE:
+            return
     await _queue_scan_for_batch(result, timeframe)
 
 

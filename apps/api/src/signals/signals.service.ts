@@ -388,7 +388,17 @@ export class SignalsService {
     return this.tracker.processActiveSignals();
   }
 
+  private _lastCandleClosedRun = 0;
+  private static readonly CANDLE_CLOSED_MIN_INTERVAL_MS = 60_000;
+
   async notifyCandleClosed(symbol: string, timeframe: string) {
+    // L'engine envoie un event par clôture de bougie (plusieurs/seconde en multi-symboles)
+    // → throttle à 1 run/min ; le cron 15min reste le filet de sécurité
+    const now = Date.now();
+    if (now - this._lastCandleClosedRun < SignalsService.CANDLE_CLOSED_MIN_INTERVAL_MS) {
+      return { skipped: true };
+    }
+    this._lastCandleClosedRun = now;
     return this.tracker.processActiveSignals();
   }
 

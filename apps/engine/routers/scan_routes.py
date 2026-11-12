@@ -698,7 +698,7 @@ async def scan_history(limit: int = 50, strategy: str | None = None,
     """
     try:
         r = await cache.client()
-        depth = 499 if (strategy or signal or min_confidence is not None) else min(limit * 4, 499)
+        depth = 1999 if (strategy or signal or min_confidence is not None) else min(limit * 4, 1999)
         raw_entries = await r.lrange("scan_history:recent", 0, depth)
         allowed_signals = {s.strip().upper() for s in signal.split(",")} if signal else None
         entries = []

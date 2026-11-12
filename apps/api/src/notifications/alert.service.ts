@@ -24,9 +24,9 @@ export interface SignalAlertInput {
 
 @Injectable()
 export class AlertService {
-  private opportunityThreshold = 0.65;
-  private maxDaily = 5;
-  private minIntervalMinutes = 60;
+  private opportunityThreshold = parseFloat(process.env.ALERT_MIN_SCORE ?? '0.70');
+  private maxDaily = parseInt(process.env.ALERT_MAX_DAILY ?? '0', 10) || 0; // 0 = illimité
+  private minIntervalMinutes = parseInt(process.env.ALERT_COOLDOWN_MINUTES ?? '60', 10) || 60;
 
   /** userId -> { date: YYYY-MM-DD, count: number } */
   private dailyCounts = new Map<string, { date: string; count: number }>();
@@ -108,7 +108,7 @@ export class AlertService {
   shouldSend(userId: string, input: SignalAlertInput): boolean {
     const score = input.opportunityScore ?? input.confidence / 100;
     if (score < this.opportunityThreshold) return false;
-    if (this.getDailyCount(userId) >= this.maxDaily) return false;
+    if (this.maxDaily > 0 && this.getDailyCount(userId) >= this.maxDaily) return false;
     if (this.isInCooldown(userId, input)) return false;
     return true;
   }
