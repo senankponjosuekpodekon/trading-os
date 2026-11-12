@@ -26,7 +26,8 @@ const YAHOO_TIMEFRAME_MAP: Record<string, string> = {
   '5m': '5m',
   '15m': '15m',
   '1h': '1h',
-  '4h': '4h',
+  // Yahoo ne supporte pas 4h → on récupère en 1h et on agrège en aval
+  '4h': '1h',
   '1d': '1d',
 };
 
@@ -43,8 +44,9 @@ export class YahooCandleRepository extends CandleRepository {
   async getSince(symbol: string, timeframe: string, since: Date): Promise<Candle[]> {
     const yahooSymbol = YAHOO_SYMBOL_MAP[symbol] ?? symbol.replace('/', '');
     const interval = YAHOO_TIMEFRAME_MAP[timeframe] ?? '1h';
-    const sinceMs = since.getTime();
-    const nowMs = Date.now();
+    // Yahoo attend period1/period2 en secondes epoch, pas en millisecondes
+    const sinceSec = Math.floor(since.getTime() / 1000);
+    const nowSec = Math.floor(Date.now() / 1000);
 
     // Rate limit: attendre si nécessaire
     const elapsed = Date.now() - this.lastCall;
@@ -54,7 +56,7 @@ export class YahooCandleRepository extends CandleRepository {
     this.lastCall = Date.now();
 
     try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=${interval}&period1=${sinceMs}&period2=${nowMs}`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=${interval}&period1=${sinceSec}&period2=${nowSec}`;
       const { data } = await firstValueFrom(this.http.get(url, { timeout: 10000 }));
 
       const result = data?.chart?.result?.[0];
@@ -64,7 +66,7 @@ export class YahooCandleRepository extends CandleRepository {
       const quotes = result.indicators?.quote?.[0];
       if (!quotes) return [];
 
-      return timestamps.map((ts: number, i: number) => ({
+      const candles = timestamps.map((ts: number, i: number) => ({
         openTime: ts * 1000,
         open: quotes.open?.[i] ?? 0,
         high: quotes.high?.[i] ?? 0,
@@ -73,6 +75,25 @@ export class YahooCandleRepository extends CandleRepository {
       }))
       .filter((c: Candle) => c.open > 0)
       .sort((a: Candle, b: Candle) => a.openTime - b.openTime);
+
+      // Yahoo n'a pas de 4h natif : on a fetché en 1h, on regroupe par fenêtre de 4h
+      if (timeframe === '4h') {
+        const buckets = new Map<number, Candle>();
+        for (const c of candles) {
+          const bucket = Math.floor(c.openTime / 14_400_000) * 14_400_000;
+          const prev = buckets.get(bucket);
+          if (prev) {
+            prev.high = Math.max(prev.high, c.high);
+            prev.low = Math.min(prev.low, c.low);
+            prev.close = c.close;
+          } else {
+            buckets.set(bucket, { ...c, openTime: bucket });
+          }
+        }
+        return [...buckets.values()].sort((a, b) => a.openTime - b.openTime);
+      }
+
+      return candles;
     } catch (error) {
       this.logger.warn(`getSince failed for ${symbol} ${timeframe}: ${(error as Error)?.message}`);
       return [];
