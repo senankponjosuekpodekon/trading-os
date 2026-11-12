@@ -67,6 +67,22 @@ async def cron_majors_tracker():
         await asyncio.sleep(HIDDEN_GEMS_INTERVAL)
 
 
+async def cron_gem_paper_trader():
+    """Évalue les positions papier des gems toutes les 10 min : TP1 +50% /
+    TP2 +100% / trailing -30% pic / SL -25% / time-stop 72h, avec push."""
+    PAPER_INTERVAL = 600
+    await asyncio.sleep(120)  # laisse le premier scan peupler les positions
+    while True:
+        try:
+            from ml.gem_paper_trader import check_positions
+            res = await check_positions()
+            logger.info("cron_gem_paper_done", **res)
+        except Exception as exc:
+            logger.warning("cron_gem_paper_failed", error=str(exc))
+
+        await asyncio.sleep(PAPER_INTERVAL)
+
+
 async def cron_gem_model():
     """Réentraîne le modèle de détection chaque nuit — régression logistique
     calibrée sur les snapshots accumulés (label = +20% à 24h). Le modèle
@@ -128,6 +144,7 @@ async def run_all_crons():
         cron_daily_pulse(),
         cron_hidden_gems(),
         cron_majors_tracker(),
+        cron_gem_paper_trader(),
         cron_gem_model(),
         cron_smart_money(),
         cron_portfolio_rebalance(),

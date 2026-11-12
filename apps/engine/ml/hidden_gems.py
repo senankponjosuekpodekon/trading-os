@@ -1470,6 +1470,19 @@ async def discover_hidden_gems(
         if isinstance(c_llm, dict) and c_llm.get("conviction") is not None and c.token_address
     ), return_exceptions=True)
 
+    # Paper trading : positions virtuelles sur les gems qualifiés (score ≥60,
+    # pas de honeypot) — la stratégie TP/SL est mesurée en conditions réelles.
+    from ml.gem_paper_trader import maybe_open_position
+    await _asyncio.gather(*(
+        maybe_open_position({
+            "chain": c.chain, "token_address": c.token_address, "symbol": c.symbol,
+            "name": c.name, "price": c.price, "gem_score": c.gem_score,
+            "liquidity": c.liquidity, "volume_24h": c.volume_24h,
+        })
+        for c in top_gems
+        if c.gem_score >= 60 and not (c.onchain or {}).get("honeypot")
+    ), return_exceptions=True)
+
     return {
         "gems": [
             {

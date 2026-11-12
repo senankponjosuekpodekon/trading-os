@@ -80,6 +80,14 @@ async def hidden_gems(
         raise HTTPException(status_code=503, detail=f"Hidden gems unavailable: {exc}") from exc
 
 
+@router.get("/ml/gem-paper/stats")
+async def gem_paper_stats():
+    """GET /ml/gem-paper/stats — paper trading auto : positions ouvertes,
+    historique des sorties TP/SL, win rate mesuré en conditions réelles."""
+    from ml.gem_paper_trader import paper_stats
+    return await paper_stats()
+
+
 @router.get("/ml/hidden-gems/backtest")
 async def hidden_gems_backtest(min_hours: float = Query(24, ge=1)):
     """GET /ml/hidden-gems/backtest — calibration du gem_score :
