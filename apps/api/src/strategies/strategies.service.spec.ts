@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { StrategiesService } from './strategies.service';
+import { StatusHistoryService } from '../common/services/status-history.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotaService } from '../billing/quota.service';
 import { EngineHttpService } from '../engine/engine-http.service';
@@ -31,6 +32,7 @@ describe('StrategiesService', () => {
         { provide: PrismaService, useValue: prismaMock as any },
         { provide: QuotaService, useValue: { assertCanEnableStrategy: jest.fn().mockResolvedValue(undefined) } },
         { provide: EngineHttpService, useValue: { get: jest.fn(), post: jest.fn() } },
+        { provide: StatusHistoryService, useValue: { record: jest.fn(), history: jest.fn() } },
       ],
     }).compile();
 

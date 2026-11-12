@@ -232,6 +232,8 @@ model Strategy {
   analysisTimeframe String?  @map("analysis_timeframe")
   entryTimeframe    String?  @map("entry_timeframe")
   isActive        Boolean  @default(true)
+  activatedAt     DateTime? @map("activated_at")
+  deactivatedAt   DateTime? @map("deactivated_at")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -239,6 +241,24 @@ model Strategy {
   userStrategies UserStrategy[]
 
   @@map("strategies")
+}
+
+// Historique générique des changements de statut — réutilisable pour
+// tout type d'entité (strategies, asset_config, user_strategies, flags…)
+model StatusHistory {
+  id         String   @id @default(cuid())
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  field      String
+  oldValue   String?  @map("old_value")
+  newValue   String?  @map("new_value")
+  changedBy  String?  @map("changed_by")
+  reason     String?
+  changedAt  DateTime @default(now()) @map("changed_at")
+
+  @@index([entityType, entityId])
+  @@index([changedAt])
+  @@map("status_history")
 }
 
 model UserStrategy {

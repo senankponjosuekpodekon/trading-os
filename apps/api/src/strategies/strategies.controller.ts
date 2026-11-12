@@ -68,8 +68,14 @@ export class StrategiesController {
 
   @Roles(UserRole.ADMIN)
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateStrategyDto) {
-    return this.strategiesService.update(id, dto);
+  update(@Request() req: any, @Param('id') id: string, @Body() dto: UpdateStrategyDto) {
+    return this.strategiesService.update(id, dto, req.user?.id);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Get(':id/history')
+  getStatusHistory(@Param('id') id: string) {
+    return this.strategiesService.getStatusHistory(id);
   }
 
   @Roles(UserRole.ADMIN)

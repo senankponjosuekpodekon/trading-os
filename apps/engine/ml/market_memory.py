@@ -142,6 +142,11 @@ async def store_pattern(
             )
     except Exception as exc:
         logger.warning("market_memory_db_store_failed", error=str(exc))
+        try:
+            from utils.dlq import dlq_push
+            await dlq_push("market_memory_store", pattern, error=str(exc))
+        except Exception:
+            pass
 
     logger.info("market_pattern_stored", pattern_id=pattern_id, key=key, setup=setup_type)
     return pattern_id

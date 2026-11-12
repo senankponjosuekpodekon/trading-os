@@ -6,6 +6,7 @@ import { SignalCard } from '@/components/signals/SignalCard';
 import { SignalTrackingView } from '@/components/signals/SignalTrackingView';
 import { SignalStatsView } from '@/components/signals/SignalStatsView';
 import { SkeletonSignalCard } from '@/components/ui/Skeleton';
+import { SectionBoundary } from '@/components/ui/SectionBoundary';
 import { api } from '@/lib/api';
 import { useTradingStore } from '@/store/trading.store';
 import { useToast } from '@/hooks/useToast';
@@ -222,16 +223,16 @@ export default function SignalsPage() {
         </div>
 
         {activeTab === 'suivi' ? (
-          <SignalTrackingView />
+          <SectionBoundary title="Suivi des signaux"><SignalTrackingView /></SectionBoundary>
         ) : activeTab === 'stats' ? (
-          <SignalStatsView />
+          <SectionBoundary title="Statistiques"><SignalStatsView /></SectionBoundary>
         ) : activeTab === 'scanner' ? (
-          <ScannerView
+          <SectionBoundary title="Scanner"><ScannerView
             entries={scanHistoryData?.entries ?? []}
             loading={scanHistoryLoading}
             pollingEnabled={scanPollingEnabled}
             pollingInterval={scanPollingInterval}
-          />
+          /></SectionBoundary>
         ) : (
         <>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

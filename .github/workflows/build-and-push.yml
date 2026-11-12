@@ -174,6 +174,9 @@ jobs:
             docker network create postgres_default 2>/dev/null || true
             docker network create ollama_default 2>/dev/null || true
             docker compose -f docker-compose.prod.yml up -d
+            # Appliquer les migrations Prisma en attente
+            sleep 15
+            docker exec trading-os-api-prod npx prisma migrate deploy --schema=./prisma/schema.prisma || echo "[deploy] migrate deploy failed — check manually"
             # Nettoyer les anciennes images laissées par le re-tag
             docker image prune -af || true
             docker builder prune -f || true

@@ -22,6 +22,7 @@ class StrategyRules:
     rsi_bearish_zone: float = 55.0   # RSI < cette valeur → bearish zone
     min_confidence:   float = 55.0
     min_dps:          float = 60.0   # Sprint 4 — DPS minimum pour persister le signal
+    min_persistence:  float = 0.0    # persistence_score (hysteresis) min requis à l'ingest
     volume_spike_min: float = 1.3    # ratio vs moyenne 20
     use_price_action: bool  = True
     use_sr_zones:     bool  = True

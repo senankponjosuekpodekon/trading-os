@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotaService } from '../billing/quota.service';
 import { EngineHttpService } from '../engine/engine-http.service';
+import { StatusHistoryService } from '../common/services/status-history.service';
 import { CreateStrategyDto, UpdateStrategyDto, ToggleUserStrategyDto } from './dto/create-strategy.dto';
 import { validateStrategyRules } from './rules-validator';
 
@@ -11,6 +12,7 @@ export class StrategiesService {
     private prisma: PrismaService,
     private quota: QuotaService,
     private engine: EngineHttpService,
+    private statusHistory: StatusHistoryService,
   ) {}
 
   async findAll() {
@@ -45,10 +47,30 @@ export class StrategiesService {
     return this.prisma.strategy.create({ data: dto });
   }
 
-  async update(id: string, dto: UpdateStrategyDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateStrategyDto, changedBy?: string) {
+    const before = await this.findOne(id);
     if (dto.rules) validateStrategyRules(dto.rules);
-    return this.prisma.strategy.update({ where: { id }, data: dto });
+
+    // Timestamps d'activation : maj seulement sur transition réelle
+    const data: any = { ...dto };
+    if (dto.isActive !== undefined && dto.isActive !== before.isActive) {
+      if (dto.isActive) {
+        data.activatedAt = new Date();
+        data.deactivatedAt = null;
+      } else {
+        data.deactivatedAt = new Date();
+      }
+      this.statusHistory.record({
+        entityType: 'strategy',
+        entityId: id,
+        field: 'isActive',
+        oldValue: before.isActive,
+        newValue: dto.isActive,
+        changedBy,
+      });
+    }
+
+    return this.prisma.strategy.update({ where: { id }, data });
   }
 
   async remove(id: string) {
@@ -67,6 +89,19 @@ export class StrategiesService {
         where: { userId_strategyId: { userId, strategyId } },
       });
       if (!existing?.isEnabled) await this.quota.assertCanEnableStrategy(userId);
+    }
+    const prev = await this.prisma.userStrategy.findUnique({
+      where: { userId_strategyId: { userId, strategyId } },
+    });
+    if (prev?.isEnabled !== dto.isEnabled) {
+      this.statusHistory.record({
+        entityType: 'user_strategy',
+        entityId: `${userId}:${strategyId}`,
+        field: 'isEnabled',
+        oldValue: prev?.isEnabled ?? null,
+        newValue: dto.isEnabled,
+        changedBy: userId,
+      });
     }
     return this.prisma.userStrategy.upsert({
       where: { userId_strategyId: { userId, strategyId } },
@@ -168,6 +203,11 @@ export class StrategiesService {
       provider: result.provider,
       model: result.model,
     };
+  }
+
+  async getStatusHistory(id: string) {
+    await this.findOne(id);
+    return this.statusHistory.history('strategy', id);
   }
 
   async getStats() {

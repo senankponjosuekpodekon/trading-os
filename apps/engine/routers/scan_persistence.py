@@ -123,6 +123,12 @@ async def _flush_scan_batch() -> None:
         logger.info("scan_history_batch_inserted", count=len(rows))
     except Exception as e:
         logger.warning("scan_history_batch_failed", error=str(e), count=len(batch))
+        try:
+            from utils.dlq import dlq_push
+            # garder seulement les clés utiles pour rejouer l'insert
+            await dlq_push("scan_history_batch", batch[:500], error=str(e))
+        except Exception:
+            pass
 
 
 async def _scan_batch_flusher():
@@ -152,6 +158,10 @@ _ingest_recent: dict[str, float] = {}  # key: "symbol:timeframe" → last ingest
 _INGEST_COOLDOWN = 300  # 5 min between ingests for the same symbol+timeframe
 _ingest_client: httpx.AsyncClient | None = None
 
+# Appris des outcomes réels : les wins ont un persistence_score moyen ~45,
+# les losses ~20. Exiger une stabilité minimale filtre les signaux "flash".
+INGEST_MIN_PERSISTENCE = float(__import__("os").environ.get("INGEST_MIN_PERSISTENCE", "30"))
+
 
 async def _try_ingest_signal(result: dict, timeframe: str) -> None:
     """If signal is BUY/SELL with confidence >= 70, POST to API /signals/ingest.
@@ -161,6 +171,11 @@ async def _try_ingest_signal(result: dict, timeframe: str) -> None:
     sig = result.get("signal", "NEUTRAL")
     conf = result.get("confidence", 0)
     if sig not in ("BUY", "SELL") or conf < 70:
+        return
+    # Gate de persistance : un signal doit survivre à plusieurs rescans
+    # (persistence_score absent/0 sur les stratégies sans hysteresis → accepté)
+    persist = result.get("persistence_score")
+    if persist is not None and 0 < persist < INGEST_MIN_PERSISTENCE:
         return
     sym = result.get("symbol", "")
     key = f"{sym}:{timeframe}"
@@ -184,5 +199,11 @@ async def _try_ingest_signal(result: dict, timeframe: str) -> None:
             json=result,
             headers={"X-Engine-Key": api_key},
         )
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            from utils.dlq import dlq_push
+            await dlq_push("ingest_signal", {"symbol": result.get("symbol"), "timeframe": timeframe,
+                                             "signal": result.get("signal"), "confidence": result.get("confidence")},
+                           error=str(e))
+        except Exception:
+            pass
