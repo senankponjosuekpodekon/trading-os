@@ -79,12 +79,14 @@ async def gem_llm_comment(gem: Dict[str, Any]) -> Dict[str, Any] | None:
 
     try:
         from routers.llm import _call_llm_with_fallback
-        text, provider, _model = await _call_llm_with_fallback(prompt, max_tokens=150)
+        # 150 tokens coupait la réponse avant la ligne CONVICTION — le
+        # verdict n'était jamais parsé ni stampé dans les snapshots.
+        text, provider, _model = await _call_llm_with_fallback(prompt, max_tokens=320)
         if not text or provider == "mock":
             return None
         text = text.strip()
         conviction = None
-        m = __import__("re").search(r"CONVICTION\s*:\s*(\d{1,3})", text)
+        m = __import__("re").search(r"CONVICTION\D{0,12}(\d{1,3})", text, __import__("re").IGNORECASE)
         if m:
             conviction = max(0, min(100, int(m.group(1))))
             text = text[: m.start()].strip()

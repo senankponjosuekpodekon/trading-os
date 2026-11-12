@@ -232,6 +232,14 @@ async def _record_gem_snapshot(t: Dict[str, Any]) -> None:
             "buzz": t.get("social_buzz", 0),
             "narr_mom": t.get("narrative_momentum"),
             "creator": oc.get("creator_address"),
+            # Features de calibration : le profil winner mesuré (x3+) était
+            # vol ~210k, ~800 holders, buy/sell ~1.0 — on les rend entraînables.
+            "fdv": t.get("fdv", 0),
+            "age_hours": t.get("age_hours"),
+            "buy_sell_ratio": round(
+                t.get("buys_24h", 0) / max(t.get("sells_24h", 0), 1), 3
+            ) if t.get("sells_24h") else None,
+            "source": t.get("source"),
         }
         r = await cache.client()
         key = _gem_snapshot_key(t.get("chain", ""), addr)
@@ -979,6 +987,22 @@ def _compute_gem_score(
     score += manip["penalty"]
     warnings.extend(manip["flags"])
 
+    # 10b. Pénalité "late pump" — calibrée sur le backtest réel (63 tokens) :
+    # les ×3+ avaient vol médian ~210k et ~800 holders ; au-delà de 800k de
+    # volume ou 3k holders, le token est déjà viral et on paie le sommet
+    # (bucket 80+ : -26% avg, 21% WR).
+    holders_count = (onchain or {}).get("holder_count") or 0
+    if volume_24h > 800_000:
+        score -= 8
+        warnings.append(
+            f"Volume 24h très élevé (${volume_24h:,.0f}) — probablement déjà pompé, entrée tardive"
+        )
+    if holders_count > 3000:
+        score -= 5
+        warnings.append(
+            f"{holders_count:,} holders — phase d'accumulation probablement passée"
+        )
+
     score = max(0, min(100, score))
 
     # 11. Under-the-radar bonus (+5) — fondamentaux forts, attention quasi nulle
@@ -1062,10 +1086,82 @@ async def _fetch_dex_trending() -> List[Dict[str, Any]]:
                 "socials": meta.get("links", {}),
                 "description": meta.get("description", ""),
                 "fdv": float(p.get("fdv") or p.get("marketCap") or 0),
+                "source": "dexscreener",
             })
         return tokens
     except Exception as exc:
         logger.warning("dex_trending_fetch_failed", error=str(exc))
+        return []
+
+
+_GECKO_CHAIN_MAP = {
+    "eth": "ethereum", "bsc": "bsc", "base": "base", "solana": "solana",
+    "arbitrum": "arbitrum", "polygon_pos": "polygon", "avax": "avalanche",
+    "optimism": "optimism", "ton": "ton", "pulsechain": "pulsechain",
+    "sui-network": "sui", "cronos": "cronos", "robinhood": "robinhood",
+    "elysium": "elysium",
+}
+
+
+async def _fetch_gecko_trending() -> List[Dict[str, Any]]:
+    """Pools trending GeckoTerminal — supplément de DexScreener dont le flux
+    token-boosts est ~85% solana (pump.fun). Ramène base/eth/bsc/arb qui
+    manquent structurellement. Payload → même shape que _fetch_dex_trending."""
+    import httpx
+    import time
+    from datetime import datetime
+
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            r = await client.get(
+                "https://api.geckoterminal.com/api/v2/networks/trending_pools",
+                params={"include": "base_token", "page": 1},
+                headers={"Accept": "application/json;version=20230302"},
+            )
+            r.raise_for_status()
+            payload = r.json()
+
+        now_ms = time.time() * 1000
+        tokens = []
+        for pool in payload.get("data") or []:
+            attrs = pool.get("attributes") or {}
+            rels = pool.get("relationships") or {}
+            network = (rels.get("network", {}).get("data") or {}).get("id", "")
+            chain = _GECKO_CHAIN_MAP.get(network, network)
+            tok_id = (rels.get("base_token", {}).get("data") or {}).get("id", "")
+            addr = tok_id.split("_", 1)[1] if "_" in tok_id else ""
+            if not addr:
+                continue
+            created = attrs.get("pool_created_at")
+            try:
+                created_ms = int(datetime.fromisoformat(
+                    created.replace("Z", "+00:00")).timestamp() * 1000) if created else None
+            except Exception:
+                created_ms = None
+            txns = (attrs.get("transactions") or {}).get("h24") or {}
+            symbol = (attrs.get("name") or "").split(" / ")[0].strip()
+            tokens.append({
+                "symbol": symbol,
+                "name": attrs.get("name", ""),
+                "chain": chain,
+                "pair_address": attrs.get("address", ""),
+                "token_address": addr,
+                "price": float(attrs.get("base_token_price_usd") or 0),
+                "liquidity": float(attrs.get("reserve_in_usd") or 0),
+                "volume_24h": float((attrs.get("volume_usd") or {}).get("h24") or 0),
+                "price_change_24h": float((attrs.get("price_change_percentage") or {}).get("h24") or 0),
+                "age_hours": (now_ms - created_ms) / 3_600_000 if created_ms else 168.0,
+                "buys_24h": float(txns.get("buys", 0) or 0),
+                "sells_24h": float(txns.get("sells", 0) or 0),
+                "buys_1h": float(((attrs.get("transactions") or {}).get("h1") or {}).get("buys", 0) or 0),
+                "sells_1h": float(((attrs.get("transactions") or {}).get("h1") or {}).get("sells", 0) or 0),
+                "url": f"https://www.geckoterminal.com/{network}/pools/{attrs.get('address','')}",
+                "fdv": float(attrs.get("fdv_usd") or attrs.get("market_cap_usd") or 0),
+                "source": "geckoterminal",
+            })
+        return tokens
+    except Exception as exc:
+        logger.warning("gecko_trending_fetch_failed", error=str(exc))
         return []
 
 
@@ -1124,10 +1220,15 @@ async def discover_hidden_gems(
     Discover hidden gem tokens from DEX data.
     Scores and ranks tokens by gem_score.
     """
-    # Fetch trending tokens
+    # Fetch trending tokens (DexScreener ~85% solana — GeckoTerminal en
+    # supplément pour ramener les autres chaînes qui mesurent mieux)
     tokens = await _fetch_dex_trending()
     if not tokens:
         tokens = await _fetch_dex_search()
+    gecko = await _fetch_gecko_trending()
+    if gecko:
+        seen = {(t.get("chain", ""), t.get("token_address", "")) for t in tokens}
+        tokens += [g for g in gecko if (g.get("chain", ""), g.get("token_address", "")) not in seen]
 
     if not tokens:
         return {
@@ -1266,7 +1367,28 @@ async def discover_hidden_gems(
     # Sort by gem_score descending
     candidates.sort(key=lambda c: c.gem_score, reverse=True)
 
-    top_gems = candidates[:limit]
+    # Diversité par chaîne : solana truste ~85% du flux DexScreener alors que
+    # le backtest montre les gems non-solana en meilleure perf. Cap 60% par
+    # chaîne dans le top, complété si la diversité manque.
+    max_per_chain = max(1, round(limit * 0.6))
+    per_chain: Dict[str, int] = {}
+    top_gems: List[GemCandidate] = []
+    for c in candidates:
+        if per_chain.get(c.chain, 0) >= max_per_chain:
+            continue
+        per_chain[c.chain] = per_chain.get(c.chain, 0) + 1
+        top_gems.append(c)
+        if len(top_gems) >= limit:
+            break
+    if len(top_gems) < limit:
+        chosen = {(c.chain, c.token_address or c.symbol) for c in top_gems}
+        for c in candidates:
+            if (c.chain, c.token_address or c.symbol) in chosen:
+                continue
+            top_gems.append(c)
+            if len(top_gems) >= limit:
+                break
+
     moonshots = sum(1 for c in candidates if c.moonshot)
 
     # Smart-money : réputation deployer + overlap early buyers (top gems seulement —

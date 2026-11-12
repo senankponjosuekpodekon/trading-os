@@ -188,6 +188,11 @@ export default function SentimentPage() {
             {/* Source info */}
             <div className="flex items-center gap-4 text-xs text-gray-500">
               <span>Source: {data.source || 'unknown'}</span>
+              {data.source === 'mock' && (
+                <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                  Données simulées — provider indisponible
+                </span>
+              )}
               <span>{data[itemKey]?.length || 0} items</span>
               {data.engagement && (
                 <>
