@@ -19,11 +19,18 @@ TMP_FILE="${OUT_FILE}.tmp"
 
 echo "$(date -Iseconds) Starting backup: container=${CONTAINER} user=${DB_USER} db=${DB_NAME}"
 
-if ! docker exec "$CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" | gzip > "$TMP_FILE"; then
+# rag_documents est exclu : son type "vector" (pgvector) n'est pas dumpable
+# sur ce Postgres (extension absente → pg_dump échouait silencieusement
+# depuis le 26/09). On exporte le contenu utile en CSV à part.
+if ! docker exec "$CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" --exclude-table=rag_documents | gzip > "$TMP_FILE"; then
   echo "$(date -Iseconds) ERROR: pg_dump failed" >&2
   rm -f "$TMP_FILE"
   exit 1
 fi
+
+docker exec "$CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" \
+  -c "COPY (SELECT id, category, title, content, metadata, created_at FROM rag_documents) TO STDOUT CSV HEADER" \
+  | gzip > "${OUT_FILE%.sql.gz}.rag_documents.csv.gz" || true
 
 if [ ! -s "$TMP_FILE" ]; then
   echo "$(date -Iseconds) ERROR: backup file is empty, aborting" >&2
