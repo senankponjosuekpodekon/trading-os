@@ -119,6 +119,66 @@ async def cron_smart_money():
         await asyncio.sleep(SMART_MONEY_INTERVAL)
 
 
+async def cron_gem_snapshot_archive():
+    """Archive quotidienne en Postgres du dernier snapshot de chaque token
+    tracké — les listes Redis gem_snapshots:* ont un TTL : sans archivage,
+    l'historique de calibration (le dataset qui mesure le score) s'évapore."""
+    ARCHIVE_INTERVAL = 24 * 3600
+    _db_ready = False
+    await asyncio.sleep(900)  # premier run 15min après boot
+    while True:
+        try:
+            from utils.cache import cache
+            from utils.db_pool import get_shared_pool as get_pool
+            import json as _json
+            r = await cache.client()
+            pool = await get_pool()
+            async with pool.acquire() as con:
+                if not _db_ready:
+                    await con.execute("""
+                        CREATE TABLE IF NOT EXISTS gem_snapshots_archive (
+                            id BIGSERIAL PRIMARY KEY,
+                            chain TEXT NOT NULL,
+                            token_address TEXT NOT NULL,
+                            snap_ts TIMESTAMPTZ NOT NULL,
+                            data JSONB,
+                            created_at TIMESTAMPTZ DEFAULT now(),
+                            UNIQUE (chain, token_address, snap_ts)
+                        )""")
+                    _db_ready = True
+
+                keys = await r.smembers("gem_tracked")
+                archived = 0
+                for raw in keys:
+                    k = raw.decode() if isinstance(raw, bytes) else raw
+                    parts = k.split(":", 1)
+                    if len(parts) != 2:
+                        continue
+                    chain, addr = parts
+                    snap_raw = await r.lindex(f"gem_snapshots:{k}", 0)
+                    if not snap_raw:
+                        continue
+                    try:
+                        snap = _json.loads(snap_raw)
+                        ts = snap.get("ts") or snap.get("time") or 0
+                        if isinstance(ts, (int, float)) and ts > 10**12:
+                            ts /= 1000.0
+                    except Exception:
+                        continue
+                    res = await con.execute("""
+                        INSERT INTO gem_snapshots_archive (chain, token_address, snap_ts, data)
+                        VALUES ($1, $2, to_timestamp($3), $4::jsonb)
+                        ON CONFLICT (chain, token_address, snap_ts) DO NOTHING""",
+                        chain, addr, float(ts), snap_raw.decode() if isinstance(snap_raw, bytes) else snap_raw)
+                    if res.endswith(" 1"):
+                        archived += 1
+                logger.info("cron_gem_snapshot_archive_done", tracked=len(keys), archived=archived)
+        except Exception as exc:
+            logger.warning("cron_gem_snapshot_archive_failed", error=str(exc))
+
+        await asyncio.sleep(ARCHIVE_INTERVAL)
+
+
 async def cron_portfolio_rebalance():
     """
     Periodically compute portfolio rebalancing suggestions.
@@ -147,6 +207,7 @@ async def run_all_crons():
         cron_gem_paper_trader(),
         cron_gem_model(),
         cron_smart_money(),
+        cron_gem_snapshot_archive(),
         cron_portfolio_rebalance(),
         return_exceptions=True,
     )

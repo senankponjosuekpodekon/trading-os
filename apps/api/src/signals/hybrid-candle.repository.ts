@@ -9,6 +9,11 @@ import { AlphaVantageCandleRepository } from './alphavantage-candle.repository';
 
 const CRYPTO_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'MATIC', 'NEAR'];
 
+const HYBRID_TF_MS: Record<string, number> = {
+  '1m': 60_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000,
+  '1h': 3_600_000, '2h': 7_200_000, '4h': 14_400_000, '1d': 86_400_000,
+};
+
 function isCrypto(symbol: string): boolean {
   const base = symbol.split('/')[0];
   return CRYPTO_SYMBOLS.includes(base);
@@ -74,16 +79,22 @@ export class HybridCandleRepository extends CandleRepository {
   }
 
   async getSince(symbol: string, timeframe: string, since: Date, until?: Date): Promise<Candle[]> {
-    // 1. Essayer le cache local
+    // 1. Essayer le cache local — mais seulement s'il COUVRE la fenêtre
+    // demandée. Une seule bougie stockée ne doit pas court-circuiter les
+    // providers : sinon les signaux ne peuvent jamais évaluer TP/SL et
+    // restent STILL_OPEN indéfiniment.
     const local = await this.localRepo.getSince(symbol, timeframe, since, until);
-    if (local.length > 0) {
+    if (local.length > 0 && this._localCovers(local, timeframe, until)) {
       this.logger.log(`Cache hit: ${local.length} candles for ${symbol} ${timeframe}`);
       return local;
+    }
+    if (local.length > 0) {
+      this.logger.log(`Cache partial (${local.length} candles, stale) for ${symbol} ${timeframe} — provider fallback`);
     }
 
     // 2. Essayer l'engine (live)
     const engine = await this.engineRepo.getSince(symbol, timeframe, since, until);
-    if (engine.length > 0) {
+    if (engine && engine.length > 0) {
       this.logger.log(`Engine hit: ${engine.length} candles for ${symbol} ${timeframe}`);
       return engine;
     }
@@ -107,5 +118,15 @@ export class HybridCandleRepository extends CandleRepository {
 
   async getLowerTimeframeWindow(symbol: string, timeframe: string, candleOpenTime: number): Promise<Candle[]> {
     return this.localRepo.getLowerTimeframeWindow(symbol, timeframe, candleOpenTime);
+  }
+
+  /** Le cache local couvre la fenêtre si sa dernière bougie atteint `until`
+   * (ou le présent quand pas de borne) à ±1 timeframe près. */
+  private _localCovers(local: Candle[], timeframe: string, until?: Date): boolean {
+    const last = local[local.length - 1];
+    if (!last) return false;
+    const tfMs = HYBRID_TF_MS[timeframe] ?? 3_600_000;
+    const horizon = until ? until.getTime() : Date.now();
+    return last.openTime >= horizon - tfMs;
   }
 }

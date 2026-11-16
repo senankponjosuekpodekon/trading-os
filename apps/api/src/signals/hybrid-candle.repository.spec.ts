@@ -57,13 +57,26 @@ describe('HybridCandleRepository', () => {
   });
 
   it('should use local cache first', async () => {
-    const mockCandles = [{ openTime: 1695000000000, open: 27000, high: 27100, low: 26900, close: 27050 }];
+    const mockCandles = [{ openTime: Date.now() - 60_000, open: 27000, high: 27100, low: 26900, close: 27050 }];
     mockLocalRepo.getSince.mockResolvedValue(mockCandles);
 
     const result = await repository.getSince('BTC/USDT', '1h', new Date());
     expect(mockLocalRepo.getSince).toHaveBeenCalled();
     expect(mockEngineRepo.getSince).not.toHaveBeenCalled();
     expect(result).toEqual(mockCandles);
+  });
+
+  it('should NOT use a stale local cache (STILL_OPEN bug)', async () => {
+    // Une seule bougie ancienne stockée ne doit pas court-circuiter les
+    // providers — sinon les signaux restent STILL_OPEN indéfiniment.
+    const stale = [{ openTime: 1695000000000, open: 27000, high: 27100, low: 26900, close: 27050 }];
+    const fresh = [{ openTime: Date.now() - 60_000, open: 27100, high: 27200, low: 27000, close: 27150 }];
+    mockLocalRepo.getSince.mockResolvedValue(stale);
+    mockEngineRepo.getSince.mockResolvedValue(fresh);
+
+    const result = await repository.getSince('BTC/USDT', '1h', new Date());
+    expect(mockEngineRepo.getSince).toHaveBeenCalled();
+    expect(result).toEqual(fresh);
   });
 
   it('should fallback to engine if local is empty', async () => {

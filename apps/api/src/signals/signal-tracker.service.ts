@@ -293,6 +293,8 @@ export class SignalTrackerService {
       where: { id: signalId },
       data: {
         executionStatus: outcome.status as PrismaSignalExecutionStatus,
+        // status reflète la résolution — sinon tout reste 'ACTIVE' à vie
+        status: outcome.status === 'EXPIRED' ? 'INVALIDATED' : 'CLOSED',
         ...(outcome.pnlPct !== null ? { finalPnlPct: outcome.pnlPct } : {}),
         ...(mae !== null ? { maxAdverseExcursionPct: mae } : {}),
         maxFavorableExcursionPct: mfe,

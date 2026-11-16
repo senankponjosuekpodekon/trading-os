@@ -126,6 +126,57 @@ async def _close(r, pid: str, pos: Dict[str, Any], price: float, reason: str) ->
     await r.srem(POSITIONS_SET, pid)
     await r.lpush(CLOSED_LIST, json.dumps(pos))
     await r.ltrim(CLOSED_LIST, 0, 499)
+    await _persist_closed_trade(pos)
+
+
+_DB_READY = False
+
+
+async def _persist_closed_trade(pos: Dict[str, Any]) -> None:
+    """Historise le trade clos en Postgres — les listes Redis sont bornées
+    (500 entrées) et volatiles : sans ça le win rate paper n'est mesurable
+    que sur une fenêtre glissante et disparaît au flush."""
+    global _DB_READY
+    try:
+        from utils.db_pool import get_shared_pool as get_pool
+        pool = await get_pool()
+        async with pool.acquire() as con:
+            if not _DB_READY:
+                await con.execute("""
+                    CREATE TABLE IF NOT EXISTS gem_paper_trades (
+                        id BIGSERIAL PRIMARY KEY,
+                        chain TEXT NOT NULL,
+                        token_address TEXT NOT NULL,
+                        symbol TEXT,
+                        entry_price DOUBLE PRECISION,
+                        exit_price DOUBLE PRECISION,
+                        entry_ts TIMESTAMPTZ,
+                        exit_ts TIMESTAMPTZ,
+                        status TEXT,
+                        total_perf_pct DOUBLE PRECISION,
+                        realized_pct DOUBLE PRECISION,
+                        gem_score INT,
+                        payload JSONB,
+                        created_at TIMESTAMPTZ DEFAULT now()
+                    )""")
+                await con.execute("""
+                    CREATE INDEX IF NOT EXISTS gem_paper_trades_ts_idx
+                    ON gem_paper_trades (exit_ts DESC)""")
+                _DB_READY = True
+            await con.execute("""
+                INSERT INTO gem_paper_trades
+                    (chain, token_address, symbol, entry_price, exit_price,
+                     entry_ts, exit_ts, status, total_perf_pct, realized_pct,
+                     gem_score, payload)
+                VALUES ($1,$2,$3,$4,$5,to_timestamp($6),to_timestamp($7),$8,$9,$10,$11,$12::jsonb)""",
+                pos.get("chain", ""), pos.get("address", ""), pos.get("symbol"),
+                pos.get("entry_price"), pos.get("exit_price"),
+                pos.get("entry_ts") or 0, pos.get("exit_ts") or 0,
+                pos.get("status"), pos.get("total_perf_pct"),
+                pos.get("realized_pct"), pos.get("entry_score"),
+                json.dumps(pos))
+    except Exception as exc:
+        logger.warning("gem_paper_db_persist_failed", error=str(exc))
 
 
 async def _notify(pid: str, pos: Dict[str, Any], price: float, level: str, sell_pct: int = 0) -> None:

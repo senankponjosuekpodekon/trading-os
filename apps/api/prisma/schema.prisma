@@ -286,6 +286,7 @@ enum SignalStatus {
   PENDING
   ACTIVE
   INVALIDATED
+  CLOSED
 }
 
 model Signal {
