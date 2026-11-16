@@ -63,6 +63,43 @@ export class PortfoliosService {
       ORDER BY created_at DESC LIMIT ${limit}`;
   }
 
+  /** Config effective : ligne DB + adapters enregistrés côté engine. */
+  async execConfig() {
+    const rows: any[] = await this.prisma.$queryRaw`
+      SELECT mode, live_venues, gate_fail_closed, updated_by, updated_at
+      FROM execution_config WHERE id='default'`;
+    const db = rows[0] ?? null;
+    let engine: any = null;
+    const engineUrl = this.config.get<string>('ENGINE_URL', 'http://engine:8000');
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`${engineUrl}/portfolio/execution-status`, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.ok) engine = await res.json();
+    } catch {}
+    return { db, engine };
+  }
+
+  /** Écrit la config pilotée UI — l'engine la relit sous ~30s. */
+  async updateExecConfig(userId: string, dto: { mode?: string; live_venues?: string[]; gate_fail_closed?: boolean }) {
+    const mode = dto.mode;
+    if (mode && !['shadow', 'paper', 'live'].includes(mode)) {
+      throw new Error('mode invalide (shadow|paper|live)');
+    }
+    const venues = dto.live_venues
+      ? JSON.stringify(dto.live_venues.map(v => v.toUpperCase()))
+      : null;
+    await this.prisma.$executeRaw`
+      UPDATE execution_config SET
+        mode = COALESCE(${mode ?? null}, mode),
+        live_venues = COALESCE(${venues}::jsonb, live_venues),
+        gate_fail_closed = COALESCE(${dto.gate_fail_closed ?? null}, gate_fail_closed),
+        updated_by = ${userId}, updated_at = now()
+      WHERE id = 'default'`;
+    return this.execConfig();
+  }
+
   async findByUser(userId: string) {
     return this.prisma.portfolio.findMany({
       where: { userId },

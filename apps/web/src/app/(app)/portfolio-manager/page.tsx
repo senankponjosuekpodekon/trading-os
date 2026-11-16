@@ -1,8 +1,8 @@
 'use client';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  TrendingUp, TrendingDown, Wallet, Shield, Activity,
+  TrendingUp, TrendingDown, Wallet, Shield, Activity, Zap,
   AlertTriangle, Layers, Globe, RefreshCw, BarChart3, BookOpen,
 } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -225,6 +225,88 @@ function Dashboard({ portfolio }: { portfolio: Portfolio }) {
   );
 }
 
+interface ExecStatus {
+  db: { mode: string; live_venues: string[]; gate_fail_closed: boolean; updated_at: string } | null;
+  engine: { mode: string; live_venues: string[]; gate_fail_closed: boolean; source: string; adapters: Record<string, string> } | null;
+}
+const VENUES = ['FUTURES', 'MARGIN', 'SPOT', 'SYNTHETIC', 'GEM'];
+
+function ExecutionPanel() {
+  const qc = useQueryClient();
+  const { data } = useQuery<ExecStatus>({
+    queryKey: ['exec-config'],
+    queryFn: async () => (await api.get('/portfolios/execution/config')).data,
+    refetchInterval: 30_000,
+  });
+  const [edit, setEdit] = useState<{ mode: string; venues: Set<string>; gfc: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const cur = edit ?? {
+    mode: data?.db?.mode ?? data?.engine?.mode ?? 'shadow',
+    venues: new Set(data?.db?.live_venues ?? data?.engine?.live_venues ?? []),
+    gfc: data?.db?.gate_fail_closed ?? data?.engine?.gate_fail_closed ?? false,
+  };
+  const modeColors: Record<string, string> = { shadow: 'text-gray-400', paper: 'text-amber-400', live: 'text-red-400' };
+
+  const save = async () => {
+    setSaving(true); setErr('');
+    try {
+      await api.put('/portfolios/execution/config', {
+        mode: cur.mode, live_venues: [...cur.venues], gate_fail_closed: cur.gfc,
+      });
+      setEdit(null);
+      qc.invalidateQueries({ queryKey: ['exec-config'] });
+    } catch (e: any) {
+      setErr(e?.response?.status === 403 ? 'Admin requis' : (e?.response?.data?.message || 'Erreur'));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm text-gray-400 flex items-center gap-2"><Zap className="w-4 h-4" /> Exécution</span>
+        {data?.engine?.source && <span className="text-xs text-gray-600">source: {data.engine.source}</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <select value={cur.mode} onChange={e => setEdit({ ...cur, mode: e.target.value })}
+          className={`bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm font-mono ${modeColors[cur.mode]}`}>
+          {['shadow', 'paper', 'live'].map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <label className="flex items-center gap-1.5 text-xs text-gray-400">
+          <input type="checkbox" checked={cur.gfc} onChange={e => setEdit({ ...cur, gfc: e.target.checked })} className="accent-red-500" />
+          gate fail-closed (requis live)
+        </label>
+        <span className="text-xs text-gray-500">venues live :</span>
+        {VENUES.map(v => (
+          <label key={v} className={`flex items-center gap-1 text-xs font-mono ${cur.venues.has(v) ? 'text-red-300' : 'text-gray-500'}`}>
+            <input type="checkbox" checked={cur.venues.has(v)}
+              onChange={e => { const s = new Set(cur.venues); e.target.checked ? s.add(v) : s.delete(v); setEdit({ ...cur, venues: s }); }}
+              className="accent-red-500" />
+            {v}
+          </label>
+        ))}
+        {edit && <button onClick={save} disabled={saving}
+          className="ml-auto px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-xs">
+          {saving ? '…' : 'Appliquer'}</button>}
+      </div>
+      {err && <div className="text-red-400 text-xs mt-2">{err}</div>}
+      {data?.engine?.adapters && Object.keys(data.engine.adapters).length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {Object.entries(data.engine.adapters).map(([v, a]) => (
+            <span key={v} className="text-xs px-2 py-1 rounded border border-emerald-700/50 bg-emerald-900/20 text-emerald-300 font-mono">
+              {v}: {a}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="text-xs text-gray-600 mt-2">
+        Live effectif = mode live + venue coché + adapter enregistré + fail-closed. Sans ça → shadow.
+      </div>
+    </div>
+  );
+}
+
 export default function PortfolioManagerPage() {
   const [mode, setMode] = useState<Mode>('PAPER');
   const { data: portfolios, isLoading } = useQuery<Portfolio[]>({
@@ -253,6 +335,8 @@ export default function PortfolioManagerPage() {
           ))}
         </div>
       </div>
+
+      <ExecutionPanel />
 
       {!pf ? (
         <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-10 text-center text-gray-500">

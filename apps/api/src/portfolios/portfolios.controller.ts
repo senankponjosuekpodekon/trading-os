@@ -1,5 +1,8 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards, Request } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 import { PortfoliosService } from './portfolios.service';
 import { CreatePortfolioDto } from './dto/create-portfolio.dto';
 
@@ -31,5 +34,19 @@ export class PortfoliosController {
   @Get(':id/ledger')
   ledger(@Request() req: any, @Param('id') id: string, @Query('limit') limit?: string) {
     return this.portfoliosService.ledger(req.user.id, id, limit ? +limit : 100);
+  }
+
+  /** Config exécution effective : ligne DB + statut adapters (engine). */
+  @Get('execution/config')
+  execConfig() {
+    return this.portfoliosService.execConfig();
+  }
+
+  /** Pilotage live — admin uniquement. Mode + venues + fail-closed. */
+  @Put('execution/config')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  updateExecConfig(@Request() req: any, @Body() dto: { mode?: string; live_venues?: string[]; gate_fail_closed?: boolean }) {
+    return this.portfoliosService.updateExecConfig(req.user.id, dto);
   }
 }

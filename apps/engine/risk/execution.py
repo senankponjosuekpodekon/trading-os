@@ -28,6 +28,43 @@ _LIVE_VENUES = {v.strip().upper() for v in
 
 _LIVE_ADAPTERS: dict[str, object] = {}  # venue → adapter, phase C
 
+# ── Config pilotable UI : table execution_config, relue toutes les 30s.
+# Priorité : la ligne DB ne s'applique que si updated_by est posé (modifiée
+# via l'API) — sinon les env font foi (comportement inchangé).
+_cfg_cache: dict | None = None
+_cfg_ts: float = 0.0
+
+
+async def _exec_config() -> dict:
+    global _cfg_cache, _cfg_ts
+    import time
+    if _cfg_cache and (time.time() - _cfg_ts) < 30:
+        return _cfg_cache
+    cfg = {"mode": EXECUTION_MODE, "live_venues": set(_LIVE_VENUES),
+           "gate_fail_closed": os.getenv("GATE_FAIL_CLOSED") == "1",
+           "source": "env"}
+    try:
+        from utils.db_pool import get_shared_pool
+        pool = await get_shared_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT mode, live_venues, gate_fail_closed, updated_by "
+                "FROM execution_config WHERE id='default'")
+            if row and row["updated_by"]:
+                cfg = {"mode": row["mode"],
+                       "live_venues": set(row["live_venues"] or []),
+                       "gate_fail_closed": row["gate_fail_closed"],
+                       "source": "db"}
+    except Exception:
+        pass
+    _cfg_cache = cfg
+    _cfg_ts = time.time()
+    return cfg
+
+
+def adapters_status() -> dict:
+    return {v: type(a).__name__ for v, a in _LIVE_ADAPTERS.items()}
+
 
 async def execute_signal(portfolio_id: str, signal_id: str | None,
                          symbol: str, direction: str, entry: float,
@@ -53,14 +90,15 @@ async def execute_signal(portfolio_id: str, signal_id: str | None,
 
     qty = decision["qty"]
     venue = decision.get("venue")
+    cfg = await _exec_config()
 
-    if EXECUTION_MODE == "shadow":
+    if cfg["mode"] == "shadow":
         await _insert_order(portfolio_id, signal_id, symbol, direction,
                             qty, entry, None, "SHADOW", "shadow", decision)
         return {"status": "SHADOW", "qty": qty,
                 "would_have_executed": decision["notional"]}
 
-    if EXECUTION_MODE == "paper":
+    if cfg["mode"] == "paper":
         await _insert_order(portfolio_id, signal_id, symbol, direction,
                             qty, entry, entry, "PAPER_FILLED", "paper",
                             decision)
@@ -69,15 +107,14 @@ async def execute_signal(portfolio_id: str, signal_id: str | None,
         return {"status": "PAPER_FILLED", "qty": qty, "fill": entry}
 
     # live — conditions cumulatives, toutes requises :
-    # 1. venue explicitement activée (EXECUTION_LIVE_VENUES)
-    if venue not in _LIVE_VENUES:
+    # 1. venue explicitement activée (EXECUTION_LIVE_VENUES / UI)
+    if venue not in cfg["live_venues"]:
         return {"status": "FAILED",
-                "reason": f"venue {venue} non activé — ajouter à "
-                          f"EXECUTION_LIVE_VENUES pour le live"}
-    # 2. garde-fou global posé côté env engine
-    if os.getenv("GATE_FAIL_CLOSED") != "1":
+                "reason": f"venue {venue} non activé pour le live"}
+    # 2. garde-fou global
+    if not cfg["gate_fail_closed"]:
         return {"status": "FAILED",
-                "reason": "GATE_FAIL_CLOSED=1 requis pour le live "
+                "reason": "gate_fail_closed requis pour le live "
                           "(un gate silencieux ne doit jamais exécuter)"}
 
     if venue == "SPOT":

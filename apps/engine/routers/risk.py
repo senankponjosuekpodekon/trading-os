@@ -451,3 +451,13 @@ async def confirm_order(order_id: str, req: ConfirmOrderRequest):
     """BRVM : saisie du fill réel après exécution manuelle (T+3)."""
     from risk.execution import confirm_manual_order
     return await confirm_manual_order(order_id, req.fill_price, req.operator)
+
+
+@router.get("/portfolio/execution-status")
+async def execution_status():
+    """Config effective (env ou DB si pilotée UI) + adapters enregistrés."""
+    from risk.execution import _exec_config, adapters_status
+    cfg = await _exec_config()
+    return {"mode": cfg["mode"], "live_venues": sorted(cfg["live_venues"]),
+            "gate_fail_closed": cfg["gate_fail_closed"],
+            "source": cfg["source"], "adapters": adapters_status()}
