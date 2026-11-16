@@ -23,6 +23,14 @@ import os
 import time
 from flask import Flask, jsonify, request
 
+# Sous Wine, le handshake IPC lib↔terminal reste en état "initializing"
+# (-10005 IPC timeout). patch_wine_mt5 corrige le status byte en mémoire.
+# No-op si le module est absent (Windows natif n'en a pas besoin).
+try:
+    import patch_wine_mt5  # noqa: F401
+except ImportError:
+    pass
+
 import MetaTrader5 as mt5
 
 app = Flask(__name__)
@@ -40,15 +48,25 @@ def _auth():
 
 
 def _ensure() -> bool:
-    """Init + (re)connexion au terminal si besoin."""
+    """Init + (re)connexion au terminal si besoin.
+    Sans credentials : s'attache au terminal déjà loggé (login manuel)."""
     if mt5.terminal_info() is not None and mt5.terminal_info().connected:
         return True
     mt5.shutdown()
-    return mt5.initialize(
-        login=int(os.environ["MT5_LOGIN"]),
-        password=os.environ["MT5_PASSWORD"],
-        server=os.environ["MT5_SERVER"],
+    path = os.getenv(
+        "MT5_TERMINAL_PATH",
+        r"C:\Program Files\MetaTrader 5\terminal64.exe",
     )
+    kw = {}
+    if os.getenv("MT5_LOGIN"):
+        kw = {
+            "login": int(os.environ["MT5_LOGIN"]),
+            "password": os.environ["MT5_PASSWORD"],
+            "server": os.environ["MT5_SERVER"],
+        }
+    # initialize(path) démarre le terminal si besoin et établit l'IPC ;
+    # sans credentials on s'attache à la session déjà loggée.
+    return mt5.initialize(path, **kw) or mt5.initialize(**kw)
 
 
 @app.before_request
@@ -61,8 +79,12 @@ def guard():
 
 @app.get("/health")
 def health():
+    ok = _ensure()
     info = mt5.terminal_info()
+    err = mt5.last_error() if not ok else None
     return {"connected": bool(info and info.connected),
+            "initialized": ok,
+            "last_error": err,
             "terminal": str(info.build) if info else None}
 
 
@@ -173,5 +195,8 @@ def close_all():
 
 
 if __name__ == "__main__":
-    # 127.0.0.1 UNIQUEMENT — jamais exposé publiquement.
-    app.run(host="127.0.0.1", port=5555)
+    # Bind local UNIQUEMENT : 127.0.0.1 par défaut, ou l'IP gateway docker
+    # (ex. 172.17.0.1) pour que les containers y accèdent sans exposition
+    # publique. Jamais 0.0.0.0.
+    host = os.getenv("MT5_BIND_HOST", "127.0.0.1")
+    app.run(host=host, port=int(os.getenv("MT5_BRIDGE_PORT", "5555")))
