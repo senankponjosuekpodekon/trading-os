@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PortfoliosService } from './portfolios.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotaService } from '../billing/quota.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('PortfoliosService', () => {
   let service: PortfoliosService;
@@ -21,6 +22,7 @@ describe('PortfoliosService', () => {
         PortfoliosService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: QuotaService, useValue: { assertCanCreatePortfolio: jest.fn().mockResolvedValue(undefined) } },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('http://engine:8000') } },
       ],
     }).compile();
 

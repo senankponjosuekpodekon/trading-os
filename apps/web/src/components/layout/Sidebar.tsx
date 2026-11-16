@@ -41,6 +41,7 @@ const groups: NavGroup[] = [
     title: 'Portfolio',
     icon: Briefcase,
     items: [
+      { href: '/portfolio-manager', label: 'Manager', icon: Layers },
       { href: '/portfolio',   label: 'Portfolio',   icon: Briefcase },
       { href: '/risk',        label: 'Risk',        icon: ShieldAlert },
       { href: '/performance', label: 'Performance', icon: Trophy },
