@@ -397,3 +397,11 @@ def record_daily_return(req: RecordDailyReturnRequest):
         return {"ok": True}
     except Exception as e:
         return {"error": str(e), "ok": False}
+
+
+@router.get("/portfolio/state/{portfolio_id}")
+async def portfolio_state_endpoint(portfolio_id: str, target_risk: float = 0.12):
+    """État consolidé : equity, marge engagée/libre, risque-to-stop par
+    cluster et par venue, perte scénario gap. Lecture seule."""
+    from risk.portfolio_state import portfolio_state
+    return await portfolio_state(portfolio_id, target_risk=target_risk)
