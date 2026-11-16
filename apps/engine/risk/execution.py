@@ -21,6 +21,11 @@ logger = get_logger(__name__)
 
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "shadow").lower()
 
+# Activation live PAR VENUE : EXECUTION_LIVE_VENUES="FUTURES,MARGIN".
+# Un venue absent de la liste → shadow même si EXECUTION_MODE=live.
+_LIVE_VENUES = {v.strip().upper() for v in
+                os.getenv("EXECUTION_LIVE_VENUES", "").split(",") if v.strip()}
+
 _LIVE_ADAPTERS: dict[str, object] = {}  # venue → adapter, phase C
 
 
@@ -63,7 +68,18 @@ async def execute_signal(portfolio_id: str, signal_id: str | None,
         # (positions.service) — l'ordre sert de journal d'exécution.
         return {"status": "PAPER_FILLED", "qty": qty, "fill": entry}
 
-    # live
+    # live — conditions cumulatives, toutes requises :
+    # 1. venue explicitement activée (EXECUTION_LIVE_VENUES)
+    if venue not in _LIVE_VENUES:
+        return {"status": "FAILED",
+                "reason": f"venue {venue} non activé — ajouter à "
+                          f"EXECUTION_LIVE_VENUES pour le live"}
+    # 2. garde-fou global posé côté env engine
+    if os.getenv("GATE_FAIL_CLOSED") != "1":
+        return {"status": "FAILED",
+                "reason": "GATE_FAIL_CLOSED=1 requis pour le live "
+                          "(un gate silencieux ne doit jamais exécuter)"}
+
     if venue == "SPOT":
         # BRVM : pas d'API — instruction opérateur, confirmation manuelle
         # via POST /portfolio/orders/{id}/confirm (settlement T+3).
