@@ -17,6 +17,7 @@ describe('PortfoliosService', () => {
     },
     position: { findMany: jest.fn().mockResolvedValue([{ id: 'pos1' }]) },
     $queryRaw: jest.fn().mockResolvedValue([{ equity: 10000 }]),
+    $executeRaw: jest.fn().mockResolvedValue(1),
   };
 
   beforeEach(async () => {
@@ -76,5 +77,21 @@ describe('PortfoliosService', () => {
     expect(await service.snapshots('u1', 'p1')).toEqual([{ equity: 10000 }]);
     expect(await service.ledger('u1', 'p1')).toEqual([{ equity: 10000 }]);
     expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('execConfig() merges the db row and a null engine status', async () => {
+    const result = await service.execConfig();
+    expect(result.db).toEqual({ equity: 10000 });
+    expect(result.engine).toBeNull();
+  });
+
+  it('updateExecConfig() rejects an invalid mode', async () => {
+    await expect(service.updateExecConfig('u1', { mode: 'yolo' })).rejects.toThrow('mode invalide');
+  });
+
+  it('updateExecConfig() writes and returns merged config', async () => {
+    const result = await service.updateExecConfig('u1', { mode: 'paper', live_venues: ['margin'], gate_fail_closed: true });
+    expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+    expect(result.db).toBeDefined();
   });
 });
