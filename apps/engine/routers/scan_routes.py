@@ -360,6 +360,17 @@ async def scan_multi(req: ScanRequest):
                     _liq = await asyncio.wait_for(compute_liquidity_score(sym, "CRYPTO"), timeout=5.0)
                 except Exception:
                     _liq = None
+                # Dérivés Binance (funding/OI/LS/taker) — positionnement que le
+                # spot ne voit pas. None si pas de perp → le signal reste SPOT.
+                try:
+                    from market.futures_data import fetch_derivatives_context
+                    _der = await asyncio.wait_for(fetch_derivatives_context(sym), timeout=6.0)
+                    if _der:
+                        if _liq is None:
+                            _liq = {}
+                        _liq["derivatives"] = _der
+                except Exception:
+                    pass
             return sym, _mcap, _liq
 
         ml_results = await asyncio.gather(
@@ -545,6 +556,27 @@ async def scan_multi(req: ScanRequest):
             brvm_results = []
 
     results = cached_results + computed_results + brvm_results
+
+    # 2b. Tag venue d'exécution par signal — spot / futures / margin.
+    # Chaque venue a des données et des risques propres (funding, liquidation,
+    # levier vs simple achat). Persisté dans metadata côté API → le front et
+    # le ML savent sur quelle venue le signal se joue.
+    for r in results:
+        at = get_asset_type(r.get("symbol", ""))
+        r["asset_type"] = at
+        if at == "CRYPTO":
+            der = (liquidity_data.get(r.get("symbol", "")) or {}).get("derivatives")
+            if der:
+                r["market_type"] = "FUTURES"   # perp Binance disponible
+                r["derivatives"] = der
+            else:
+                r["market_type"] = "SPOT"      # alt sans perp → spot uniquement
+        elif at in ("FOREX", "COMMODITY", "GOLD"):
+            r["market_type"] = "MARGIN"        # CFD Oanda = trading sur marge
+        elif at == "SYNTHETIC":
+            r["market_type"] = "FUTURES"       # synthétiques = perp-like
+        else:
+            r["market_type"] = "SPOT"          # BRVM, actions
 
     # 3. Enrichissement sentiment news (en parallèle, timeout 2s max)
     if config.settings.news_api_key:

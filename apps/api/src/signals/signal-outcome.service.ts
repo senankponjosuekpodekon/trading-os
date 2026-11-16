@@ -94,6 +94,12 @@ export class SignalOutcomeService {
             detectedPatterns: detected,
             decisionTrace: r.decisionTrace ?? null,
             explanation: r.explanation ?? null,
+            // Venue d'exécution : SPOT | FUTURES | MARGIN — chaque venue a
+            // ses données propres (funding/OI sur perp, spread sur CFD…)
+            marketType: r.market_type ?? null,
+            assetType: r.asset_type ?? null,
+            // Contexte dérivés au moment du signal → feature entraînable
+            derivatives: r.derivatives ?? null,
           } as any,
           expectedPnlPct,
         },

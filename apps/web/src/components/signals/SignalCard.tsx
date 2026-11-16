@@ -180,6 +180,28 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
             <span className="text-white font-bold text-lg">{signal.asset?.symbol ?? '—'}</span>
             <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">{signal.timeframe}</span>
             <AssetTypeBadge type={inferAssetType(signal.asset?.symbol)} />
+            {(signal.metadata as any)?.market_type && (
+              <span
+                className={`text-xs px-2 py-0.5 rounded border font-medium ${
+                  (signal.metadata as any).market_type === 'FUTURES'
+                    ? 'border-purple-500/40 bg-purple-500/10 text-purple-400'
+                    : (signal.metadata as any).market_type === 'MARGIN'
+                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
+                    : 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                }`}
+                title={
+                  (signal.metadata as any).market_type === 'FUTURES'
+                    ? 'Exécutable en perp — funding/OI analysés, levier possible'
+                    : (signal.metadata as any).market_type === 'MARGIN'
+                    ? 'Trading sur marge (CFD) — spread + sessions déterminants'
+                    : 'Exécution spot uniquement — pas de levier'
+                }
+              >
+                {(signal.metadata as any).market_type === 'FUTURES' ? '⚡ PERP'
+                  : (signal.metadata as any).market_type === 'MARGIN' ? '📊 MARGIN'
+                  : 'SPOT'}
+              </span>
+            )}
             {signal.metadata?.risk_level && (
               <RiskLevelBadge
                 level={signal.metadata.risk_level}

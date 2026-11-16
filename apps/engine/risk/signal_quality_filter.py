@@ -770,6 +770,19 @@ def apply_quality_gate(
             total_penalty += 0.08
             flags.append(f"Carnet contredit le signal ({imbalance:+.0%} bids)")
 
+    # Layer 3d — Dérivés perp (funding/OI/retail ratio) : le positionnement
+    # que le spot ne voit pas. Contradiction = signal contre le positionnement.
+    deriv = (liquidity_data or {}).get("derivatives") or {}
+    if deriv:
+        from market.futures_data import derivatives_adjustment
+        adj = derivatives_adjustment(deriv, signal)
+        if adj > 0:
+            total_penalty = max(0.0, total_penalty - 0.05)
+            flags.append("Positionnement dérivés favorable (funding/OI/retail)")
+        elif adj < 0:
+            total_penalty += 0.10
+            flags.append("Positionnement dérivés adverse (funding/OI/retail)")
+
     # Layer 3b — Volume gate (with BRVM normalization)
     vol_result = _check_volume_gate(df, signal, asset_type, symbol)
     if not vol_result["passed"]:
