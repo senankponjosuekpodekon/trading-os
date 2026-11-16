@@ -13,7 +13,10 @@ describe('PortfoliosService', () => {
         { id: 'p1', userId: 'u1', name: 'Default', positions: [{ id: 'pos1', status: 'OPEN' }] },
       ]),
       create: jest.fn().mockResolvedValue({ id: 'p2', userId: 'u1', name: 'Swing', type: 'PAPER' }),
+      findFirst: jest.fn().mockResolvedValue({ id: 'p1', userId: 'u1', type: 'PAPER', currentCapital: '10000' }),
     },
+    position: { findMany: jest.fn().mockResolvedValue([{ id: 'pos1' }]) },
+    $queryRaw: jest.fn().mockResolvedValue([{ equity: 10000 }]),
   };
 
   beforeEach(async () => {
@@ -54,5 +57,24 @@ describe('PortfoliosService', () => {
         currentCapital: 5000,
       },
     });
+  });
+
+  it('state() falls back to a degraded snapshot when the engine is down', async () => {
+    const result = await service.state('u1', 'p1');
+    expect(result.portfolio_id).toBe('p1');
+    expect(result.stale).toBe(true);
+    expect(result.equity).toBe(10000);
+    expect(result.n_positions).toBe(1);
+  });
+
+  it('state() throws NotFoundException for a foreign portfolio', async () => {
+    mockPrisma.portfolio.findFirst.mockResolvedValueOnce(null);
+    await expect(service.state('u1', 'other')).rejects.toThrow('Portfolio not found');
+  });
+
+  it('snapshots() and ledger() query the raw tables', async () => {
+    expect(await service.snapshots('u1', 'p1')).toEqual([{ equity: 10000 }]);
+    expect(await service.ledger('u1', 'p1')).toEqual([{ equity: 10000 }]);
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 });
