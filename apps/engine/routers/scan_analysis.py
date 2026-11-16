@@ -1293,6 +1293,10 @@ def analyze_candles(
         "confidence":   confidence,
         "_confidence_before_sentiment": confidence,  # snapshot avant enrichissement sentiment
         "entry_price":  entry,
+        # Feed qui a fourni les bougies du scan — nécessaire car la
+        # résolution TP/SL doit utiliser le même provider (bug iv :
+        # entryPrice d'un feed ≠ bougies d'un autre feed).
+        "price_source": getattr(df, "attrs", {}).get("provider"),
         "stop_loss":    sl,
         "take_profit_1": tp1,
         "take_profit_2": tp2,

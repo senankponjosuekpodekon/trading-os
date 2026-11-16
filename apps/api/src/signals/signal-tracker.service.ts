@@ -140,7 +140,8 @@ export class SignalTrackerService {
     const until = signal.expiresAt
       ? new Date(signal.expiresAt.getTime() + this._timeframeMs(signal.timeframe))
       : undefined;
-    const newCandles = (await this.candles.getSince(signal.asset.symbol, signal.timeframe, since, until)) as RepoCandle[];
+    const priceSource = (signal.metadata as any)?.price_source ?? undefined;
+    const newCandles = (await this.candles.getSince(signal.asset.symbol, signal.timeframe, since, until, priceSource)) as RepoCandle[];
     if (newCandles.length === 0) {
       // Aucune bougie disponible mais signal expiré → clôturer quand même
       // sinon il reste PENDING/ACTIVE indéfiniment et bloque la dédup scan.

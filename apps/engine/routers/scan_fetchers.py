@@ -442,6 +442,7 @@ async def fetch_klines_fallback(
                 if df is not None and not df.empty:
                     for t in pending:
                         t.cancel()
+                    df.attrs["provider"] = name
                     asyncio.create_task(_notify_api_candle_closed(symbol, interval))
                     return df
     finally:

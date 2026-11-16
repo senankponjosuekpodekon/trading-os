@@ -76,6 +76,28 @@ def _ts_iso(t: float) -> str:
     return datetime.fromtimestamp(t).isoformat()
 
 
+# Fiche instrument (docs/instrument_spec.md) : si un CSV instrument_profile
+# est passé en 3e argument, les coûts viennent de la fiche — source unique,
+# fini les constantes dupliquées backtest/prod.
+_PROFILE_COSTS: dict = {}
+
+
+def _load_profiles(path: str) -> None:
+    for r in load(path):
+        carry = float(r.get("carry_rate") or 0)
+        per_8h = carry / 3.0 if r.get("carry_freq") == "daily" else carry
+        _PROFILE_COSTS[r["symbol"]] = {
+            "rt_frac": float(r.get("spread_rt") or 0)
+                       + float(r.get("taker_rt") or 0)
+                       + float(r.get("slippage_rt_obs") or 0),
+            "per_8h": per_8h,
+        }
+
+
+def cost_for(symbol: str) -> dict:
+    return _PROFILE_COSTS.get(symbol, COSTS[venue(symbol)])
+
+
 def _tf_seconds(tf: str) -> int:
     """'1h'->3600, '4h'->14400, '15m'->900, '1d'->86400."""
     tf = (tf or "1h").lower()
@@ -170,7 +192,7 @@ def _close_trade(entry, exit_px, reason, long_, sig, t_end, L, sl, ambiguous=0):
     """PnL net % marge + R multiple + durée, coûts par venue."""
     move = (exit_px - entry) / entry if long_ else (entry - exit_px) / entry
     dur_h = max(0.0, (t_end - ts(sig["entry_ts"])) / 3600.0)
-    c = COSTS[venue(sig["symbol"])]
+    c = cost_for(sig["symbol"])
     fees = c["rt_frac"] * L * 100
     holding = math.floor(dur_h / 8) * c["per_8h"] * L * 100
     sl_dist = abs(entry - sl) / entry if sl else None
@@ -263,6 +285,9 @@ def metrics(trades, label):
 def main():
     signals = load(sys.argv[1])
     candles_raw = load(sys.argv[2])
+    if len(sys.argv) > 3:
+        _load_profiles(sys.argv[3])
+        print(f"instrument_profile chargé : {len(_PROFILE_COSTS)} symboles")
     candles = {}
     for c in candles_raw:
         candles.setdefault((c["symbol"], c["timeframe"]), []).append(c)
@@ -284,7 +309,7 @@ def main():
         r = replay(s, candles[(s["symbol"], s["timeframe"])], 1)
         if r is None:
             continue
-        c = COSTS[venue(s["symbol"])]
+        c = cost_for(s["symbol"])
         hold_frac = math.floor(r[2] / 8) * c["per_8h"] * 100
         spot_trades.append((r[0] + hold_frac, day_of(s), r[3], r[1]))
         reasons[r[1]] = reasons.get(r[1], 0) + 1
@@ -303,7 +328,7 @@ def main():
         r = replay(s, candles[(s["symbol"], s["timeframe"])], 1, order="optimistic")
         if r is None:
             continue
-        c = COSTS[venue(s["symbol"])]
+        c = cost_for(s["symbol"])
         hold_frac = math.floor(r[2] / 8) * c["per_8h"] * 100
         opt_trades.append((r[0] + hold_frac, day_of(s), r[3], r[1]))
     print("=== ENCADREMENT ORDRE INTRABAR (×1) ===")
@@ -577,7 +602,7 @@ def main():
         f["entryPrice"] = str(new_e)
         r = replay(f, cs, 1)
         if r:
-            c = COSTS[venue(s["symbol"])]
+            c = cost_for(s["symbol"])
             rebase_stats.append((r[0] + math.floor(r[2]/8)*c["per_8h"]*100,
                                  day_of(s), r[3], r[1], s["execution_status"]))
     metrics([(t[0], t[1], t[2], t[3]) for t in rebase_stats], "REBASÉ")
@@ -632,7 +657,7 @@ def main():
             sd = abs(e - sl_) / e if sl_ else 0
             if sd <= 0:
                 continue
-            c = COSTS[v]
+            c = COSTS[v]  # décomposition par poste, niveau venue
             dur_f = r[2]
             gross_r = (r[0] + math.floor(dur_f / 8) * c["per_8h"] * 100
                        + c["rt_frac"] * 100) / (sd * 100)  # R avant tout coût

@@ -78,7 +78,7 @@ export class HybridCandleRepository extends CandleRepository {
     return candles;
   }
 
-  async getSince(symbol: string, timeframe: string, since: Date, until?: Date): Promise<Candle[]> {
+  async getSince(symbol: string, timeframe: string, since: Date, until?: Date, preferredProvider?: string): Promise<Candle[]> {
     // 1. Essayer le cache local — mais seulement s'il COUVRE la fenêtre
     // demandée. Une seule bougie stockée ne doit pas court-circuiter les
     // providers : sinon les signaux ne peuvent jamais évaluer TP/SL et
@@ -99,7 +99,18 @@ export class HybridCandleRepository extends CandleRepository {
       return engine;
     }
 
-    // 3. Fallback sur le bon provider selon le marché
+    // 3. Provider source du signal en priorité (bug iv : l'entryPrice a été
+    // produit par un feed précis — résoudre sur un autre feed décale les
+    // TP/SL de ~0.5-1.3×SL, 98.9% adverse sur commodités).
+    if (preferredProvider) {
+      const repo = this._repoFor(preferredProvider.toLowerCase());
+      if (repo) {
+        const hit = await this.tryRepo(preferredProvider, repo, symbol, timeframe, since, until);
+        if (hit) return hit;
+      }
+    }
+
+    // 4. Fallback sur le bon provider selon le marché
     if (isCrypto(symbol)) {
       return (await this.tryRepo('Binance', this.binanceRepo, symbol, timeframe, since, until)) ?? [];
     }
@@ -114,6 +125,19 @@ export class HybridCandleRepository extends CandleRepository {
     }
 
     return (await this.tryRepo('Yahoo', this.yahooRepo, symbol, timeframe, since, until)) ?? [];
+  }
+
+  /** Mappe le nom de provider engine (df.attrs['provider']) vers le repo
+   * local correspondant. 'deriv' n'a pas de repo dédié → engine. */
+  private _repoFor(provider: string): CandleRepository | null {
+    switch (provider) {
+      case 'binance': return this.binanceRepo;
+      case 'twelvedata': return this.twelveDataRepo;
+      case 'yfinance': case 'yahoo': return this.yahooRepo;
+      case 'alphavantage': return this.alphaVantageRepo;
+      case 'deriv': return this.engineRepo;
+      default: return null;
+    }
   }
 
   async getLowerTimeframeWindow(symbol: string, timeframe: string, candleOpenTime: number): Promise<Candle[]> {

@@ -196,6 +196,70 @@ async def cron_portfolio_rebalance():
         await asyncio.sleep(REBALANCE_INTERVAL)
 
 
+async def cron_instrument_profile_refresh():
+    """Mesure continue de la fiche instrument (toutes les 6h) :
+
+    - feed_offset_obs : écart moyen |entryPrice signal − close bougie
+      contenant l'entrée| / entryPrice, sur les 90 derniers jours — le
+      biais (iv) mesuré (0.5-1.3×SL adverse).
+    - candles_since : début réel de couverture bougies.
+    - tradable=false si aucune bougie n'a jamais été stockée.
+    """
+    INTERVAL = 6 * 3600
+    TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                  "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400}
+    await asyncio.sleep(1200)  # premier run 20min après boot
+    while True:
+        try:
+            from utils.db_pool import get_shared_pool as get_pool
+            pool = await get_pool()
+            async with pool.acquire() as con:
+                # feed_offset par symbole : médiane approx via percentile_cont
+                rows = await con.fetch("""
+                    SELECT a.symbol, s.timeframe, s."entryPrice", s."createdAt"
+                    FROM signals s JOIN assets a ON a.id = s."assetId"
+                    WHERE s."entryPrice" IS NOT NULL
+                      AND s."createdAt" > NOW() - INTERVAL '90 days'
+                """)
+                offsets: dict[str, list[float]] = {}
+                for r in rows:
+                    tf_s = TF_SECONDS.get(r["timeframe"], 3600)
+                    c = await con.fetchrow("""
+                        SELECT close FROM candles
+                        WHERE symbol=$1 AND timeframe=$2
+                          AND open_time <= $3::timestamp
+                          AND open_time + ($4 || ' seconds')::interval > $3::timestamp
+                        LIMIT 1""",
+                        r["symbol"], r["timeframe"], r["createdAt"], str(tf_s))
+                    if not c:
+                        continue
+                    e, close = float(r["entryPrice"]), float(c["close"])
+                    if e > 0:
+                        offsets.setdefault(r["symbol"], []).append(abs(e - close) / e)
+                for sym, vals in offsets.items():
+                    vals.sort()
+                    med = vals[len(vals) // 2]
+                    await con.execute("""
+                        UPDATE instrument_profile
+                        SET feed_offset_obs=$1, source='measured', updated_at=NOW()
+                        WHERE symbol=$2""", med, sym)
+                await con.execute("""
+                    UPDATE instrument_profile ip
+                    SET candles_since = sub.first_candle,
+                        tradable = (sub.first_candle IS NOT NULL),
+                        updated_at = NOW()
+                    FROM (SELECT symbol, MIN(open_time)::date AS first_candle
+                          FROM candles GROUP BY symbol) sub
+                    WHERE ip.symbol = sub.symbol""")
+                await con.execute("""
+                    UPDATE instrument_profile ip SET tradable=false, updated_at=NOW()
+                    WHERE NOT EXISTS (SELECT 1 FROM candles c WHERE c.symbol = ip.symbol)""")
+                logger.info("cron_instrument_profile_done", measured=len(offsets))
+        except Exception as exc:
+            logger.warning("cron_instrument_profile_failed", error=str(exc))
+        await asyncio.sleep(INTERVAL)
+
+
 async def run_all_crons():
     """Launch all cron jobs in parallel. Each cron is individually resilient
     (try/except inside the while loop), but we also use return_exceptions=True
@@ -209,5 +273,6 @@ async def run_all_crons():
         cron_smart_money(),
         cron_gem_snapshot_archive(),
         cron_portfolio_rebalance(),
+        cron_instrument_profile_refresh(),
         return_exceptions=True,
     )
