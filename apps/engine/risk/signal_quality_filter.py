@@ -697,6 +697,7 @@ def apply_quality_gate(
     symbol: str,
     entry: Optional[float] = None,
     tp1: Optional[float] = None,
+    stop_loss: Optional[float] = None,
     df=None,
     session_info: Optional[dict] = None,
     liquidity_data: Optional[dict] = None,
@@ -904,6 +905,23 @@ def apply_quality_gate(
                 flags.append("Vol term backwardation (complacency)")
         layer_scores["vol_term_structure"] = 100 - int(vol_ts_result.get("vol_term_penalty", 0) * 200)
 
+    # ── SHADOW — RR gate (non bloquant) ──────────────────────────────
+    # Mode shadow : on FLAGGE les signaux à RR < 1 sans les rejeter.
+    # Justification : WR et RR ne sont pas indépendants — un rejet dur
+    # changerait mécaniquement le WR ; et le seuil 1.0 est calibré sur
+    # l'échantillon qu'on évalue (data snooping). On mesure d'abord la
+    # performance des signaux flaggés vs non flaggés hors échantillon,
+    # rejet dur seulement si la tranche est confirmée perdante.
+    shadow_reject_rr = None
+    if signal in ("BUY", "SELL") and entry and tp1 and stop_loss:
+        risk = abs(entry - stop_loss)
+        reward = abs(tp1 - entry)
+        if risk > 0:
+            rr_ratio = reward / risk
+            if rr_ratio < 1.0:
+                shadow_reject_rr = round(rr_ratio, 3)
+                flags.append(f"[SHADOW] RR {rr_ratio:.2f} < 1.0 — aurait été rejeté")
+
     # Composite quality score
     if layer_scores:
         quality_score = int(sum(layer_scores.values()) / len(layer_scores))
@@ -922,6 +940,7 @@ def apply_quality_gate(
         "confidence_penalty": min(total_penalty, 0.5),
         "quality_flags": flags,
         "quality_score": quality_score,
+        "shadow_reject_rr": shadow_reject_rr,
     }
 
 

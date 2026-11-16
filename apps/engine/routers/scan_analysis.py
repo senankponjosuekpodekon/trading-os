@@ -120,6 +120,7 @@ def analyze_candles(
             symbol=symbol,
             entry=_syn_result.get("entry_price"),
             tp1=_syn_result.get("take_profit_1"),
+            stop_loss=_syn_result.get("stop_loss"),
             df=df,
             session_info=session_info,
             liquidity_data=estimate_liquidity_score_sync(symbol, "SYNTHETIC", df),
@@ -130,6 +131,7 @@ def analyze_candles(
         )
         _syn_result["quality_score"] = _syn_gate.get("quality_score", 0)
         _syn_result["quality_flags"] = _syn_gate.get("quality_flags", [])
+        _syn_result["shadow_reject_rr"] = _syn_gate.get("shadow_reject_rr")
         _syn_result["quality_size_multiplier"] = get_quality_size_multiplier(_syn_gate.get("quality_score", 0)) if _syn_result.get("signal") != "NEUTRAL" else 0
         if not _syn_gate["passed"]:
             _syn_result["signal"] = "NEUTRAL"
@@ -1168,6 +1170,7 @@ def analyze_candles(
         symbol=symbol,
         entry=entry,
         tp1=tp1,
+        stop_loss=sl,
         df=df,
         session_info=session_info,
         liquidity_data=_final_liquidity,
@@ -1359,6 +1362,7 @@ def analyze_candles(
         "scale_out": compute_scale_out(signal, entry if signal != "NEUTRAL" else None, fear_greed_value) if signal != "NEUTRAL" else None,
         "quality_score": _quality_gate.get("quality_score", 0),
         "quality_flags": _quality_gate.get("quality_flags", []),
+        "shadow_reject_rr": _quality_gate.get("shadow_reject_rr"),
         "quality_size_multiplier": get_quality_size_multiplier(_quality_gate.get("quality_score", 0)) if signal != "NEUTRAL" else 0,
         "correlation_id": corr_id,
     }

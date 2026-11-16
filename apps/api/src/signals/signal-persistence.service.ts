@@ -397,6 +397,9 @@ export class SignalPersistenceService {
             market_type:       r.market_type ?? null,
             asset_type:        r.asset_type ?? null,
             derivatives:       r.derivatives ?? null,
+            // Gate RR en mode shadow : flaggé ≠ rejeté — on mesure la perf
+            // des signaux RR<1 hors échantillon avant un rejet dur.
+            shadow_reject_rr:  r.shadow_reject_rr ?? null,
             market_cap_tier:   r.market_cap_tier ?? null,
             liquidity_score:   r.liquidity_score ?? null,
             max_position_pct:  r.max_position_pct ?? null,

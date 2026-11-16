@@ -100,6 +100,7 @@ export class SignalOutcomeService {
             assetType: r.asset_type ?? null,
             // Contexte dérivés au moment du signal → feature entraînable
             derivatives: r.derivatives ?? null,
+            shadow_reject_rr: r.shadow_reject_rr ?? null,
           } as any,
           expectedPnlPct,
         },
