@@ -127,7 +127,7 @@ function Dashboard({ portfolio }: { portfolio: Portfolio }) {
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-gray-900/60 border border-gray-800 rounded-xl p-4">
           <div className="flex items-center gap-2 text-sm text-gray-400 mb-3">
-            <BarChart3 className="w-4 h-4" /> Courbe d'equity
+            <BarChart3 className="w-4 h-4" /> Courbe d’equity
           </div>
           <EquityCurve snaps={snaps ?? []} />
         </div>
