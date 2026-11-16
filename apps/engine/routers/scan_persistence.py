@@ -96,6 +96,56 @@ async def _queue_scan_for_batch(result: dict, timeframe: str) -> None:
             _scan_batch[:] = _scan_batch[-2000:]
 
 
+_rej_batch: list[dict] = []
+_rej_batch_lock = asyncio.Lock()
+
+
+def queue_gate_rejection(rejection: dict) -> None:
+    """Queue a structured gate rejection for batch DB insertion.
+
+    Synchrone : appelable depuis analyze_candles (sync). list.append est
+    atomique sous le GIL ; le flush recopie le batch sous lock.
+    Champs attendus : symbol, timeframe, direction, layer, reason,
+    asset_type, strategy_id, strategy_name, entry_price, quality_score,
+    metadata. Persiste chaque rejet du pipeline — sans ça, les SELL
+    disparus et les couches qui filtrent ne sont pas mesurables.
+    """
+    _rej_batch.append(rejection)
+    if len(_rej_batch) > 2000:
+        _rej_batch[:] = _rej_batch[-2000:]
+
+
+async def _flush_rejection_batch() -> None:
+    async with _rej_batch_lock:
+        if not _rej_batch:
+            return
+        batch = _rej_batch.copy()
+        _rej_batch.clear()
+    try:
+        pool = await _get_scan_pool()
+        async with pool.acquire() as conn:
+            rows = [
+                (e.get("symbol"), e.get("timeframe"), e.get("direction"),
+                 e.get("layer"), (e.get("reason") or "")[:2000],
+                 e.get("asset_type"), e.get("strategy_id"),
+                 e.get("strategy_name"), e.get("entry_price"),
+                 e.get("quality_score"), json.dumps(e.get("metadata") or {}, default=str))
+                for e in batch
+            ]
+            await conn.executemany(
+                """INSERT INTO gate_rejections
+                   (id, symbol, timeframe, direction, layer, reason,
+                    asset_type, strategy_id, strategy_name, entry_price,
+                    quality_score, metadata)
+                   VALUES (md5(random()::text || clock_timestamp()::text || random()::text),
+                           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)""",
+                rows,
+            )
+        logger.info("gate_rejections_batch_inserted", count=len(rows))
+    except Exception as e:
+        logger.warning("gate_rejections_batch_failed", error=str(e), count=len(batch))
+
+
 async def _flush_scan_batch() -> None:
     """Batch insert queued scans into scan_history table."""
     async with _scan_batch_lock:
@@ -136,6 +186,7 @@ async def _scan_batch_flusher():
     while True:
         await asyncio.sleep(300)
         await _flush_scan_batch()
+        await _flush_rejection_batch()
 
 
 async def _persist_scan(result: dict, timeframe: str) -> None:

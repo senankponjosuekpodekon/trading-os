@@ -77,6 +77,35 @@ router = APIRouter()
 
 
 
+def _report_rejection(*, symbol: str, timeframe: str, direction: str,
+                      layer: str, reason: str, asset_type=None,
+                      entry=None, strategy=None, quality_score=None,
+                      metadata=None) -> None:
+    """Persiste chaque rejet du pipeline (batch DB via scan_persistence).
+
+    Sans ce journal, les signaux neutralisés par le gate sont invisibles :
+    on ne peut pas mesurer où les SELL disparaissent ni quelle couche
+    filtre quoi. Best-effort : un échec ne doit jamais casser le scan.
+    """
+    try:
+        from routers.scan_persistence import queue_gate_rejection
+        queue_gate_rejection({
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "direction": direction,
+            "layer": layer,
+            "reason": reason,
+            "asset_type": asset_type,
+            "strategy_id": (strategy or {}).get("id"),
+            "strategy_name": (strategy or {}).get("name"),
+            "entry_price": entry,
+            "quality_score": quality_score,
+            "metadata": metadata or {},
+        })
+    except Exception:
+        pass
+
+
 def analyze_candles(
     symbol: str,
     timeframe: str,
@@ -134,6 +163,17 @@ def analyze_candles(
         _syn_result["shadow_reject_rr"] = _syn_gate.get("shadow_reject_rr")
         _syn_result["quality_size_multiplier"] = get_quality_size_multiplier(_syn_gate.get("quality_score", 0)) if _syn_result.get("signal") != "NEUTRAL" else 0
         if not _syn_gate["passed"]:
+            for _rej in _syn_gate.get("rejected_layers", []):
+                _report_rejection(
+                    symbol=symbol, timeframe=timeframe,
+                    direction=_syn_result.get("signal", "NEUTRAL"),
+                    layer=f"quality_gate:{_rej.get('layer', '?')}",
+                    reason=str(_rej.get("reason", "")),
+                    asset_type="SYNTHETIC",
+                    entry=_syn_result.get("entry_price"),
+                    strategy=strategy,
+                    quality_score=_syn_gate.get("quality_score"),
+                )
             _syn_result["signal"] = "NEUTRAL"
             _syn_result["confidence"] = 0
             _syn_result["stop_loss"] = None
@@ -1147,6 +1187,13 @@ def analyze_candles(
         confidence = int(confidence * 0.5)
         reasons.append(f"Liquidité critique (score={_final_liquidity['score']}) — confidence réduite 50%")
         if confidence < 40:
+            _report_rejection(
+                symbol=symbol, timeframe=timeframe, direction=signal,
+                layer="liquidity",
+                reason=f"Liquidité insuffisante (score={_final_liquidity['score']})",
+                asset_type=asset_type, entry=entry,
+                strategy=strategy,
+            )
             signal = "NEUTRAL"
             confidence = 0
             reasons.append("Liquidité insuffisante — signal neutralisé")
@@ -1154,6 +1201,13 @@ def analyze_candles(
     # ── Phase 0++: Red flags checklist ──
     _red_flags = red_flags_data or {"red_flags": [], "red_flag_count": 0, "danger": False, "warning": None}
     if signal != "NEUTRAL" and _red_flags.get("danger"):
+        _report_rejection(
+            symbol=symbol, timeframe=timeframe, direction=signal,
+            layer="red_flags",
+            reason=str(_red_flags.get("warning") or "Projet à risque extrême"),
+            asset_type=asset_type, entry=entry, strategy=strategy,
+            metadata={"red_flags": _red_flags.get("red_flags", [])},
+        )
         signal = "NEUTRAL"
         confidence = 0
         sl = None
@@ -1190,6 +1244,16 @@ def analyze_candles(
             layers=[r["layer"] for r in _quality_gate["rejected_layers"]],
             reasons=_reject_reasons,
         )
+        for _rej in _quality_gate["rejected_layers"]:
+            _report_rejection(
+                symbol=symbol, timeframe=timeframe, direction=signal,
+                layer=f"quality_gate:{_rej.get('layer', '?')}",
+                reason=str(_rej.get("reason", "")),
+                asset_type=asset_type, entry=entry,
+                strategy=strategy,
+                quality_score=_quality_gate.get("quality_score"),
+                metadata={"quality_flags": _quality_gate.get("quality_flags", [])},
+            )
         signal = "NEUTRAL"
         confidence = 0
         sl = None
