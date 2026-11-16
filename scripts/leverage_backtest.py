@@ -65,6 +65,13 @@ def _ts_iso(t: float) -> str:
     return datetime.fromtimestamp(t).isoformat()
 
 
+def _tf_seconds(tf: str) -> int:
+    """'1h'->3600, '4h'->14400, '15m'->900, '1d'->86400."""
+    tf = (tf or "1h").lower()
+    n = int(tf[:-1] or 1)
+    return n * {"m": 60, "h": 3600, "d": 86400}[tf[-1]]
+
+
 def load(path):
     with open(path) as f:
         return list(csv.DictReader(f))
@@ -221,10 +228,20 @@ def metrics(trades, label):
             ruins += 1
     means.sort()
     lo, hi = means[int(0.025 * BOOTSTRAP_N)], means[int(0.975 * BOOTSTRAP_N)]
-    wins = sum(1 for p in pnls if p > 0)
+    # WR correct : TP/(TP+SL) parmi les RÉSOLUS uniquement (les expirés
+    # n'ont pas de win/loss). trades = (pnl, day, r, reason).
+    res_tp = sum(1 for t in trades if t[3] == "TP") if len(trades[0]) > 3 else None
+    res_sl = sum(1 for t in trades if t[3] == "SL") if len(trades[0]) > 3 else None
+    res_exp = sum(1 for t in trades if t[3] == "EXPIRED") if len(trades[0]) > 3 else None
+    if res_tp is not None and (res_tp + res_sl) > 0:
+        wr_res = res_tp / (res_tp + res_sl) * 100
+        wr_txt = (f"  WR résolus={wr_res:5.1f}% (TP={res_tp} SL={res_sl} "
+                  f"exp={res_exp})")
+    else:
+        wr_txt = f"  wins={sum(1 for p in pnls if p > 0)}"
     r_txt = f"  expR={exp_r:+.2f}R" if exp_r is not None else ""
-    print(f"{label:<10} n={n:<4} WR={wins/n*100:5.1f}%  exp={exp:+7.3f}%  "
-          f"IC95=[{lo:+6.3f},{hi:+6.3f}]{r_txt}  eq={eq:+8.1f}$  "
+    print(f"{label:<10} n={n:<4} exp={exp:+7.3f}%  "
+          f"IC95=[{lo:+6.3f},{hi:+6.3f}]{r_txt}{wr_txt}  eq={eq:+8.1f}$  "
           f"maxDD={max_dd:7.1f}$  liq={liqs:<3} streak={worst_streak:<3} "
           f"ruin={ruins/BOOTSTRAP_N*100:5.1f}%  (jours={n_days})")
     return {"exp": exp, "exp_r": exp_r, "ci": (lo, hi), "eq": eq,
@@ -258,7 +275,7 @@ def main():
             continue
         c = COSTS[venue(s["symbol"])]
         hold_frac = math.floor(r[2] / 8) * c["per_8h"] * 100
-        spot_trades.append((r[0] + hold_frac, day_of(s), r[3]))
+        spot_trades.append((r[0] + hold_frac, day_of(s), r[3], r[1]))
         reasons[r[1]] = reasons.get(r[1], 0) + 1
         if r[4] > 0:
             n_ambiguous += 1
@@ -277,7 +294,7 @@ def main():
             continue
         c = COSTS[venue(s["symbol"])]
         hold_frac = math.floor(r[2] / 8) * c["per_8h"] * 100
-        opt_trades.append((r[0] + hold_frac, day_of(s), r[3]))
+        opt_trades.append((r[0] + hold_frac, day_of(s), r[3], r[1]))
     print("=== ENCADREMENT ORDRE INTRABAR (×1) ===")
     res_pess = metrics(spot_trades, "×1 pess.")
     res_opt = metrics(opt_trades, "×1 opt.")
@@ -326,8 +343,11 @@ def main():
         if not rs:
             continue
         det_by_sig[s["id"]] = (r_det, day_of(s))
+        tp_f = sum(1 for r in rs if r[1] == "TP") / len(rs)
+        sl_f = sum(1 for r in rs if r[1] == "SL") / len(rs)
         rand_by_sig[s["id"]] = (sum(r[0] for r in rs) / len(rs),
-                                sum(r[3] or 0 for r in rs) / len(rs), day_of(s))
+                                sum(r[3] or 0 for r in rs) / len(rs), day_of(s),
+                                tp_f, sl_f, rs)
         # (0) validation : théorie marche aléatoire vs mesure, sur tirages
         # résolus uniquement (TP/SL — les expirés n'ont pas de WR défini)
         tp_d = abs(float(s["takeProfit1"] or 0) - float(s["entryPrice"])) \
@@ -356,8 +376,17 @@ def main():
     def _paired_table(det, rand, label):
         diffs = [(det[k][0][0] - rand[k][0], det[k][1]) for k in det if k in rand]
         print(f"\n=== {label} (n={len(diffs)} signaux) ===")
-        metrics([(det[k][0][0], det[k][1], det[k][0][3]) for k in det], "DÉTECT.")
-        metrics([(rand[k][0], rand[k][2], rand[k][1]) for k in det if k in rand], "ALÉAT.")
+        metrics([(det[k][0][0], det[k][1], det[k][0][3], det[k][0][1])
+                 for k in det], "DÉTECT.")
+        metrics([(rand[k][0], rand[k][2], rand[k][1], "")
+                 for k in det if k in rand], "ALÉAT.")
+        # WR résolus aléatoire : moyenne des fractions TP/(TP+SL) par signal
+        wr_rand = [rand[k][3] / (rand[k][3] + rand[k][4])
+                   for k in det if k in rand and len(rand[k]) > 4
+                   and rand[k][3] + rand[k][4] > 0]
+        if wr_rand:
+            print(f"  ALÉAT. WR résolus (TP/(TP+SL)) : "
+                  f"{sum(wr_rand)/len(wr_rand)*100:.1f}%")
         det_r = [det[k][0][3] for k in det if det[k][0][3] is not None]
         rand_r = [rand[k][1] for k in det if k in rand and det[k][0][3] is not None]
         # différence appariée — block bootstrap par jour
@@ -399,6 +428,111 @@ def main():
 
     _paired_table(det_by_sig, rand_by_sig, "APPARIÉ (même direction, mêmes TP/SL/durée/coûts)")
     _paired_table(det_by_sig, rand_dir_by_sig, "VARIANTE direction 50/50")
+
+    # (iii) DÉCOMPOSITION PAR TYPE DE SORTIE — l'essentiel de l'écart se
+    # joue dans les expirés (53% détect. vs 86% aléat.), il faut voir
+    # comment chaque exit contribue à l'espérance.
+    print("\n=== DÉCOMPOSITION PAR TYPE DE SORTIE (×1, en R) ===")
+    print(f"{'groupe':10} {'exit':9} {'n/part':>8} {'R moyen':>9} {'contrib.':>9}")
+    for label, get_trades in (
+        ("DÉTECT.", lambda k: [(det_by_sig[k][0][1], det_by_sig[k][0][3])]),
+        ("ALÉAT.",  lambda k: [(r[1], r[3]) for r in rand_by_sig[k][5]]),
+    ):
+        agg = {}
+        tot = 0
+        for k in det_by_sig:
+            if label == "ALÉAT." and k not in rand_by_sig:
+                continue
+            for reason, r_val in get_trades(k):
+                agg.setdefault(reason, []).append(r_val or 0)
+                tot += 1
+        exp_total = sum(sum(v) for v in agg.values()) / max(tot, 1)
+        for reason in ("TP", "SL", "EXPIRED", "LIQUIDATED"):
+            if reason not in agg:
+                continue
+            v = agg[reason]
+            part = len(v) / tot
+            contrib = sum(v) / tot
+            print(f"{label:10} {reason:9} {len(v):>4}({part*100:4.1f}%) "
+                  f"{sum(v)/len(v):>9.2f} {contrib:>9.3f}")
+        print(f"{label:10} {'TOTAL':9} {tot:>8} {'':>9} {exp_total:>9.3f}")
+
+    # (ii) CONCORDANCE prod vs rejeu — la table signals dit ~68% de winners
+    # résolus, le rejeu ~30% : croiser les deux statuts signal par signal.
+    print("\n=== CONCORDANCE prod (execution_status) vs rejeu ===")
+    xtab = {}
+    for s in eligible:
+        k = s["id"]
+        if k not in det_by_sig:
+            continue
+        prod = s["execution_status"]
+        replayed = det_by_sig[k][0][1]
+        xtab.setdefault(prod, {})
+        xtab[prod][replayed] = xtab[prod].get(replayed, 0) + 1
+    replayed_set = sorted({r for v in xtab.values() for r in v})
+    print(f"{'prod':18}" + "".join(f"{r:>11}" for r in replayed_set) + f"{'total':>8}")
+    for prod, v in sorted(xtab.items()):
+        print(f"{prod:18}" + "".join(f"{v.get(r,0):>11}" for r in replayed_set)
+              + f"{sum(v.values()):>8}")
+
+    # (iv) ÉCART PRIX D'ENTRÉE — le détecteur entre au prix du signal,
+    # l'aléatoire au close de bougie. Si les deux sources diffèrent,
+    # TP/SL sont décalés. Mesure : |entryPrice − close(bougie entrée)|
+    # en unités de distance SL.
+    print("\n=== ÉCART entryPrice signal vs close bougie d'entrée (en ×SL) ===")
+    gaps = []
+    for s in eligible:
+        k = s["id"]
+        if k not in det_by_sig:
+            continue
+        cs = candles[(s["symbol"], s["timeframe"])]
+        t_e = ts(s["entry_ts"])
+        tf_s = _tf_seconds(s["timeframe"])
+        ec = next((c for c in cs
+                   if ts(c["open_time"]) <= t_e < ts(c["open_time"]) + tf_s), None)
+        if not ec:
+            continue
+        e, sl_ = float(s["entryPrice"]), float(s["stopLoss"] or 0)
+        sd = abs(e - sl_) / e if sl_ else 0
+        if sd <= 0:
+            continue
+        gaps.append(abs(e - float(ec["close"])) / e / sd)
+    if gaps:
+        gaps.sort()
+        med = gaps[len(gaps)//2]
+        p90 = gaps[int(len(gaps)*0.9)]
+        over = sum(1 for g in gaps if g > 0.5)
+        print(f"  n={len(gaps)}  médiane={med:.3f}×SL  p90={p90:.3f}×SL  "
+              f">0.5×SL={over} ({over/len(gaps)*100:.1f}%)")
+
+    # (v) VENTILATION PAR CLASSE — l'univers n'est plus EUR/GBP : ~500
+    # expirés commodités. Pas d'IC global comme verdict.
+    def asset_class(sym):
+        b = sym.split("/")[0].upper()
+        if b in CRYPTO:
+            return "crypto"
+        if b in ("XAU", "XAG", "WTI", "BRENT", "NG", "CL", "UKOIL", "USOIL"):
+            return "commodité"
+        if "/" in sym and len(sym.split("/")[0]) == 3:
+            return "forex"
+        return "autre"
+    print("\n=== VENTILATION (a) PAR CLASSE D'ACTIF ===")
+    print(f"{'classe':10} {'n':>4} {'détect R':>9} {'aléat R':>9} {'diff R':>8} "
+          f"{'détect %':>9} {'aléat %':>8}")
+    classes = {}
+    for s in eligible:
+        k = s["id"]
+        if k in det_by_sig and k in rand_by_sig:
+            classes.setdefault(asset_class(s["symbol"]), []).append(k)
+    for cl, ks in sorted(classes.items()):
+        n = len(ks)
+        dr = sum(det_by_sig[k][0][3] or 0 for k in ks) / n
+        ar = sum(rand_by_sig[k][1] for k in ks) / n
+        dp = sum(det_by_sig[k][0][0] for k in ks) / n
+        ap = sum(rand_by_sig[k][0] for k in ks) / n
+        flag = " (n<30)" if n < 30 else ""
+        print(f"{cl:10} {n:>4} {dr:>9.2f} {ar:>9.2f} {dr-ar:>8.2f} "
+              f"{dp:>9.3f} {ap:>8.3f}{flag}")
 
     # (b) COÛTS PAR VENUE — décomposition en R, poste par poste.
     # MARGIN/CFD : spread + swap (pas de taker/funding). FUTURES : taker +
@@ -458,7 +592,7 @@ def main():
             r = replay(s, candles[(s["symbol"], s["timeframe"])], L)
             if r is None:
                 continue
-            trades.append((r[0], day_of(s), r[3]))
+            trades.append((r[0], day_of(s), r[3], r[1]))
             reasons[r[1]] = reasons.get(r[1], 0) + 1
         res[f"×{L}"] = metrics(trades, f"LEV×{L}")
         # verdict overlap handled below via res
