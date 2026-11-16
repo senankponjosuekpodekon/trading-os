@@ -57,6 +57,17 @@ def venue(symbol: str) -> str:
     return "FUTURES" if base in CRYPTO else "MARGIN"
 
 
+def asset_class(sym: str) -> str:
+    b = sym.split("/")[0].upper()
+    if b in CRYPTO:
+        return "crypto"
+    if b in ("XAU", "XAG", "WTI", "BRENT", "NG", "CL", "UKOIL", "USOIL"):
+        return "commodité"
+    if "/" in sym and len(b) == 3:
+        return "forex"
+    return "autre"
+
+
 def ts(s: str) -> float:
     return datetime.fromisoformat(s.replace("Z", "").split(".")[0]).timestamp()
 
@@ -505,17 +516,86 @@ def main():
         print(f"  n={len(gaps)}  médiane={med:.3f}×SL  p90={p90:.3f}×SL  "
               f">0.5×SL={over} ({over/len(gaps)*100:.1f}%)")
 
+    # (iv-bis) Écart SIGNÉ par rapport à la direction : pour un BUY,
+    # entryPrice > close ⇒ l'entrée est plus HAUTE que le chemin ⇒ SL plus
+    # proche mécaniquement. adverse = + (défavorable), par classe.
+    print("\n=== ÉCART SIGNÉ (adverse = entrée au-dessus du close pour BUY) ===")
+    print(f"{'classe':10} {'n':>4} {'médiane×SL':>11} {'part adverse':>13}")
+    by_class = {}
+    for s in eligible:
+        k = s["id"]
+        if k not in det_by_sig:
+            continue
+        cs = candles[(s["symbol"], s["timeframe"])]
+        t_e = ts(s["entry_ts"])
+        tf_s = _tf_seconds(s["timeframe"])
+        ec = next((c for c in cs
+                   if ts(c["open_time"]) <= t_e < ts(c["open_time"]) + tf_s), None)
+        if not ec:
+            continue
+        e, sl_ = float(s["entryPrice"]), float(s["stopLoss"] or 0)
+        sd = abs(e - sl_) / e if sl_ else 0
+        if sd <= 0:
+            continue
+        long_ = s["signal"] == "BUY"
+        signed = (e - float(ec["close"])) / e / sd
+        adverse = signed if long_ else -signed
+        by_class.setdefault(asset_class(s["symbol"]), []).append(adverse)
+    for cl, vals in sorted(by_class.items()):
+        vals.sort()
+        adv = sum(1 for v in vals if v > 0)
+        print(f"{cl:10} {len(vals):>4} {vals[len(vals)//2]:>11.3f} "
+              f"{adv/len(vals)*100:>12.1f}%")
+
+    # (iv-ter) REJEU REBASÉ : le détecteur entre au CLOSE de la bougie
+    # d'entrée, avec les MÊMES distances TP/SL (comme l'aléatoire). Si le
+    # WR résolus remonte vers ~50%, l'écart de feed explique le "pire que
+    # le hasard".
+    print("\n=== REJEU REBASÉ (entry = close bougie, distances conservées) ===")
+    rebase_stats = []
+    for s in eligible:
+        k = s["id"]
+        if k not in det_by_sig:
+            continue
+        cs = candles[(s["symbol"], s["timeframe"])]
+        t_e = ts(s["entry_ts"])
+        tf_s = _tf_seconds(s["timeframe"])
+        ec = next((c for c in cs
+                   if ts(c["open_time"]) <= t_e < ts(c["open_time"]) + tf_s), None)
+        if not ec:
+            continue
+        e0 = float(s["entryPrice"])
+        new_e = float(ec["close"])
+        long_ = s["signal"] == "BUY"
+        f = dict(s)
+        if s["stopLoss"]:
+            d_sl = abs(float(s["stopLoss"]) - e0)
+            f["stopLoss"] = str(new_e - d_sl if long_ else new_e + d_sl)
+        if s["takeProfit1"]:
+            d_tp = abs(float(s["takeProfit1"]) - e0)
+            f["takeProfit1"] = str(new_e + d_tp if long_ else new_e - d_tp)
+        f["entryPrice"] = str(new_e)
+        r = replay(f, cs, 1)
+        if r:
+            c = COSTS[venue(s["symbol"])]
+            rebase_stats.append((r[0] + math.floor(r[2]/8)*c["per_8h"]*100,
+                                 day_of(s), r[3], r[1], s["execution_status"]))
+    metrics([(t[0], t[1], t[2], t[3]) for t in rebase_stats], "REBASÉ")
+    # concordance rebasée
+    xtab2 = {}
+    for t in rebase_stats:
+        prod, replayed = t[4], t[3]
+        xtab2.setdefault(prod, {})
+        xtab2[prod][replayed] = xtab2[prod].get(replayed, 0) + 1
+    rset = sorted({r for v in xtab2.values() for r in v})
+    print("  concordance rebasée :")
+    print(f"  {'prod':18}" + "".join(f"{r:>11}" for r in rset) + f"{'total':>8}")
+    for prod, v in sorted(xtab2.items()):
+        print(f"  {prod:18}" + "".join(f"{v.get(r,0):>11}" for r in rset)
+              + f"{sum(v.values()):>8}")
+
     # (v) VENTILATION PAR CLASSE — l'univers n'est plus EUR/GBP : ~500
     # expirés commodités. Pas d'IC global comme verdict.
-    def asset_class(sym):
-        b = sym.split("/")[0].upper()
-        if b in CRYPTO:
-            return "crypto"
-        if b in ("XAU", "XAG", "WTI", "BRENT", "NG", "CL", "UKOIL", "USOIL"):
-            return "commodité"
-        if "/" in sym and len(sym.split("/")[0]) == 3:
-            return "forex"
-        return "autre"
     print("\n=== VENTILATION (a) PAR CLASSE D'ACTIF ===")
     print(f"{'classe':10} {'n':>4} {'détect R':>9} {'aléat R':>9} {'diff R':>8} "
           f"{'détect %':>9} {'aléat %':>8}")

@@ -82,20 +82,58 @@ souvent dans le rouge avant expiration.
 - Conséquence : `execution_status` prod ≠ vérité terrain ; le rejeu sur
   bougies est la mesure la plus fiable des deux, sous réserve de (iv).
 
-## (iv) Écart prix d'entrée signal vs close de la bougie d'entrée
+## (iv) Écart prix d'entrée — CAUSE TROUVÉE (bug de feed, prod concernée)
 
 | Mesure | Valeur |
 |---|---|
 | n | 753 |
-| Médiane de l'écart (en × distance SL) | **0.665×SL** |
+| Médiane écart absolu | 0.665×SL |
 | p90 | 1.654×SL |
-| Part des signaux avec écart > 0.5×SL | **69.3%** |
+| Part > 0.5×SL | 69.3% |
 
-→ Pour les deux tiers des signaux, le `entryPrice` enregistré diffère du
-prix des bougies de plus de la moitié du risque. Sources possibles : feed de
-prix différent (Yahoo vs Oanda), timestamp de génération ≠ prix de clôture,
-prix périmé. **Tant que cet écart n'est pas expliqué, la comparaison
-détecteur vs aléatoire (qui entre au close de bougie) n'est pas appariée.**
+Écart **signé** (adverse = entrée au-dessus du close pour un BUY) :
+
+| Classe | n | Médiane signée | Part adverse |
+|---|---|---|---|
+| commodité | 270 | +1.271×SL | **98.9%** |
+| forex | 475 | +0.531×SL | 85.1% |
+| crypto | 8 | +0.173×SL | 75.0% |
+
+→ Décalage **systématique et défavorable**, pas du bruit : le prix de
+génération (`entryPrice`, tick live du feed de scan) n'est pas le prix des
+bougies de résolution. Les SL rejoués sont mécaniquement ~0.5–1.3× plus
+proches.
+
+### Rejeu rebasé (entry = close bougie, distances TP/SL conservées)
+
+| | WR résolus | Espérance | Esp. R |
+|---|---|---|---|
+| Rejeu sur `entryPrice` | 16.3% (59TP/304SL) | −0.466% | −0.56R |
+| **Rejeu rebasé** | **92.6% (151TP/12SL)** | **+0.056%** IC95[−0.015,+0.118] | **+0.13R** |
+
+### Concordance rebasée prod vs rejeu
+
+| prod ↓ / rejeu → | EXPIRED | SL | TP | total |
+|---|---|---|---|---|
+| CLOSED_BREAKEVEN | 4 | 0 | 2 | 6 |
+| CLOSED_LOSS | 22 | 4 | 28 | 54 |
+| CLOSED_WIN | 47 | 4 | 72 | 123 |
+| EXPIRED | 517 | 4 | 49 | 570 |
+
+`CLOSED_WIN` prod → 58% rejoués TP (contre 21% avant rebasage).
+
+### Lecture (mesures, pas de conclusion d'edge)
+
+- Le « détecteur pire que le hasard » était majoritairement un artefact du
+  décalage d'entrée — il disparaît au rebasage.
+- L'inverse n'est pas prouvé : +0.13R avec IC95 incluant 0 ≠ edge.
+- **Bug prod réel** : la chaîne de providers de génération
+  (`fetch_klines_fallback` : binance→deriv→twelvedata→yfinance) n'est pas
+  celle de résolution (`HybridCandleRepository` : local→engine→
+  Binance/TwelveData/AlphaVantage/Yahoo), et aucun signal n'enregistre son
+  feed source. Conséquence : TP/SL absolus calés sur un prix incohérent
+  avec les bougies de suivi — les résolutions prod elles-mêmes sont
+  probablement biaisées dans le sens défavorable pour les BUY.
 
 ## (v) Ventilation (a) par classe d'actif — l'univers n'est plus EUR/GBP
 
@@ -176,8 +214,9 @@ persister chaque rejet avec sa raison.
   n_effectif << 783.
 - Pipeline partiellement cassé sur la période (cache bougies, throttling) ;
   `execution_status` prod en partie non fiable (voir concordance).
-- **(a) non interprétable** : écart médian prix d'entrée = 0.665×SL (iv) ;
-  la validation (0) ne couvre que les tirages résolus (~14%).
+- **(a) non interprétable** : écart signé prix d'entrée = 0.5–1.3×SL
+  adverse (iv) — la comparaison détecteur/aléatoire n'est pas appariée
+  tant que le feed d'entrée n'est pas unifié avec le feed de résolution.
 - Univers = forex + commodités + crypto, pas seulement EUR/GBP ; ~53% des
   trades rejoués sont des expirés (survivorship sur les persistés).
 - **Aucune conclusion sur les cryptos (n < 30).**
