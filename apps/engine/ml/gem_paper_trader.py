@@ -130,6 +130,24 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
                 logger.info("gem_gate_rejected", symbol=gem.get("symbol"),
                             layers=[x["layer"] for x in gate.get("rejections", [])])
                 return
+            # Journal shadow : ce que l'adapter Jupiter aurait exécuté
+            try:
+                from utils.db_pool import get_shared_pool as get_pool2
+                pool2 = await get_pool2()
+                async with pool2.acquire() as con2:
+                    await con2.execute("""
+                        INSERT INTO execution_orders
+                        ("portfolioId","signalId",symbol,direction,qty,
+                         requested_price,status,mode,venue,metadata)
+                        VALUES ($1,NULL,$2,'BUY',$3,$4,'SHADOW','shadow','GEM',$5::jsonb)""",
+                        pfid, gem.get("symbol", ""),
+                        gate.get("qty") or VIRTUAL_SIZE_USD / float(gem["price"]),
+                        float(gem["price"]),
+                        json.dumps({"token_address": addr,
+                                    "chain": gem.get("chain", ""),
+                                    "gem_score": gem.get("gem_score")}))
+            except Exception as e:
+                logger.debug("gem_shadow_order_failed", error=str(e))
         pos = {
             "id": pid,
             "chain": gem.get("chain", ""),
