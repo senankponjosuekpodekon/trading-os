@@ -26,7 +26,6 @@ async def can_open_position(portfolio_id: str, symbol: str,
                             target_risk: float = 0.12) -> dict:
     """Décision d'ouverture. qty=None → taille via size_for_symbol."""
     from risk.portfolio_state import portfolio_state
-    from risk.sizing import size_for_symbol
     from utils.instrument_profile import get_instrument_profile
     from routers.portfolio_risk import get_cluster
 

@@ -405,3 +405,37 @@ async def portfolio_state_endpoint(portfolio_id: str, target_risk: float = 0.12)
     cluster et par venue, perte scénario gap. Lecture seule."""
     from risk.portfolio_state import portfolio_state
     return await portfolio_state(portfolio_id, target_risk=target_risk)
+
+
+class CanOpenRequest(BaseModel):
+    portfolio_id: str
+    symbol: str
+    direction: str
+    entry: float
+    stop_loss: float | None = None
+    qty: float | None = None
+    target_risk: float = 0.12
+
+
+@router.post("/portfolio/can-open")
+async def can_open(req: CanOpenRequest):
+    """Gate portefeuille : autorise ou refuse l'ouverture (marge, budget
+    risque, cluster, gap). Rejets persistés dans gate_rejections."""
+    from risk.portfolio_gate import can_open_position
+    return await can_open_position(
+        req.portfolio_id, req.symbol, req.direction, req.entry,
+        req.stop_loss, qty=req.qty, target_risk=req.target_risk)
+
+
+class ExecuteRequest(CanOpenRequest):
+    signal_id: str | None = None
+
+
+@router.post("/portfolio/execute")
+async def execute(req: ExecuteRequest):
+    """Pipeline gate → sizing → ordre. Mode via env EXECUTION_MODE
+    (shadow par défaut ; live = phase C, non implémenté)."""
+    from risk.execution import execute_signal
+    return await execute_signal(
+        req.portfolio_id, req.signal_id, req.symbol, req.direction,
+        req.entry, req.stop_loss, qty=req.qty, target_risk=req.target_risk)

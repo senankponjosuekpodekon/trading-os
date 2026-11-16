@@ -225,13 +225,17 @@ export class PositionsService {
         where: { id: dto.portfolioId },
         data: { currentCapital: { decrement: cost } },
       });
-      await tx.$executeRaw`
-        INSERT INTO account_ledger
-          ("portfolioId","positionId",event,amount,balance_after,symbol,metadata)
-        VALUES (${dto.portfolioId}, ${created.id}, 'POSITION_OPEN',
-                ${-cost}, ${parseFloat(updated.currentCapital.toString())},
-                ${asset.symbol}, ${JSON.stringify({ entry: dto.entryPrice, qty: dto.quantity })}::jsonb)
-        ON CONFLICT ("positionId", event) DO NOTHING`;
+      try {
+        await tx.$executeRaw`
+          INSERT INTO account_ledger
+            ("portfolioId","positionId",event,amount,balance_after,symbol,metadata)
+          VALUES (${dto.portfolioId}, ${created.id}, 'POSITION_OPEN',
+                  ${-cost}, ${updated?.currentCapital ? parseFloat(updated.currentCapital.toString()) : null},
+                  ${asset.symbol}, ${JSON.stringify({ entry: dto.entryPrice, qty: dto.quantity })}::jsonb)
+          ON CONFLICT ("positionId", event) DO NOTHING`;
+      } catch (e) {
+        this.logger.warn(`account_ledger POSITION_OPEN failed: ${e}`);
+      }
       return created;
     });
 
@@ -341,13 +345,17 @@ export class PositionsService {
         where: { id: position.portfolioId },
         data: { currentCapital: { increment: proceeds } },
       });
-      await tx.$executeRaw`
-        INSERT INTO account_ledger
-          ("portfolioId","positionId",event,amount,balance_after,symbol,metadata)
-        VALUES (${position.portfolioId}, ${positionId}, 'POSITION_CLOSE',
-                ${proceeds}, ${parseFloat(updated.currentCapital.toString())},
-                ${position.asset.symbol}, ${JSON.stringify({ exit: exitPrice, pnl })}::jsonb)
-        ON CONFLICT ("positionId", event) DO NOTHING`;
+      try {
+        await tx.$executeRaw`
+          INSERT INTO account_ledger
+            ("portfolioId","positionId",event,amount,balance_after,symbol,metadata)
+          VALUES (${position.portfolioId}, ${positionId}, 'POSITION_CLOSE',
+                  ${proceeds}, ${updated?.currentCapital ? parseFloat(updated.currentCapital.toString()) : null},
+                  ${position.asset.symbol}, ${JSON.stringify({ exit: exitPrice, pnl })}::jsonb)
+          ON CONFLICT ("positionId", event) DO NOTHING`;
+      } catch (e) {
+        this.logger.warn(`account_ledger POSITION_CLOSE failed: ${e}`);
+      }
     });
 
     try {

@@ -8,7 +8,6 @@ ou de feed DOIT passer par ici — fini les constantes dupliquées.
 """
 import asyncio
 import time
-from typing import Optional
 
 from utils.logger import get_logger
 
