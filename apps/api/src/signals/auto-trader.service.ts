@@ -144,6 +144,12 @@ export class AutoTraderService {
     // Mode shadow → execution_orders enregistre ce qui aurait été exécuté.
     // Fail-open si l'engine est down — le cap local ci-dessus reste actif.
     const exec = await this._engineExecute(portfolio.id, signal, entry, sl);
+    // Engine down : fail-open en paper (défaut), fail-closed si flag posé —
+    // obligatoire avant tout passage en exécution réelle.
+    if (!exec && this.config.get<string>('GATE_FAIL_CLOSED') === '1') {
+      this.logger.warn(`autopilot skip ${signal.asset?.symbol} — engine injoignable (GATE_FAIL_CLOSED)`);
+      return;
+    }
     if (exec && exec.status === 'REJECTED') {
       this.logger.log(`autopilot skip ${signal.asset?.symbol} — portfolio_gate: ${exec.rejections?.map((r: any) => r.layer).join(',')}`);
       return;

@@ -72,7 +72,32 @@ class BinanceAdapter(VenueAdapter):
         return {"price": float(res.get("avgPrice") or price or 0),
                 "order_id": res.get("orderId"), "raw_status": res.get("status")}
 
+    async def _get(self, path: str, params: dict) -> dict | list:
+        params = {**params, "timestamp": int(time.time() * 1000),
+                  "recvWindow": 5000}
+        params["signature"] = self._sign(params)
+        async with httpx.AsyncClient(base_url=self._base, timeout=10) as c:
+            r = await c.get(path, params=params,
+                            headers={"X-MBX-APIKEY": self._key})
+            r.raise_for_status()
+            return r.json()
+
     async def close_position(self, symbol: str) -> dict:
-        # reduceOnly market — à raffiner avec la qty réelle de la position
-        raise NotImplementedError("close via adapter à implémenter avec "
-                                  "la réconciliation de position")
+        """Lit la position réelle (positionRisk) puis envoie un ordre
+        MARKET reduceOnly de la quantité exacte."""
+        sym = symbol.replace("/", "")
+        rows = await self._get("/fapi/v2/positionRisk", {"symbol": sym})
+        pos = next((r for r in rows
+                    if float(r.get("positionAmt", 0)) != 0), None)
+        if not pos:
+            return {"closed": False, "reason": "no open position"}
+        amt = float(pos["positionAmt"])
+        res = await self._post("/fapi/v1/order", {
+            "symbol": sym,
+            "side": "SELL" if amt > 0 else "BUY",
+            "type": "MARKET", "reduceOnly": "true",
+            "quantity": f"{abs(amt):.6f}".rstrip("0").rstrip("."),
+        })
+        return {"closed": True, "qty": abs(amt),
+                "price": float(res.get("avgPrice") or 0),
+                "order_id": res.get("orderId")}

@@ -76,5 +76,36 @@ class JupiterAdapter(VenueAdapter):
                     "out_amount": q["outAmount"],
                     "price_impact_pct": q.get("priceImpactPct")}
 
-    async def close_position(self, symbol: str) -> dict:
-        raise NotImplementedError("swap inverse token→USDC à implémenter")
+    async def close_position(self, symbol: str, token_amount: float | None = None,
+                             token_decimals: int = 6) -> dict:
+        """Swap inverse token→USDC. token_amount en unités natives ; si
+        absent → refuse (il faut le solde on-chain, à réconcilier)."""
+        if not token_amount:
+            raise NotImplementedError(
+                "close nécessite le solde on-chain exact — à réconcilier")
+        amount = int(token_amount * 10 ** token_decimals)
+        async with httpx.AsyncClient(timeout=15) as c:
+            q = (await c.get(f"{_QUOTE}/quote", params={
+                "inputMint": symbol, "outputMint": _USDC,
+                "amount": amount, "slippageBps": 300})).json()
+            if "outAmount" not in q:
+                raise RuntimeError(f"jupiter quote failed: {q}")
+            s = (await c.post(f"{_QUOTE}/swap", json={
+                "quoteResponse": q,
+                "userPublicKey": str(self._keypair.pubkey()),
+                "wrapAndUnwrapSol": True})).json()
+            tx_b64 = s.get("swapTransaction")
+            if not tx_b64:
+                raise RuntimeError(f"jupiter swap build failed: {s}")
+            from solders.transaction import VersionedTransaction
+            tx = VersionedTransaction.from_bytes(base64.b64decode(tx_b64))
+            signed = VersionedTransaction(tx.message, [self._keypair])
+            res = (await c.post(self._rpc, json={
+                "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
+                "params": [base64.b64encode(bytes(signed)).decode(),
+                           {"encoding": "base64"}]})).json()
+            sig = res.get("result")
+            if not sig:
+                raise RuntimeError(f"rpc send failed: {res}")
+            return {"closed": True, "order_id": sig,
+                    "usdc_out": float(q["outAmount"]) / 1e6}
