@@ -89,7 +89,23 @@ SELECT
   CASE WHEN m.name = 'Crypto' THEN 'binance'
        WHEN a.symbol = 'XAG/USD' THEN 'alphavantage'
        ELSE 'twelvedata' END,
-  (SELECT min(c.open_time)::date FROM candles c WHERE c.symbol = a.symbol)
+  NULL
 FROM assets a
 JOIN markets m ON m.id = a."marketId"
 ON CONFLICT (symbol) DO NOTHING;
+
+-- candles est une table engine (hors migrations Prisma) : backfill seulement
+-- si elle existe dans cette base (prod oui, CI neuve non — le cron la
+-- recalcule toutes les 6h de toute façon).
+DO $$
+BEGIN
+  IF to_regclass('candles') IS NOT NULL THEN
+    EXECUTE $u$
+      UPDATE instrument_profile ip
+      SET candles_since = sub.first_candle
+      FROM (SELECT symbol, MIN(open_time)::date AS first_candle
+            FROM candles GROUP BY symbol) sub
+      WHERE ip.symbol = sub.symbol
+    $u$;
+  END IF;
+END $$;
