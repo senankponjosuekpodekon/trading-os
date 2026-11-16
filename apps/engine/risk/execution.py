@@ -64,11 +64,78 @@ async def execute_signal(portfolio_id: str, signal_id: str | None,
         return {"status": "PAPER_FILLED", "qty": qty, "fill": entry}
 
     # live
+    if venue == "SPOT":
+        # BRVM : pas d'API — instruction opérateur, confirmation manuelle
+        # via POST /portfolio/orders/{id}/confirm (settlement T+3).
+        oid = await _insert_order(portfolio_id, signal_id, symbol, direction,
+                                  qty, entry, None, "PENDING_MANUAL", "live",
+                                  decision)
+        return {"status": "PENDING_MANUAL", "order_id": oid, "qty": qty,
+                "reason": "venue sans API — instruction opérateur"}
+
     adapter = _LIVE_ADAPTERS.get(venue or "")
     if adapter is None:
         return {"status": "FAILED",
                 "reason": f"no live adapter for venue {venue} — phase C"}
-    return {"status": "FAILED", "reason": "live adapters not implemented"}
+    try:
+        fill = await adapter.place_order(symbol, direction, qty, entry)  # type: ignore
+        await _insert_order(portfolio_id, signal_id, symbol, direction,
+                            qty, entry, fill.get("price"), "FILLED", "live",
+                            decision)
+        return {"status": "FILLED", "qty": qty, "fill": fill}
+    except Exception as e:
+        await _insert_order(portfolio_id, signal_id, symbol, direction,
+                            qty, entry, None, "FAILED", "live", decision)
+        return {"status": "FAILED", "reason": str(e)}
+
+
+async def confirm_manual_order(order_id: str, fill_price: float,
+                               operator: str = "manual") -> dict:
+    """Confirme un ordre PENDING_MANUAL (BRVM T+3) : fill réel saisi par
+    l'opérateur → statut FILLED + journal pour mesurer le slippage vs
+    requested_price."""
+    from utils.db_pool import get_shared_pool
+    pool = await get_shared_pool()
+    async with pool.acquire() as conn:
+        r = await conn.execute(
+            """UPDATE execution_orders
+               SET status='FILLED', fill_price=$2,
+                   metadata = COALESCE(metadata,'{}'::jsonb)
+                              || $3::jsonb
+               WHERE id=$1 AND status='PENDING_MANUAL'""",
+            order_id, fill_price,
+            f'{{"confirmed_by": "{operator}"}}')
+    return {"ok": r == "UPDATE 1", "order_id": order_id}
+
+
+def _register_adapters():
+    """Enregistre les adapters live si les clés sont présentes — sinon le
+    venue reste sans adapter et l'exécution live refuse explicitement."""
+    try:
+        from risk.adapters.binance import BinanceAdapter
+        a = BinanceAdapter.from_env()
+        if a:
+            _LIVE_ADAPTERS["FUTURES"] = a
+            _LIVE_ADAPTERS["SPOT_CRYPTO"] = a
+    except Exception as e:
+        logger.info("adapter_binance_unavailable", error=str(e))
+    try:
+        from risk.adapters.deriv import DerivAdapter
+        d = DerivAdapter.from_env()
+        if d:
+            _LIVE_ADAPTERS["SYNTHETIC"] = d
+    except Exception as e:
+        logger.info("adapter_deriv_unavailable", error=str(e))
+    try:
+        from risk.adapters.oanda import OandaAdapter
+        o = OandaAdapter.from_env()
+        if o:
+            _LIVE_ADAPTERS["MARGIN"] = o
+    except Exception as e:
+        logger.info("adapter_oanda_unavailable", error=str(e))
+
+
+_register_adapters()
 
 
 async def _insert_order(portfolio_id, signal_id, symbol, direction, qty,
@@ -86,3 +153,7 @@ async def _insert_order(portfolio_id, signal_id, symbol, direction, qty,
             portfolio_id, signal_id, symbol, direction, qty,
             req_price, fill_price, status, mode,
             extra.get("venue"), json.dumps(extra.get("state_summary") or {}))
+        row = await conn.fetchrow(
+            "SELECT id FROM execution_orders WHERE \"signalId\"=$1 AND mode=$2",
+            signal_id, mode)
+        return row["id"] if row else None

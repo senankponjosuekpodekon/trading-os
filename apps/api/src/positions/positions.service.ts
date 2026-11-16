@@ -232,7 +232,7 @@ export class PositionsService {
           VALUES (${dto.portfolioId}, ${created.id}, 'POSITION_OPEN',
                   ${-cost}, ${updated?.currentCapital ? parseFloat(updated.currentCapital.toString()) : null},
                   ${asset.symbol}, ${JSON.stringify({ entry: dto.entryPrice, qty: dto.quantity })}::jsonb)
-          ON CONFLICT ("positionId", event) DO NOTHING`;
+          ON CONFLICT DO NOTHING`;
       } catch (e) {
         this.logger.warn(`account_ledger POSITION_OPEN failed: ${e}`);
       }
@@ -352,7 +352,7 @@ export class PositionsService {
           VALUES (${position.portfolioId}, ${positionId}, 'POSITION_CLOSE',
                   ${proceeds}, ${updated?.currentCapital ? parseFloat(updated.currentCapital.toString()) : null},
                   ${position.asset.symbol}, ${JSON.stringify({ exit: exitPrice, pnl })}::jsonb)
-          ON CONFLICT ("positionId", event) DO NOTHING`;
+          ON CONFLICT DO NOTHING`;
       } catch (e) {
         this.logger.warn(`account_ledger POSITION_CLOSE failed: ${e}`);
       }

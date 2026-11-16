@@ -296,6 +296,57 @@ async def cron_portfolio_snapshots():
         await asyncio.sleep(INTERVAL)
 
 
+async def cron_carry_accrual():
+    """Accrual quotidien du carry sur les positions ouvertes :
+    - FUTURES (perp) : funding 8h → ×3/jour
+    - MARGIN (CFD/forex) : swap journalier
+    - SPOT : aucun carry
+    Insère un événement CARRY par position et par jour dans
+    account_ledger (dedup via index account_ledger_idem + period)."""
+    INTERVAL = 24 * 3600
+    await asyncio.sleep(3600)  # premier run 1h après boot
+    while True:
+        try:
+            import json
+            from datetime import date
+            from utils.db_pool import get_shared_pool as get_pool
+            from utils.instrument_profile import get_instrument_profile
+            period = date.today().isoformat()
+            pool = await get_pool()
+            async with pool.acquire() as con:
+                rows = await con.fetch("""
+                    SELECT p.id, p."portfolioId", a.symbol, p.direction,
+                           p."entryPrice"::float AS entry,
+                           p.quantity::float AS qty
+                    FROM positions p JOIN assets a ON a.id = p."assetId"
+                    WHERE p.status IN ('OPEN','PARTIAL','PARTIAL_2')""")
+                n = 0
+                for r in rows:
+                    prof = await get_instrument_profile(r["symbol"])
+                    rate = prof.get("carry_rate")
+                    if not rate:
+                        continue
+                    per_day = rate * 3 if prof.get("carry_freq") == "8h" else rate
+                    notional = r["entry"] * r["qty"]
+                    # Le carry est créditeur/débiteur selon direction ;
+                    # convention : long paie si rate>0, short reçoit.
+                    amount = -notional * per_day * (1 if r["direction"] == "BUY" else -1)
+                    await con.execute("""
+                        INSERT INTO account_ledger
+                        ("portfolioId","positionId",event,amount,symbol,metadata)
+                        VALUES ($1,$2,'CARRY',$3,$4,$5::jsonb)
+                        ON CONFLICT DO NOTHING""",
+                        r["portfolioId"], r["id"], amount, r["symbol"],
+                        json.dumps({"period": period,
+                                    "carry_source": prof.get("carry_source"),
+                                    "rate_per_day": per_day}))
+                    n += 1
+            logger.info("cron_carry_done", positions=n, period=period)
+        except Exception as exc:
+            logger.warning("cron_carry_failed", error=str(exc))
+        await asyncio.sleep(INTERVAL)
+
+
 async def run_all_crons():
     """Launch all cron jobs in parallel. Each cron is individually resilient
     (try/except inside the while loop), but we also use return_exceptions=True
@@ -311,5 +362,6 @@ async def run_all_crons():
         cron_portfolio_rebalance(),
         cron_instrument_profile_refresh(),
         cron_portfolio_snapshots(),
+        cron_carry_accrual(),
         return_exceptions=True,
     )

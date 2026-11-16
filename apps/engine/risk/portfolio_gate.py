@@ -36,6 +36,13 @@ async def can_open_position(portfolio_id: str, symbol: str,
         rejections.append({"layer": "tradable",
                            "reason": "no_candle_coverage"})
 
+    # Short rules par venue : BRVM/SPOT non shortable — un SELL n'a de sens
+    # que comme sortie d'une position BUY existante (pas d'ouverture short).
+    if direction == "SELL" and not profile.get("shortable", False):
+        rejections.append({"layer": "shortable",
+                           "reason": f"{profile.get('venue')} non shortable — "
+                                     f"SELL = sortie de position, pas short"})
+
     state = await portfolio_state(portfolio_id, target_risk=target_risk)
     if state.get("error"):
         return {"allow": False, "rejections": [

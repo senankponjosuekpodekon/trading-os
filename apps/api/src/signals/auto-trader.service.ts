@@ -140,11 +140,12 @@ export class AutoTraderService {
       return;
     }
 
-    // Gate portefeuille (engine) : marge, budget risque τ, cluster, gap.
+    // Gate + exécuteur ombre (engine) : marge, budget risque τ, cluster, gap.
+    // Mode shadow → execution_orders enregistre ce qui aurait été exécuté.
     // Fail-open si l'engine est down — le cap local ci-dessus reste actif.
-    const gate = await this._portfolioGate(portfolio.id, signal, entry, sl);
-    if (gate && !gate.allow) {
-      this.logger.log(`autopilot skip ${signal.asset?.symbol} — portfolio_gate: ${gate.rejections?.map((r: any) => r.layer).join(',')}`);
+    const exec = await this._engineExecute(portfolio.id, signal, entry, sl);
+    if (exec && exec.status === 'REJECTED') {
+      this.logger.log(`autopilot skip ${signal.asset?.symbol} — portfolio_gate: ${exec.rejections?.map((r: any) => r.layer).join(',')}`);
       return;
     }
 
@@ -168,19 +169,20 @@ export class AutoTraderService {
     this.logger.log(`autopilot OPEN ${direction === 'BUY' ? 'LONG' : 'SHORT'} ${signal.asset?.symbol} qty=${quantity.toFixed(6)} @ ${effectiveEntry.toFixed(2)} (conf ${signal.confidence}%)`);
   }
 
-  /** Gate portefeuille côté engine. null = engine injoignable → fail-open. */
-  private async _portfolioGate(
+  /** Exécuteur engine (gate + ordre shadow/paper). null = engine injoignable. */
+  private async _engineExecute(
     portfolioId: string, signal: any, entry: number, sl: number | null,
-  ): Promise<{ allow: boolean; rejections?: any[] } | null> {
+  ): Promise<{ status: string; rejections?: any[] } | null> {
     const engineUrl = this.config.get<string>('ENGINE_URL') || 'http://engine:8000';
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 5000);
-      const res = await fetch(`${engineUrl}/portfolio/can-open`, {
+      const res = await fetch(`${engineUrl}/portfolio/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           portfolio_id: portfolioId,
+          signal_id: signal.id,
           symbol: signal.asset?.symbol,
           direction: signal.signal === 'SELL' ? 'SELL' : 'BUY',
           entry, stop_loss: sl,

@@ -439,3 +439,15 @@ async def execute(req: ExecuteRequest):
     return await execute_signal(
         req.portfolio_id, req.signal_id, req.symbol, req.direction,
         req.entry, req.stop_loss, qty=req.qty, target_risk=req.target_risk)
+
+
+class ConfirmOrderRequest(BaseModel):
+    fill_price: float
+    operator: str = "manual"
+
+
+@router.post("/portfolio/orders/{order_id}/confirm")
+async def confirm_order(order_id: str, req: ConfirmOrderRequest):
+    """BRVM : saisie du fill réel après exécution manuelle (T+3)."""
+    from risk.execution import confirm_manual_order
+    return await confirm_manual_order(order_id, req.fill_price, req.operator)
