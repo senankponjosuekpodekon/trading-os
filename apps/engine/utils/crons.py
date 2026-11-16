@@ -260,6 +260,42 @@ async def cron_instrument_profile_refresh():
         await asyncio.sleep(INTERVAL)
 
 
+async def cron_portfolio_snapshots():
+    """Snapshot horaire de l'état consolidé de chaque portfolio →
+    portfolio_snapshots : equity curve réelle, marge, risque-to-stop,
+    clusters, venues. Permet de mesurer la performance réelle du
+    portefeuille (pas simulée) et d'alimenter VaR/drawdown."""
+    import json
+    INTERVAL = 3600
+    await asyncio.sleep(900)  # premier run 15min après boot
+    while True:
+        try:
+            from risk.portfolio_state import portfolio_state
+            from utils.db_pool import get_shared_pool as get_pool
+            pool = await get_pool()
+            async with pool.acquire() as con:
+                pids = await con.fetch("SELECT id FROM portfolios")
+                for p in pids:
+                    st = await portfolio_state(p["id"])
+                    if st.get("error"):
+                        continue
+                    await con.execute("""
+                        INSERT INTO portfolio_snapshots
+                        ("portfolioId",equity,cash,cash_free,margin_locked,
+                         unrealized_pnl,n_positions,risk_to_stop,risk_budget,
+                         gap_loss,clusters,venues)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb)""",
+                        p["id"], st["equity"], st["cash"], st["cash_free"],
+                        st["margin_locked"], st["unrealized_pnl"],
+                        st["n_positions"], st["risk_to_stop"],
+                        st["risk_budget"], st["gap_loss_total"],
+                        json.dumps(st["clusters"]), json.dumps(st["venues"]))
+            logger.info("cron_portfolio_snapshots_done", n=len(pids))
+        except Exception as exc:
+            logger.warning("cron_portfolio_snapshots_failed", error=str(exc))
+        await asyncio.sleep(INTERVAL)
+
+
 async def run_all_crons():
     """Launch all cron jobs in parallel. Each cron is individually resilient
     (try/except inside the while loop), but we also use return_exceptions=True
@@ -274,5 +310,6 @@ async def run_all_crons():
         cron_gem_snapshot_archive(),
         cron_portfolio_rebalance(),
         cron_instrument_profile_refresh(),
+        cron_portfolio_snapshots(),
         return_exceptions=True,
     )

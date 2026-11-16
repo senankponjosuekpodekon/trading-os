@@ -221,10 +221,17 @@ export class PositionsService {
         },
         include: { asset: { select: { symbol: true, name: true } } },
       });
-      await tx.portfolio.update({
+      const updated = await tx.portfolio.update({
         where: { id: dto.portfolioId },
         data: { currentCapital: { decrement: cost } },
       });
+      await tx.$executeRaw`
+        INSERT INTO account_ledger
+          ("portfolioId","positionId",event,amount,balance_after,symbol,metadata)
+        VALUES (${dto.portfolioId}, ${created.id}, 'POSITION_OPEN',
+                ${-cost}, ${parseFloat(updated.currentCapital.toString())},
+                ${asset.symbol}, ${JSON.stringify({ entry: dto.entryPrice, qty: dto.quantity })}::jsonb)
+        ON CONFLICT ("positionId", event) DO NOTHING`;
       return created;
     });
 
@@ -330,10 +337,17 @@ export class PositionsService {
       if (closed.count === 0) {
         throw new ConflictException('Position already closed');
       }
-      await tx.portfolio.update({
+      const updated = await tx.portfolio.update({
         where: { id: position.portfolioId },
         data: { currentCapital: { increment: proceeds } },
       });
+      await tx.$executeRaw`
+        INSERT INTO account_ledger
+          ("portfolioId","positionId",event,amount,balance_after,symbol,metadata)
+        VALUES (${position.portfolioId}, ${positionId}, 'POSITION_CLOSE',
+                ${proceeds}, ${parseFloat(updated.currentCapital.toString())},
+                ${position.asset.symbol}, ${JSON.stringify({ exit: exitPrice, pnl })}::jsonb)
+        ON CONFLICT ("positionId", event) DO NOTHING`;
     });
 
     try {

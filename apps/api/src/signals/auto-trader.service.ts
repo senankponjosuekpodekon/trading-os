@@ -140,6 +140,14 @@ export class AutoTraderService {
       return;
     }
 
+    // Gate portefeuille (engine) : marge, budget risque τ, cluster, gap.
+    // Fail-open si l'engine est down — le cap local ci-dessus reste actif.
+    const gate = await this._portfolioGate(portfolio.id, signal, entry, sl);
+    if (gate && !gate.allow) {
+      this.logger.log(`autopilot skip ${signal.asset?.symbol} — portfolio_gate: ${gate.rejections?.map((r: any) => r.layer).join(',')}`);
+      return;
+    }
+
     const effectiveEntry = this.applySlippage(entry, direction === 'BUY' ? 'buy' : 'sell');
     await this.prisma.position.create({
       data: {
@@ -158,6 +166,33 @@ export class AutoTraderService {
       },
     });
     this.logger.log(`autopilot OPEN ${direction === 'BUY' ? 'LONG' : 'SHORT'} ${signal.asset?.symbol} qty=${quantity.toFixed(6)} @ ${effectiveEntry.toFixed(2)} (conf ${signal.confidence}%)`);
+  }
+
+  /** Gate portefeuille côté engine. null = engine injoignable → fail-open. */
+  private async _portfolioGate(
+    portfolioId: string, signal: any, entry: number, sl: number | null,
+  ): Promise<{ allow: boolean; rejections?: any[] } | null> {
+    const engineUrl = this.config.get<string>('ENGINE_URL') || 'http://engine:8000';
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`${engineUrl}/portfolio/can-open`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          portfolio_id: portfolioId,
+          symbol: signal.asset?.symbol,
+          direction: signal.signal === 'SELL' ? 'SELL' : 'BUY',
+          entry, stop_loss: sl,
+        }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(t);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 
   /** Ferme sizePct% de la taille ORIGINALE (sémantique tracker : 33.3% par TP). */
