@@ -37,6 +37,8 @@ COSTS = {
     "SPOT":    {"rt_frac": 2 * 0.001,             "per_8h": 0.0},
 }
 MM_BUFFER = 0.015        # 1.5% buffer maintenance margin
+TAKER_RT = 2 * 0.0005    # taker aller-retour (FUTURES/SPOT-like)
+SLIP_RT = 2 * 0.0002     # slippage aller-retour
 LEVERAGES = [1, 2, 3, 5, 10]
 STAKE = 100.0            # USDT de marge par trade
 BANKROLL = 1000.0        # 10 stakes — risque de ruine mesuré dessus
@@ -59,6 +61,10 @@ def ts(s: str) -> float:
     return datetime.fromisoformat(s.replace("Z", "").split(".")[0]).timestamp()
 
 
+def _ts_iso(t: float) -> str:
+    return datetime.fromtimestamp(t).isoformat()
+
+
 def load(path):
     with open(path) as f:
         return list(csv.DictReader(f))
@@ -68,7 +74,7 @@ def liq_distance(leverage: float) -> float:
     return max(0.0, 1.0 / leverage - MM_BUFFER)
 
 
-def replay(sig, candles, L):
+def replay(sig, candles, L, order="pessimistic"):
     """Rejoue le trade au levier L. Retourne (pnl_pct_marge, exit_reason, durée_h)."""
     entry = float(sig["entryPrice"] or 0)
     if entry <= 0:
@@ -80,55 +86,86 @@ def replay(sig, candles, L):
     liq_px = entry * (1 - d) if long_ else entry * (1 + d)
 
     t_entry, t_end = ts(sig["entry_ts"]), ts(sig["end_ts"] or sig["entry_ts"])
+    # La bougie d'entrée (open_time == t_entry) contient du range AVANT le
+    # moment d'entrée → SL/TP "touchés" avant que la position existe. On
+    # n'évalue que les bougies strictement postérieures ; la bougie
+    # d'entrée est rapportée à part (ambiguous_entry).
     path = [c for c in candles
-            if ts(c["open_time"]) >= t_entry and ts(c["open_time"]) <= t_end]
+            if ts(c["open_time"]) > t_entry and ts(c["open_time"]) <= t_end]
+    entry_candle = next((c for c in candles if ts(c["open_time"]) == t_entry), None)
+    # Bougie d'entrée : son range inclut l'avant-entrée. Si un seul des deux
+    # niveaux est touché → exit indiscutable (l'hypothèse d'ordre ne change
+    # rien). Si les DEUX sont touchés → ordre intrabar décide (pessimiste=SL,
+    # optimiste=TP). Sinon → path normal.
+    if entry_candle:
+        hi0, lo0 = float(entry_candle["high"]), float(entry_candle["low"])
+        hit_sl0 = (lo0 <= sl if long_ else hi0 >= sl) if sl else False
+        hit_tp0 = (hi0 >= tp if long_ else lo0 <= tp) if tp else False
+        if hit_sl0 and hit_tp0:
+            first = "SL" if order == "pessimistic" else "TP"
+            return _close_trade(entry, sl if first == "SL" else tp, first,
+                                long_, sig, t_entry, L, sl)
+        elif hit_sl0:
+            return _close_trade(entry, sl, "SL", long_, sig, t_entry, L, sl)
+        elif hit_tp0:
+            return _close_trade(entry, tp, "TP", long_, sig, t_entry, L, sl)
     if not path:
         return None
 
     exit_px = None
     reason = None
+    ambiguous = 0
     for c in path:
         hi, lo = float(c["high"]), float(c["low"])
-        # Ordre pessimiste : liquidation d'abord, puis SL, puis TP
+        # Bougie ambiguë : TP ET SL touchés dans la même bougie → l'ordre
+        # intrabar choisi décide du résultat. Sur TP 0.15%/SL 0.25% 1h,
+        # c'est fréquent → on borne avec les deux hypothèses.
+        hit_sl = (lo <= sl if long_ else hi >= sl) if sl else False
+        hit_tp = (hi >= tp if long_ else lo <= tp) if tp else False
+        if hit_sl and hit_tp:
+            ambiguous += 1
+            if order == "optimistic":
+                hit_sl = False  # hypothèse favorable : TP touché d'abord
         if long_:
-            if lo <= liq_px:
+            if lo <= liq_px and order == "pessimistic":
                 exit_px, reason = liq_px, "LIQUIDATED"
-            elif sl and lo <= sl:
+            elif hit_sl:
                 exit_px, reason = sl, "SL"
-            elif tp and hi >= tp:
+            elif hit_tp:
                 exit_px, reason = tp, "TP"
         else:
-            if hi >= liq_px:
+            if hi >= liq_px and order == "pessimistic":
                 exit_px, reason = liq_px, "LIQUIDATED"
-            elif sl and hi >= sl:
+            elif hit_sl:
                 exit_px, reason = sl, "SL"
-            elif tp and lo <= tp:
+            elif hit_tp:
                 exit_px, reason = tp, "TP"
         if reason:
             break
     if not reason:
         exit_px, reason = float(path[-1]["close"]), "EXPIRED"
+    return _close_trade(entry, exit_px, reason, long_, sig,
+                        ts(path[-1]["open_time"]), L, sl, ambiguous)
 
+
+def _close_trade(entry, exit_px, reason, long_, sig, t_end, L, sl, ambiguous=0):
+    """PnL net % marge + R multiple + durée, coûts par venue."""
     move = (exit_px - entry) / entry if long_ else (entry - exit_px) / entry
-    dur_h = (ts(path[-1]["open_time"]) - t_entry) / 3600.0
-
-    # Coûts sur notionnel → ×L en % de marge — modèle par venue
+    dur_h = max(0.0, (t_end - ts(sig["entry_ts"])) / 3600.0)
     c = COSTS[venue(sig["symbol"])]
-    gross = move * L * 100
     fees = c["rt_frac"] * L * 100
     holding = math.floor(dur_h / 8) * c["per_8h"] * L * 100
-    # R multiple : PnL net en fraction du risque prix (distance SL)
     sl_dist = abs(entry - sl) / entry if sl else None
+    d = liq_distance(L)
     r_mult = None
     if sl_dist and sl_dist > 0:
         net_frac = move - c["rt_frac"] - math.floor(dur_h / 8) * c["per_8h"]
         if reason == "LIQUIDATED":
             net_frac = -d
         r_mult = net_frac / sl_dist
-
     if reason == "LIQUIDATED":
-        return (-100.0 - fees - holding, reason, dur_h, r_mult)
-    return (gross - fees - holding, reason, dur_h, r_mult)
+        return (-100.0 - fees - holding, reason, dur_h, r_mult, ambiguous)
+    return (move * L * 100 - fees - holding, reason, dur_h, r_mult, ambiguous)
 
 
 def metrics(trades, label):
@@ -214,19 +251,205 @@ def main():
     # Baseline ×1 avec le coût propre à chaque venue (CFD = spread,
     # pas de funding — corrige le biais taker+funding sur 92% de l'échantillon)
     spot_trades, reasons = [], {}
+    n_ambiguous = 0
     for s in eligible:
         r = replay(s, candles[(s["symbol"], s["timeframe"])], 1)
         if r is None:
             continue
-        # Venue-cost déjà dans r[0] ; à ×1 le funding perp ne s'applique
-        # qu'aux FUTURES — déjà géré par COSTS[venue]. On retire juste
-        # la part "holding" pour avoir l'équivalent spot pur.
         c = COSTS[venue(s["symbol"])]
         hold_frac = math.floor(r[2] / 8) * c["per_8h"] * 100
         spot_trades.append((r[0] + hold_frac, day_of(s), r[3]))
         reasons[r[1]] = reasons.get(r[1], 0) + 1
-    print(f"Exits observés (chemin rejoué) : {reasons}\n")
-    res = {"SPOT×1": metrics(spot_trades, "×1 net")}
+        if r[4] > 0:
+            n_ambiguous += 1
+    print(f"Exits observés (chemin rejoué) : {reasons}")
+    print(f"Bougies ambiguës TP+SL : {n_ambiguous}/{len(spot_trades)} trades "
+          f"({n_ambiguous/max(len(spot_trades),1)*100:.0f}%) — l'ordre intrabar "
+          f"pèse directement sur le verdict\n")
+
+    # Encadrement : hypothèse optimiste (TP avant SL quand les deux sont
+    # touchés) vs pessimiste. Si les deux bornes donnent le même signe,
+    # le verdict est robuste à l'ordre intrabar.
+    opt_trades = []
+    for s in eligible:
+        r = replay(s, candles[(s["symbol"], s["timeframe"])], 1, order="optimistic")
+        if r is None:
+            continue
+        c = COSTS[venue(s["symbol"])]
+        hold_frac = math.floor(r[2] / 8) * c["per_8h"] * 100
+        opt_trades.append((r[0] + hold_frac, day_of(s), r[3]))
+    print("=== ENCADREMENT ORDRE INTRABAR (×1) ===")
+    res_pess = metrics(spot_trades, "×1 pess.")
+    res_opt = metrics(opt_trades, "×1 opt.")
+
+    # (a) BENCHMARK APPARIÉ : par signal, N_DRAWS entrées aléatoires —
+    # MÊME direction (99% BUY), mêmes distances TP/SL, même durée
+    # d'expiration, même venue/coûts, mêmes bougies. Moyenné par signal
+    # → différence détecteur − aléatoire, IC95% block bootstrap par jour.
+    N_DRAWS = 50
+    rng = random.Random(7)
+
+    def _random_draw(s, cs):
+        """Tire une entrée aléatoire appariée au signal s sur cs."""
+        i = rng.randrange(0, len(cs) - 1)
+        new_entry = float(cs[i]["close"])
+        old_entry = float(s["entryPrice"] or 0)
+        long_ = s["signal"] == "BUY"
+        fake = dict(s)
+        if old_entry and s["stopLoss"]:
+            sl_d = abs(float(s["stopLoss"]) - old_entry)
+            fake["stopLoss"] = str(new_entry - sl_d if long_ else new_entry + sl_d)
+        if old_entry and s["takeProfit1"]:
+            tp_d = abs(float(s["takeProfit1"]) - old_entry)
+            fake["takeProfit1"] = str(new_entry + tp_d if long_ else new_entry - tp_d)
+        fake["entryPrice"] = str(new_entry)
+        fake["entry_ts"] = cs[i]["open_time"]
+        dur = ts(s["end_ts"] or s["entry_ts"]) - ts(s["entry_ts"])
+        fake["end_ts"] = cs[min(i + 100, len(cs) - 1)]["open_time"] \
+            if dur <= 0 else _ts_iso(ts(fake["entry_ts"]) + dur)
+        # borne au-delà des bougies disponibles → clamp
+        if ts(fake["end_ts"]) > ts(cs[-1]["open_time"]):
+            fake["end_ts"] = cs[-1]["open_time"]
+        return replay(fake, cs, 1)
+
+    det_by_sig, rand_by_sig, rand_dir_by_sig = {}, {}, {}
+    theory_list, expired_stats = [], []
+    for s in eligible:
+        cs = candles[(s["symbol"], s["timeframe"])]
+        if len(cs) < 10:
+            continue
+        r_det = replay(s, cs, 1)
+        if r_det is None:
+            continue
+        # draws appariés : même direction
+        rs = [r for r in (_random_draw(s, cs) for _ in range(N_DRAWS)) if r]
+        if not rs:
+            continue
+        det_by_sig[s["id"]] = (r_det, day_of(s))
+        rand_by_sig[s["id"]] = (sum(r[0] for r in rs) / len(rs),
+                                sum(r[3] or 0 for r in rs) / len(rs), day_of(s))
+        # (0) validation : théorie marche aléatoire vs mesure, sur tirages
+        # résolus uniquement (TP/SL — les expirés n'ont pas de WR défini)
+        tp_d = abs(float(s["takeProfit1"] or 0) - float(s["entryPrice"])) \
+            if s["takeProfit1"] else 0
+        sl_d = abs(float(s["stopLoss"] or 0) - float(s["entryPrice"])) \
+            if s["stopLoss"] else 0
+        resolved_draws = [r for r in rs if r[1] in ("TP", "SL")]
+        if tp_d > 0 and sl_d > 0 and resolved_draws:
+            p_theory = sl_d / (tp_d + sl_d)
+            n_tp = sum(1 for r in resolved_draws if r[1] == "TP")
+            theory_list.append((p_theory, n_tp / len(resolved_draws)))
+        det_exp = 1 if r_det[1] == "EXPIRED" else 0
+        rand_exp = sum(1 for r in rs if r[1] == "EXPIRED") / len(rs)
+        expired_stats.append((det_exp, rand_exp))
+        # variante 50/50 : direction tirée au hasard → isole le biais BUY
+        rs50 = []
+        for _ in range(N_DRAWS):
+            f = dict(s); f["signal"] = rng.choice(["BUY", "SELL"])
+            r = _random_draw(f, cs)
+            if r:
+                rs50.append(r)
+        if rs50:
+            rand_dir_by_sig[s["id"]] = (sum(r[0] for r in rs50) / len(rs50),
+                                        sum(r[3] or 0 for r in rs50) / len(rs50), day_of(s))
+
+    def _paired_table(det, rand, label):
+        diffs = [(det[k][0][0] - rand[k][0], det[k][1]) for k in det if k in rand]
+        print(f"\n=== {label} (n={len(diffs)} signaux) ===")
+        metrics([(det[k][0][0], det[k][1], det[k][0][3]) for k in det], "DÉTECT.")
+        metrics([(rand[k][0], rand[k][2], rand[k][1]) for k in det if k in rand], "ALÉAT.")
+        det_r = [det[k][0][3] for k in det if det[k][0][3] is not None]
+        rand_r = [rand[k][1] for k in det if k in rand and det[k][0][3] is not None]
+        # différence appariée — block bootstrap par jour
+        days = {}
+        for i, (_, d) in enumerate(diffs):
+            days.setdefault(d, []).append(i)
+        day_list = list(days.values())
+        rng2 = random.Random(42)
+        means = []
+        for _ in range(BOOTSTRAP_N):
+            idx = [i for day in rng2.choices(day_list, k=len(day_list)) for i in day]
+            means.append(sum(diffs[i][0] for i in idx) / len(idx))
+        means.sort()
+        d_exp = sum(x[0] for x in diffs) / len(diffs)
+        lo, hi = means[int(.025 * BOOTSTRAP_N)], means[int(.975 * BOOTSTRAP_N)]
+        dr = sum(det_r) / len(det_r) if det_r else 0
+        ar = sum(rand_r) / len(rand_r) if rand_r else 0
+        print(f"  différence détect−aléat : {d_exp:+.3f}% IC95[{lo:+.3f},{hi:+.3f}] "
+              f"(jours={len(day_list)})  |  R brut : détect {dr:+.2f}R vs aléat {ar:+.2f}R")
+
+    # (0) VALIDATION DU BENCHMARK : WR aléatoire mesuré vs théorie
+    # SL/(TP+SL), signal par signal puis moyennée — sur tirages résolus.
+    if theory_list:
+        t_th = sum(p for p, _ in theory_list) / len(theory_list)
+        t_me = sum(m for _, m in theory_list) / len(theory_list)
+        gap = abs(t_me - t_th) * 100
+        print(f"=== (0) VALIDATION BENCHMARK ===")
+        print(f"  théorie moyenne P(TP avant SL) : {t_th*100:.1f}%  |  "
+              f"aléatoire mesuré (tirages résolus) : {t_me*100:.1f}%  "
+              f"→ écart {gap:.1f} pts (n={len(theory_list)} signaux ×{N_DRAWS})")
+        if gap > 5:
+            print("  ⚠ écart >5 pts — causes testées : bougie d'entrée exclue ✓, "
+                  "spread inclus ✓ ; résiduel probable = volatilité réelle "
+                  "≠ marche aléatoire iid + horizon tronqué par expiration")
+    if expired_stats:
+        de = sum(x for x, _ in expired_stats) / len(expired_stats)
+        re = sum(x for _, x in expired_stats) / len(expired_stats)
+        print(f"  expirés : détecteur {de*100:.1f}%  vs  aléatoire {re*100:.1f}%\n")
+
+    _paired_table(det_by_sig, rand_by_sig, "APPARIÉ (même direction, mêmes TP/SL/durée/coûts)")
+    _paired_table(det_by_sig, rand_dir_by_sig, "VARIANTE direction 50/50")
+
+    # (b) COÛTS PAR VENUE — décomposition en R, poste par poste.
+    # MARGIN/CFD : spread + swap (pas de taker/funding). FUTURES : taker +
+    # slippage + funding(constante 0.01%/8h — pas de série historique).
+    print("\n=== COÛTS PAR VENUE (×1, par poste, en R) ===")
+    print(f"{'venue':8} {'n':>4} {'R brut':>8} {'spread':>7} {'swap':>7} "
+          f"{'slippage':>9} {'taker':>7} {'funding':>8} {'R net':>8}")
+    for v in ("MARGIN", "FUTURES", "SPOT"):
+        rows = []
+        for s in eligible:
+            if venue(s["symbol"]) != v:
+                continue
+            r = replay(s, candles[(s["symbol"], s["timeframe"])], 1)
+            if r is None or r[3] is None:
+                continue
+            e, sl_ = float(s["entryPrice"]), float(s["stopLoss"] or 0)
+            sd = abs(e - sl_) / e if sl_ else 0
+            if sd <= 0:
+                continue
+            c = COSTS[v]
+            dur_f = r[2]
+            gross_r = (r[0] + math.floor(dur_f / 8) * c["per_8h"] * 100
+                       + c["rt_frac"] * 100) / (sd * 100)  # R avant tout coût
+            comp = {"spread": 0.0, "swap": 0.0, "slippage": 0.0,
+                    "taker": 0.0, "funding": 0.0}
+            if v == "MARGIN":
+                comp["spread"] = c["rt_frac"] / sd  # spread payé à l'entrée ≈ rt_frac
+                comp["swap"] = math.floor(dur_f / 8) * c["per_8h"] / sd
+            elif v == "FUTURES":
+                comp["taker"] = TAKER_RT / sd
+                comp["slippage"] = SLIP_RT / sd
+                comp["funding"] = math.floor(dur_f / 8) * c["per_8h"] / sd
+            else:  # SPOT : taker seul
+                comp["taker"] = c["rt_frac"] / sd
+            rows.append((gross_r, comp, r[3]))
+        if not rows:
+            print(f"{v:8}    0 —")
+            continue
+        n = len(rows)
+        g = sum(r[0] for r in rows) / n
+        comps = {k: sum(r[1][k] for r in rows) / n for k in
+                 ("spread", "swap", "slippage", "taker", "funding")}
+        net = sum(r[2] for r in rows) / n
+        flag = "  (non concluant, n<30)" if n < 30 else ""
+        print(f"{v:8} {n:>4} {g:>8.2f} {comps['spread']:>7.2f} {comps['swap']:>7.2f} "
+              f"{comps['slippage']:>9.2f} {comps['taker']:>7.2f} {comps['funding']:>8.2f} "
+              f"{net:>8.2f}{flag}")
+    print("  MARGIN : funding N/A sur CFD (swap à la place) — source funding\n"
+          "  FUTURES = constante 0.01%/8h, pas de série historique appliquée.\n")
+
+    res = {"SPOT×1": res_pess}
 
     for L in LEVERAGES[1:]:
         trades = []
@@ -238,6 +461,7 @@ def main():
             trades.append((r[0], day_of(s), r[3]))
             reasons[r[1]] = reasons.get(r[1], 0) + 1
         res[f"×{L}"] = metrics(trades, f"LEV×{L}")
+        # verdict overlap handled below via res
         if L == LEVERAGES[-1]:
             print(f"  exits ×{L} : {reasons}")
 
