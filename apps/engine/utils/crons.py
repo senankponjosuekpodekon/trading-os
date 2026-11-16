@@ -43,7 +43,7 @@ async def cron_hidden_gems():
         try:
             from ml.hidden_gems import discover_hidden_gems, _cache
             logger.info("cron_hidden_gems_start")
-            result = await discover_hidden_gems(limit=10)
+            result = await discover_hidden_gems(limit=50)
             _cache["gems"] = result
             _cache["ts"] = time.monotonic()
             logger.info("cron_hidden_gems_done", gems=len(result.get("gems", [])))

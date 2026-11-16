@@ -163,12 +163,131 @@ async def compute_liquidity_score(symbol: str, asset_type: str) -> dict:
     elif total < 10:
         warning = "Liquidité extrêmement faible — signal risqué"
 
+    orderbook = _analyze_orderbook(symbol, depth_data if isinstance(depth_data, dict) else None)
+
     return {
         "score": round(total, 1),
         "depth_score": d_score,
         "spread_score": s_score,
         "volume_score": v_score,
         "warning": warning,
+        "orderbook": orderbook,
+    }
+
+
+_OB_SNAPSHOT_TTL = 900  # garde le snapshot précédent ~15min pour mesurer le churn
+
+
+def _weighted_side_value(levels: list, mid: float) -> float:
+    """USD value pondérée par proximité du mid (1er niveau pèse le plus)."""
+    total = 0.0
+    for i, lvl in enumerate(levels[:10]):
+        price, qty = float(lvl[0]), float(lvl[1])
+        if mid > 0:
+            dist_pct = abs(price - mid) / mid
+            weight = 1.0 / (1.0 + dist_pct * 100.0) / (1.0 + i * 0.15)
+        else:
+            weight = 1.0
+        total += price * qty * weight
+    return total
+
+
+def _slippage_for(levels: list, target_usd: float = 500.0) -> Optional[float]:
+    """Slippage % d'un ordre market de `target_usd` exécuté contre les niveaux.
+
+    Marche le carnet niveau par niveau : le prix moyen pondéré obtenu est
+    comparé au meilleur prix disponible (impact instantané de l'ordre)."""
+    if not levels:
+        return None
+    best = float(levels[0][0])
+    usd_spent = 0.0
+    qty_acc = 0.0
+    for lvl in levels:
+        price, qty = float(lvl[0]), float(lvl[1])
+        take_usd = min(price * qty, target_usd - usd_spent)
+        if take_usd <= 0:
+            break
+        qty_acc += take_usd / price
+        usd_spent += take_usd
+        if usd_spent >= target_usd:
+            break
+    if qty_acc <= 0 or usd_spent < target_usd * 0.5:
+        # Carnet trop fin pour remplir la moitié de l'ordre → mesure non fiable
+        return None
+    avg_price = usd_spent / qty_acc
+    return abs(avg_price - best) / best * 100.0
+
+
+def _analyze_orderbook(symbol: str, depth_data: Optional[dict]) -> Optional[dict]:
+    """Signaux directionnels du carnet Binance (Niveau A) :
+
+    - imbalance : (bids - asks) pondéré proximité → pression acheteur/vendeur
+    - microprice : "vrai" prix instantané vs mid → prédicteur du prochain tick
+    - slippage estimé pour $500 market buy/sell
+    - churn + spoof : comparaison avec le snapshot précédent (cache 15min) —
+      un mur qui apparaît/disparaît = spoofing probable, on ne s'y fie pas.
+    """
+    if not depth_data:
+        return None
+    bids = depth_data.get("bids") or []
+    asks = depth_data.get("asks") or []
+    if not bids or not asks:
+        return None
+
+    best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
+    mid = (best_bid + best_ask) / 2.0
+
+    bid_val = _weighted_side_value(bids, mid)
+    ask_val = _weighted_side_value(asks, mid)
+    imbalance = (bid_val - ask_val) / (bid_val + ask_val) if (bid_val + ask_val) > 0 else 0.0
+
+    bid_sz, ask_sz = float(bids[0][1]), float(asks[0][1])
+    microprice = (best_bid * ask_sz + best_ask * bid_sz) / (bid_sz + ask_sz)
+    microprice_bps = (microprice - mid) / mid * 10_000
+
+    slip_buy = _slippage_for(asks, 500.0)
+    slip_sell = _slippage_for(bids, 500.0)
+
+    # Churn vs snapshot précédent : % des niveaux top-10 qui ont changé.
+    from utils.cache import mem_get, mem_set
+    key = f"ob:{symbol.upper()}"
+    prev = mem_get(key)
+    cur_levels = {
+        "bids": [l[0] for l in bids[:10]],
+        "asks": [l[0] for l in asks[:10]],
+    }
+    mem_set(key, cur_levels, _OB_SNAPSHOT_TTL)
+
+    churn = None
+    spoof_suspected = False
+    if isinstance(prev, dict):
+        prev_set = set(prev.get("bids", [])) | set(prev.get("asks", []))
+        cur_set = set(cur_levels["bids"]) | set(cur_levels["asks"])
+        if prev_set:
+            churn = 1.0 - len(prev_set & cur_set) / len(prev_set)
+        if churn is not None and churn > 0.8:
+            spoof_suspected = True
+
+    # Ajustement de confiance : le carnet confirme (+) ou contredit (-).
+    # Le sens est appliqué par l'appelant selon la direction du signal.
+    notes = []
+    if spoof_suspected:
+        notes.append("Churn carnet >80% — spoofing/manipulation probable, imbalance ignorée")
+    elif imbalance > 0.3:
+        notes.append(f"Pression acheteuse dans le carnet ({imbalance:+.0%})")
+    elif imbalance < -0.3:
+        notes.append(f"Pression vendeuse dans le carnet ({imbalance:+.0%})")
+    if slip_buy is not None and slip_buy > 0.5:
+        notes.append(f"Slippage entrée élevé (~{slip_buy:.2f}% pour $500)")
+
+    return {
+        "imbalance": round(imbalance, 3),
+        "microprice_bps": round(microprice_bps, 1),
+        "slippage_buy_pct": round(slip_buy, 3) if slip_buy is not None else None,
+        "slippage_sell_pct": round(slip_sell, 3) if slip_sell is not None else None,
+        "churn": round(churn, 3) if churn is not None else None,
+        "spoof_suspected": spoof_suspected,
+        "notes": notes,
     }
 
 

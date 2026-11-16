@@ -754,6 +754,22 @@ def apply_quality_gate(
             if score < 30:
                 flags.append("Liquidité faible")
 
+    # Layer 3c — Order book directionnel (Binance depth, si disponible)
+    # imbalance : pression acheteur/vendeur ; churn élevé = spoofing probable.
+    ob = (liquidity_data or {}).get("orderbook") or {}
+    imbalance = ob.get("imbalance")
+    if ob.get("spoof_suspected"):
+        total_penalty += 0.08
+        flags.append("Carnet instable — spoofing probable, imbalance ignorée")
+    elif imbalance is not None and abs(imbalance) >= 0.30:
+        aligned = (signal == "BUY" and imbalance > 0) or (signal == "SELL" and imbalance < 0)
+        if aligned:
+            total_penalty = max(0.0, total_penalty - 0.05)
+            flags.append(f"Carnet confirme ({imbalance:+.0%} bids)")
+        else:
+            total_penalty += 0.08
+            flags.append(f"Carnet contredit le signal ({imbalance:+.0%} bids)")
+
     # Layer 3b — Volume gate (with BRVM normalization)
     vol_result = _check_volume_gate(df, signal, asset_type, symbol)
     if not vol_result["passed"]:

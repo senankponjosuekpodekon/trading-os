@@ -50,6 +50,8 @@ class GemCandidate:
     token_address: str | None = None
     upside: Dict[str, Any] | None = None
     smart_money: Dict[str, Any] | None = None
+    exec_check: Dict[str, Any] | None = None
+    flow: Dict[str, Any] | None = None
 
 
 # Narratives — taxonomie des thèmes de marché crypto.
@@ -1082,6 +1084,8 @@ async def _fetch_dex_trending() -> List[Dict[str, Any]]:
                 "sells_24h": float((txns.get("h24") or {}).get("sells", 0) or 0),
                 "buys_1h": float((txns.get("h1") or {}).get("buys", 0) or 0),
                 "sells_1h": float((txns.get("h1") or {}).get("sells", 0) or 0),
+                "buys_m5": float((txns.get("m5") or {}).get("buys", 0) or 0),
+                "sells_m5": float((txns.get("m5") or {}).get("sells", 0) or 0),
                 "url": p.get("url", ""),
                 "socials": meta.get("links", {}),
                 "description": meta.get("description", ""),
@@ -1155,6 +1159,8 @@ async def _fetch_gecko_trending() -> List[Dict[str, Any]]:
                 "sells_24h": float(txns.get("sells", 0) or 0),
                 "buys_1h": float(((attrs.get("transactions") or {}).get("h1") or {}).get("buys", 0) or 0),
                 "sells_1h": float(((attrs.get("transactions") or {}).get("h1") or {}).get("sells", 0) or 0),
+                "buys_m5": float(((attrs.get("transactions") or {}).get("m5") or {}).get("buys", 0) or 0),
+                "sells_m5": float(((attrs.get("transactions") or {}).get("m5") or {}).get("sells", 0) or 0),
                 "url": f"https://www.geckoterminal.com/{network}/pools/{attrs.get('address','')}",
                 "fdv": float(attrs.get("fdv_usd") or attrs.get("market_cap_usd") or 0),
                 "source": "geckoterminal",
@@ -1198,6 +1204,8 @@ async def _fetch_dex_search(query: str = "trending") -> List[Dict[str, Any]]:
                 "sells_24h": float((txns.get("h24") or {}).get("sells", 0) or 0),
                 "buys_1h": float((txns.get("h1") or {}).get("buys", 0) or 0),
                 "sells_1h": float((txns.get("h1") or {}).get("sells", 0) or 0),
+                "buys_m5": float((txns.get("m5") or {}).get("buys", 0) or 0),
+                "sells_m5": float((txns.get("m5") or {}).get("sells", 0) or 0),
                 "fdv": float(p.get("fdv") or p.get("marketCap") or 0),
             })
         return tokens
@@ -1339,6 +1347,28 @@ async def discover_hidden_gems(
             t.get("buys_24h", 0), t.get("sells_24h", 0), oc,
         )
 
+        # Flux instantané m5 (équivalent DEX de l'imbalance carnet d'ordres) :
+        # pression acheteuse active + accélération du rythme des txns.
+        buys_m5, sells_m5 = t.get("buys_m5", 0), t.get("sells_m5", 0)
+        tot_m5 = buys_m5 + sells_m5
+        tot_1h = t.get("buys_1h", 0) + t.get("sells_1h", 0)
+        flow = {}
+        if tot_m5 >= 5:
+            ratio_m5 = buys_m5 / tot_m5
+            # Rythme m5 annualisé en heure vs rythme h1 réel (>1 = accélère)
+            accel = (tot_m5 * 12) / max(tot_1h, 1)
+            flow = {"buy_ratio_m5": round(ratio_m5, 2), "accel": round(accel, 2)}
+            if ratio_m5 >= 0.65 and accel > 1.2:
+                score += 5
+                reasons.append(f"Flux acheteur actif ({ratio_m5:.0%} buys m5, rythme ×{accel:.1f})")
+            elif ratio_m5 <= 0.35:
+                score -= 10
+                warnings.append(f"Distribution en cours ({1-ratio_m5:.0%} sells m5)")
+        elif tot_1h > 0:
+            warnings.append("Aucune transaction depuis 5min — activité en pause")
+        t["flow"] = flow
+        flow_data = flow
+
         candidates.append(GemCandidate(
             symbol=t.get("symbol", ""),
             name=t.get("name", ""),
@@ -1362,6 +1392,7 @@ async def discover_hidden_gems(
             manipulation=manipulation,
             token_address=t.get("token_address"),
             upside=_estimate_upside(t.get("fdv", 0), t.get("narrative"), leader_caps),
+            flow=flow_data or None,
         ))
 
     # Sort by gem_score descending
@@ -1401,6 +1432,36 @@ async def discover_hidden_gems(
         for c in top_gems
         if c.token_address and isinstance(c.smart_money, dict)
     ), return_exceptions=True)
+
+    # Test d'exécutabilité réelle Jupiter (solana) : aller-retour SOL→token→SOL
+    # ~$100. Les AMM n'ont pas de carnet d'ordres — le quote Jupiter est le prix
+    # réellement exécutable ; une revente non cotée = honeypot/pool piégé.
+    from ml.jupiter_check import check_exit_liquidity
+    _solana_gems = [c for c in top_gems
+                    if (c.chain or "").lower() == "solana" and c.token_address]
+    jup_results = await _asyncio.gather(*(
+        _asyncio.wait_for(check_exit_liquidity(c.token_address), timeout=8.0)
+        for c in _solana_gems
+    ), return_exceptions=True)
+    for c, res in zip(_solana_gems, jup_results):
+        if not isinstance(res, dict) or not res.get("checked"):
+            continue
+        c.exec_check = res
+        loss = res.get("round_trip_loss_pct")
+        if res.get("sellable") is False:
+            c.gem_score = max(0, c.gem_score - 40)
+            c.warnings.append("Sortie impossible — revente non cotée (honeypot probable)")
+        elif loss is not None and loss > 30:
+            c.gem_score = max(0, c.gem_score - 30)
+            c.warnings.append(f"Aller-retour coûte ~{loss:.0f}% — pool piégé")
+        elif loss is not None and loss > 15:
+            c.gem_score = max(0, c.gem_score - 12)
+            c.warnings.append(f"Sortie coûteuse (~{loss:.0f}% aller-retour)")
+        elif loss is not None and loss < 5:
+            c.reasons.append(f"Sortie saine (aller-retour ~{loss:.1f}%)")
+
+    # Re-tri après les ajustements Jupiter — un pool piégé redescend
+    top_gems.sort(key=lambda c: c.gem_score, reverse=True)
 
     # Score dans le snapshot le plus récent → calibration future (backtest)
     await _asyncio.gather(*(
@@ -1504,6 +1565,8 @@ async def discover_hidden_gems(
                 "under_the_radar": c.under_the_radar,
                 "manipulation": c.manipulation,
                 "smart_money": c.smart_money,
+                "exec_check": c.exec_check,
+                "flow": c.flow,
                 "upside": c.upside,
                 "llm_comment": (c_llm or {}).get("comment") if isinstance(c_llm, dict) else None,
                 "analyst_conviction": (c_llm or {}).get("conviction") if isinstance(c_llm, dict) else None,
