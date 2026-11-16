@@ -17,9 +17,10 @@ en conditions live avant toute exécution on-chain.
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from utils.logger import get_logger
 
@@ -48,9 +49,51 @@ async def _client():
     return await cache.client()
 
 
+_GEMS_PORTFOLIO_ID: Optional[str] = None
+GEM_MAX_TOTAL_USD = float(os.getenv("GEM_MAX_TOTAL_USD", "500"))
+
+
+async def _gems_portfolio() -> Optional[str]:
+    """Portfolio PAPER dédié aux gems — créé une fois, réutilisé."""
+    global _GEMS_PORTFOLIO_ID
+    if _GEMS_PORTFOLIO_ID:
+        return _GEMS_PORTFOLIO_ID
+    try:
+        import os as _os
+        env_id = _os.getenv("GEMS_PORTFOLIO_ID")
+        if env_id:
+            _GEMS_PORTFOLIO_ID = env_id
+            return env_id
+        from utils.db_pool import get_shared_pool as get_pool
+        pool = await get_pool()
+        async with pool.acquire() as con:
+            row = await con.fetchrow(
+                "SELECT id FROM portfolios WHERE name='HiddenGems' LIMIT 1")
+            if row:
+                _GEMS_PORTFOLIO_ID = row["id"]
+                return row["id"]
+            uid = await con.fetchval(
+                "SELECT id FROM users ORDER BY \"createdAt\" LIMIT 1")
+            if not uid:
+                return None
+            pid = await con.fetchval("""
+                INSERT INTO portfolios (id,name,type,currency,"initialCapital",
+                                        "currentCapital","userId","createdAt","updatedAt")
+                VALUES (gen_random_uuid()::text,'HiddenGems','PAPER','USD',
+                        10000,10000,$1,now(),now()) RETURNING id""", uid)
+            _GEMS_PORTFOLIO_ID = pid
+            logger.info("gems_portfolio_created", id=pid)
+            return pid
+    except Exception as e:
+        logger.warning("gems_portfolio_failed", error=str(e))
+        return None
+
+
 async def maybe_open_position(gem: Dict[str, Any]) -> None:
     """Ouvre une position papier si le token remplit le profil d'entrée
-    et n'est pas déjà tracké. Appelé depuis discover_hidden_gems."""
+    et n'est pas déjà tracké. Appelé depuis discover_hidden_gems.
+    Passe par le portfolio_gate : budget risque, marge, concentration.
+    Rejet gate → position non ouverte, raison persistée."""
     addr = gem.get("token_address")
     if not addr or not gem.get("price"):
         return
@@ -59,6 +102,34 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
         pid = _key(gem.get("chain", ""), addr)
         if await r.sismember(POSITIONS_SET, pid):
             return
+
+        # Cap dédié gems : exposition totale ≤ GEM_MAX_TOTAL_USD
+        keys = [f"{POSITION_PREFIX}{k}"
+                for k in await r.smembers(POSITIONS_SET)]
+        vals = await r.mget(keys) if keys else []
+        open_pos = [json.loads(v) for v in vals if v]
+        exposure = sum(p.get("size_usd", 0) * p.get("remaining_pct", 0) / 100
+                       for p in open_pos)
+        if exposure + VIRTUAL_SIZE_USD > GEM_MAX_TOTAL_USD:
+            logger.info("gem_skip_exposure_cap", symbol=gem.get("symbol"),
+                        exposure=round(exposure))
+            return
+
+        # Gate portefeuille — SL −25% (règle du paper trader)
+        pfid = await _gems_portfolio()
+        gate: Dict[str, Any] = {"allow": True}
+        if pfid:
+            try:
+                from risk.portfolio_gate import can_open_position
+                gate = await can_open_position(
+                    pfid, gem.get("symbol", ""), "BUY",
+                    float(gem["price"]), float(gem["price"]) * 0.75)
+            except Exception as e:
+                logger.debug("gem_gate_error", error=str(e))
+            if not gate.get("allow"):
+                logger.info("gem_gate_rejected", symbol=gem.get("symbol"),
+                            layers=[x["layer"] for x in gate.get("rejections", [])])
+                return
         pos = {
             "id": pid,
             "chain": gem.get("chain", ""),
@@ -70,8 +141,9 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
             "entry_score": gem.get("gem_score"),
             "entry_liq": gem.get("liquidity"),
             "entry_vol": gem.get("volume_24h"),
-            "size_usd": VIRTUAL_SIZE_USD,
+            "size_usd": (gate.get("notional") or VIRTUAL_SIZE_USD),
             "remaining_pct": 100.0,
+            "gate": gate.get("state_summary"),
             "max_price": float(gem["price"]),
             "status": "OPEN",
             "tp1_hit": False,

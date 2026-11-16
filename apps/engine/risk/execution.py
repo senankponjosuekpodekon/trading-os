@@ -133,6 +133,13 @@ def _register_adapters():
             _LIVE_ADAPTERS["MARGIN"] = o
     except Exception as e:
         logger.info("adapter_oanda_unavailable", error=str(e))
+    try:
+        from risk.adapters.jupiter import JupiterAdapter
+        j = JupiterAdapter.from_env()
+        if j:
+            _LIVE_ADAPTERS["GEM"] = j
+    except Exception as e:
+        logger.info("adapter_jupiter_unavailable", error=str(e))
 
 
 _register_adapters()
