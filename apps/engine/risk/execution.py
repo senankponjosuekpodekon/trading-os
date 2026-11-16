@@ -186,6 +186,14 @@ def _register_adapters():
             _LIVE_ADAPTERS["MARGIN"] = o
     except Exception as e:
         logger.info("adapter_oanda_unavailable", error=str(e))
+    if "MARGIN" not in _LIVE_ADAPTERS:
+        try:
+            from risk.adapters.mt5 import MT5Adapter
+            m = MT5Adapter.from_env()
+            if m:
+                _LIVE_ADAPTERS["MARGIN"] = m
+        except Exception as e:
+            logger.info("adapter_mt5_unavailable", error=str(e))
     try:
         from risk.adapters.jupiter import JupiterAdapter
         j = JupiterAdapter.from_env()
