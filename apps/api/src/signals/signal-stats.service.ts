@@ -12,6 +12,7 @@ export interface SignalStats {
   avgPnl: number;
   avgMae: number;
   avgMfe: number;
+  avgR: number | null;
 }
 
 @Injectable()
@@ -40,6 +41,8 @@ export class SignalStatsService {
         finalPnlPct: true,
         maxAdverseExcursionPct: true,
         maxFavorableExcursionPct: true,
+        entryPrice: true,
+        stopLoss: true,
       },
     });
 
@@ -52,6 +55,17 @@ export class SignalStatsService {
     const totalWinPnl = wins.reduce((sum, s) => sum + (parseFloat(s.finalPnlPct?.toString() ?? '0') || 0), 0);
     const totalLossPnl = losses.reduce((sum, s) => sum + Math.abs(parseFloat(s.finalPnlPct?.toString() ?? '0') || 0), 0);
 
+    const rMultiples = signals
+      .map(s => {
+        const entry = parseFloat(s.entryPrice?.toString() ?? '0');
+        const sl = s.stopLoss != null ? parseFloat(s.stopLoss.toString()) : null;
+        const pnl = parseFloat(s.finalPnlPct?.toString() ?? '');
+        if (!entry || !sl || sl === entry || !isFinite(pnl)) return null;
+        const riskPct = (Math.abs(entry - sl) / entry) * 100;
+        return riskPct > 0 ? pnl / riskPct : null;
+      })
+      .filter((r): r is number => r != null);
+
     return {
       total: signals.length,
       wins: wins.length,
@@ -63,6 +77,7 @@ export class SignalStatsService {
       avgPnl: signals.length > 0 ? totalPnl / signals.length : 0,
       avgMae: signals.length > 0 ? signals.reduce((sum, s) => sum + (parseFloat(s.maxAdverseExcursionPct?.toString() ?? '0') || 0), 0) / signals.length : 0,
       avgMfe: signals.length > 0 ? signals.reduce((sum, s) => sum + (parseFloat(s.maxFavorableExcursionPct?.toString() ?? '0') || 0), 0) / signals.length : 0,
+      avgR: rMultiples.length > 0 ? rMultiples.reduce((a, b) => a + b, 0) / rMultiples.length : null,
     };
   }
 

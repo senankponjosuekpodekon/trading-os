@@ -442,15 +442,16 @@ export class SignalOutcomeService {
     return result;
   }
 
-  async getPatternStats() {
+  async getPatternStats(market?: string) {
     const where: any = { outcome: { not: 'PENDING' }, patternName: { not: null } };
+    if (market) where.market = { equals: market, mode: 'insensitive' };
     const logs = await this.prisma.signalLog.findMany({ where, take: 5000 });
 
-    const stats: Record<string, { trades: number; wins: number; losses: number; pnl: number; winRate: number; avgDuration: number | null; avgConfluence: number | null; avgRealizedPnl: number | null; avgExpectedPnl: number | null }> = {};
+    const stats: Record<string, { trades: number; wins: number; losses: number; pnl: number; winRate: number; avgDuration: number | null; avgConfluence: number | null; avgRealizedPnl: number | null; avgExpectedPnl: number | null; avgR: number | null }> = {};
     for (const log of logs) {
       const name = log.patternName!;
       if (!stats[name]) {
-        stats[name] = { trades: 0, wins: 0, losses: 0, pnl: 0, winRate: 0, avgDuration: null, avgConfluence: null, avgRealizedPnl: null, avgExpectedPnl: null };
+        stats[name] = { trades: 0, wins: 0, losses: 0, pnl: 0, winRate: 0, avgDuration: null, avgConfluence: null, avgRealizedPnl: null, avgExpectedPnl: null, avgR: null };
       }
       const s = stats[name];
       s.trades += 1;
@@ -458,6 +459,15 @@ export class SignalOutcomeService {
       else if (log.outcome === 'LOSS_SL') s.losses += 1;
       s.pnl += parseFloat(log.outcomePrice?.toString() ?? '0') - parseFloat(log.entryPrice?.toString() ?? '0');
     }
+
+    const rMultiple = (l: any): number | null => {
+      const entry = parseFloat(l.entryPrice?.toString() ?? '0');
+      const sl = l.stopLoss != null ? parseFloat(l.stopLoss.toString()) : null;
+      if (!entry || !sl || sl === entry || l.realizedPnlPct == null) return null;
+      const riskPct = (Math.abs(entry - sl) / entry) * 100;
+      if (riskPct <= 0) return null;
+      return l.realizedPnlPct / riskPct;
+    };
 
     for (const name of Object.keys(stats)) {
       const s = stats[name];
@@ -473,14 +483,33 @@ export class SignalOutcomeService {
       s.avgExpectedPnl = patternLogs.filter(l => l.expectedPnlPct != null).length
         ? patternLogs.reduce((sum, l) => sum + (l.expectedPnlPct ?? 0), 0) / patternLogs.filter(l => l.expectedPnlPct != null).length
         : null;
+      const rs = patternLogs.map(rMultiple).filter((r): r is number => r != null);
+      s.avgR = rs.length ? Math.round((rs.reduce((a, b) => a + b, 0) / rs.length) * 100) / 100 : null;
       s.pnl = Math.round(s.pnl * 100) / 100;
     }
-    return { total: logs.length, patterns: stats };
+
+    // Contexte global : signaux invalidés (exclus du WR) + part des données
+    // antérieures à la persistance price_source (fix feed).
+    const [invalidated, resolved, staleRows] = await Promise.all([
+      this.prisma.signal.count({ where: { status: 'INVALIDATED' } }),
+      this.prisma.signal.count({ where: { status: 'CLOSED' } }),
+      this.prisma.$queryRaw<[{ n: bigint }]>`
+        SELECT count(*)::bigint AS n FROM signals
+        WHERE status = 'CLOSED' AND metadata->>'price_source' IS NULL`,
+    ]);
+
+    return {
+      total: logs.length,
+      patterns: stats,
+      invalidated,
+      resolved,
+      stalePriceSource: Number(staleRows[0]?.n ?? 0),
+    };
   }
 
   async getPostTradeAnalysis(market?: string, patternName?: string) {
     const where: any = { outcome: { not: 'PENDING' }, realizedPnlPct: { not: null }, expectedPnlPct: { not: null } };
-    if (market) where.market = market;
+    if (market) where.market = { equals: market, mode: 'insensitive' };
     if (patternName) where.patternName = patternName;
     const logs = await this.prisma.signalLog.findMany({ where, take: 5000 });
 

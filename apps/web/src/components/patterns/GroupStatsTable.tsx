@@ -20,7 +20,9 @@ export function GroupStatsTable({ groups }: { groups: Record<string, ExecutionSt
           <tr className="text-left text-xs text-gray-500 border-b border-gray-800">
             <th className="px-4 py-2.5 font-medium">Groupe</th>
             <th className="px-4 py-2.5 font-medium text-right">Trades</th>
+            <th className="px-4 py-2.5 font-medium text-right">W/L/Exp</th>
             <th className="px-4 py-2.5 font-medium text-right">Win rate</th>
+            <th className="px-4 py-2.5 font-medium text-right">Esp. (R)</th>
             <th className="px-4 py-2.5 font-medium text-right">Profit factor</th>
             <th className="px-4 py-2.5 font-medium text-right">PnL moyen</th>
             <th className="px-4 py-2.5 font-medium text-right">MAE/MFE moy.</th>
@@ -33,8 +35,18 @@ export function GroupStatsTable({ groups }: { groups: Record<string, ExecutionSt
               <tr key={name} className="border-b border-gray-800/50 last:border-0">
                 <td className="px-4 py-2.5 text-gray-200 font-medium">{name}</td>
                 <td className="px-4 py-2.5 text-right text-gray-400 font-mono">{s.total}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs">
+                  <span className="text-emerald-400">{s.wins}</span>
+                  <span className="text-gray-500">/</span>
+                  <span className="text-red-400">{s.losses}</span>
+                  <span className="text-gray-500">/</span>
+                  <span className="text-gray-400">{s.expired}</span>
+                </td>
                 <td className={`px-4 py-2.5 text-right font-mono ${s.winRate >= 0.5 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {(s.winRate * 100).toFixed(1)}%
+                </td>
+                <td className={`px-4 py-2.5 text-right font-mono ${s.avgR != null ? (s.avgR >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-gray-500'}`}>
+                  {s.avgR != null ? `${s.avgR >= 0 ? '+' : ''}${s.avgR.toFixed(2)}R` : '—'}
                 </td>
                 <td className={`px-4 py-2.5 text-right font-mono ${s.profitFactor >= 1 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {s.profitFactor.toFixed(2)}

@@ -10,14 +10,16 @@ import { api } from '@/lib/api';
 import { CalibrationResponse, ExecutionStats, PatternStatsResponse, PostTradeAnalysis } from '@/types';
 import { Activity, BarChart3, Gauge, Layers, RefreshCw } from 'lucide-react';
 
-const MARKETS = ['ALL', 'CRYPTO', 'FOREX', 'METALS', 'BRVM'];
+// Noms exacts des markets en DB (signal_logs.market est case-sensitive côté API,
+// l'endpoint compare en mode insensitive mais METALS n'existe pas — c'est Commodities).
+const MARKETS = ['ALL', 'Forex', 'Crypto', 'Commodities', 'Indices', 'Synthetic', 'BRVM'];
 
 export default function PatternsPage() {
   const [market, setMarket] = useState('ALL');
 
   const { data: stats, isLoading: statsLoading } = useQuery<PatternStatsResponse>({
-    queryKey: ['pattern-stats'],
-    queryFn: async () => (await api.get('/signals/pattern-stats')).data,
+    queryKey: ['pattern-stats', market],
+    queryFn: async () => (await api.get(`/signals/pattern-stats?market=${market === 'ALL' ? '' : market}`)).data,
   });
 
   const { data: analysis, isLoading: analysisLoading } = useQuery<PostTradeAnalysis>({
@@ -76,10 +78,21 @@ export default function PatternsPage() {
           </div>
         ) : (
           <>
+            {stats?.resolved != null && stats.resolved > 0 && (stats.stalePriceSource ?? 0) > 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-300">
+                ⚠ {stats.stalePriceSource}/{stats.resolved} signaux résolus antérieurs à la persistance <code>price_source</code> — le win rate historique n'est pas comparable à l'exécution live (écarts feed mesurés : XAU +1.5%).
+              </div>
+            )}
+
             <section className="space-y-3">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                 <Activity size={18} className="text-indigo-400" />
-                Analyse post-trade ({stats?.total ?? 0} signaux résolus)
+                Analyse post-trade ({stats?.total ?? 0} signaux résolus
+                {(stats?.invalidated ?? 0) > 0 && (
+                  <span className="text-sm font-normal text-gray-500">
+                    — {stats!.invalidated} invalidés exclus du calcul
+                  </span>
+                )})
               </h2>
               {analysis ? (
                 <PostTradeAnalysisCard analysis={analysis} />

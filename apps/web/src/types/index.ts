@@ -74,11 +74,15 @@ export interface PatternStats {
   avgConfluence: number | null;
   avgRealizedPnl: number | null;
   avgExpectedPnl: number | null;
+  avgR: number | null;
 }
 
 export interface PatternStatsResponse {
   total: number;
   patterns: Record<string, PatternStats>;
+  invalidated?: number;
+  resolved?: number;
+  stalePriceSource?: number;
 }
 
 export interface PostTradeAnalysis {
@@ -114,6 +118,7 @@ export interface ExecutionStats {
   avgPnl: number;
   avgMae: number;
   avgMfe: number;
+  avgR: number | null;
 }
 
 export type VolatilityRegime = 'LOW' | 'NORMAL' | 'HIGH';

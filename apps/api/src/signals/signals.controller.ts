@@ -134,8 +134,8 @@ export class SignalsController {
 
   @Get('pattern-stats')
   @UseGuards(JwtAuthGuard)
-  getPatternStats() {
-    return this.outcomeService.getPatternStats();
+  getPatternStats(@Query('market') market?: string) {
+    return this.outcomeService.getPatternStats(market);
   }
 
   @Get('features')
