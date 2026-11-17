@@ -32,6 +32,12 @@ class BinanceAdapter(VenueAdapter):
 
     def __init__(self, key: str, secret: str, base: str):
         self._key, self._secret, self._base = key, secret, base
+        self._leverage = int(os.getenv("BINANCE_LEVERAGE", "3") or "3")
+        # ISOLATED par défaut : une position liquidée n'emporte que sa marge,
+        # pas tout le compte (fail-safe). CROSS via BINANCE_MARGIN_TYPE=CROSS.
+        self._margin_type = os.getenv("BINANCE_MARGIN_TYPE", "ISOLATED").upper()
+        self._filters_cache: dict[str, dict] = {}
+        self._filters_ts: float = 0.0
 
     @classmethod
     def from_env(cls) -> Optional["BinanceAdapter"]:
@@ -59,22 +65,117 @@ class BinanceAdapter(VenueAdapter):
             r.raise_for_status()
             return r.json()
 
+    # ── Filtres exchange (LOT_SIZE / PRICE_FILTER / MIN_NOTIONAL) ────
+    @staticmethod
+    def _round_step(value: float, step: float) -> float:
+        if step <= 0:
+            return value
+        import math
+        return math.floor(value / step) * step
+
+    async def _filters(self) -> dict[str, dict]:
+        """Cache 1h de /fapi/v1/exchangeInfo (endpoint public)."""
+        if self._filters_cache and (time.monotonic() - self._filters_ts) < 3600:
+            return self._filters_cache
+        async with httpx.AsyncClient(base_url=self._base, timeout=10) as c:
+            r = await c.get("/fapi/v1/exchangeInfo")
+            r.raise_for_status()
+        out: dict[str, dict] = {}
+        for s in r.json().get("symbols", []):
+            f = {fl["filterType"]: fl for fl in s.get("filters", [])}
+            lot = f.get("LOT_SIZE") or {}
+            prc = f.get("PRICE_FILTER") or {}
+            notl = f.get("MIN_NOTIONAL") or f.get("NOTIONAL") or {}
+            out[s["symbol"]] = {
+                "step_size": float(lot.get("stepSize") or 0),
+                "min_qty": float(lot.get("minQty") or 0),
+                "tick_size": float(prc.get("tickSize") or 0),
+                "min_notional": float(notl.get("notional") or notl.get("minNotional") or 0),
+            }
+        self._filters_cache, self._filters_ts = out, time.monotonic()
+        return out
+
+    @staticmethod
+    def _fmt(value: float, step: float) -> str:
+        """Formate selon la précision du step/tick."""
+        if step >= 1:
+            return str(int(round(value)))
+        decimals = 0
+        s = step
+        while s < 1 and decimals < 10:
+            s *= 10
+            decimals += 1
+        return f"{value:.{decimals}f}"
+
+    async def _setup_symbol(self, sym: str) -> None:
+        """Levier + marginType explicites — best-effort, ignoré si déjà OK."""
+        try:
+            await self._post("/fapi/v1/leverage",
+                             {"symbol": sym, "leverage": self._leverage})
+        except Exception as e:
+            logger.warning("binance_leverage_failed", symbol=sym, error=str(e))
+        try:
+            await self._post("/fapi/v1/marginType",
+                             {"symbol": sym, "marginType": self._margin_type})
+        except Exception:
+            pass  # -4059 "no need to change" ou position ouverte → ignorer
+
     async def place_order(self, symbol: str, direction: str,
                           qty: float, price: float | None,
                           stop_loss: float | None = None,
                           take_profit: float | None = None) -> dict:
-        # TODO live : attacher un STOP_MARKET closePosition côté Binance
-        # (algo /fapi/v1/order type=STOP_MARKET) pour la protection broker.
-        _ = (stop_loss, take_profit)
         sym = symbol.replace("/", "")
+        f = (await self._filters()).get(sym, {})
+
+        # Respect des filtres exchange : qty arrondie au step, prix au tick
+        qty_r = self._round_step(qty, f.get("step_size") or 0)
+        if f.get("min_qty") and qty_r < f["min_qty"]:
+            raise ValueError(
+                f"qty {qty_r} < minQty {f['min_qty']} pour {sym}")
+        ref_price = float(price or 0)
+        if f.get("min_notional") and qty_r * ref_price < f["min_notional"]:
+            raise ValueError(
+                f"notional {qty_r * ref_price:.2f} < minNotional "
+                f"{f['min_notional']} pour {sym}")
+        price_r = (self._round_step(ref_price, f["tick_size"])
+                   if price and f.get("tick_size") else price)
+
+        await self._setup_symbol(sym)
+
         params = {
             "symbol": sym, "side": "BUY" if direction == "BUY" else "SELL",
             "type": "LIMIT", "timeInForce": "GTC",
-            "quantity": f"{qty:.6f}".rstrip("0").rstrip("."),
-            "price": f"{price}",
+            "quantity": self._fmt(qty_r, f.get("step_size") or 1e-6),
+            "price": self._fmt(price_r or 0, f.get("tick_size") or 1e-8),
         }
         res = await self._post("/fapi/v1/order", params)
-        return {"price": float(res.get("avgPrice") or price or 0),
+        fill_price = float(res.get("avgPrice") or price or 0)
+
+        # Protection côté broker : SL/TP natifs Binance — survivent à un
+        # crash de notre système (closePosition, trigger sur mark price).
+        close_side = "SELL" if direction == "BUY" else "BUY"
+        if stop_loss:
+            try:
+                await self._post("/fapi/v1/order", {
+                    "symbol": sym, "side": close_side,
+                    "type": "STOP_MARKET", "closePosition": "true",
+                    "stopPrice": self._fmt(stop_loss, f.get("tick_size") or 1e-8),
+                    "workingType": "MARK_PRICE",
+                })
+            except Exception as e:
+                logger.error("binance_stop_failed", symbol=sym, error=str(e))
+        if take_profit:
+            try:
+                await self._post("/fapi/v1/order", {
+                    "symbol": sym, "side": close_side,
+                    "type": "TAKE_PROFIT_MARKET", "closePosition": "true",
+                    "stopPrice": self._fmt(take_profit, f.get("tick_size") or 1e-8),
+                    "workingType": "MARK_PRICE",
+                })
+            except Exception as e:
+                logger.error("binance_tp_failed", symbol=sym, error=str(e))
+
+        return {"price": fill_price,
                 "order_id": res.get("orderId"), "raw_status": res.get("status")}
 
     async def _get(self, path: str, params: dict) -> dict | list:
@@ -97,11 +198,13 @@ class BinanceAdapter(VenueAdapter):
         if not pos:
             return {"closed": False, "reason": "no open position"}
         amt = float(pos["positionAmt"])
+        f = (await self._filters()).get(sym, {})
+        qty_r = self._round_step(abs(amt), f.get("step_size") or 0) or abs(amt)
         res = await self._post("/fapi/v1/order", {
             "symbol": sym,
             "side": "SELL" if amt > 0 else "BUY",
             "type": "MARKET", "reduceOnly": "true",
-            "quantity": f"{abs(amt):.6f}".rstrip("0").rstrip("."),
+            "quantity": self._fmt(qty_r, f.get("step_size") or 1e-6),
         })
         return {"closed": True, "qty": abs(amt),
                 "price": float(res.get("avgPrice") or 0),
