@@ -38,7 +38,10 @@ class DerivAdapter(VenueAdapter):
         return cls(token, app_id)
 
     async def place_order(self, symbol: str, direction: str,
-                          qty: float, price: float | None) -> dict:
+                          qty: float, price: float | None,
+                          stop_loss: float | None = None,
+                          take_profit: float | None = None) -> dict:
+        _ = (stop_loss, take_profit)  # contrats digitaux : pas de SL broker
         import websockets  # dependency engine existante
         req = {
             "authorize": self._token,

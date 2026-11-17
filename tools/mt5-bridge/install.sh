@@ -29,6 +29,11 @@ if ! wine --version 2>/dev/null | grep -qE 'wine-1[0-9]'; then
 fi
 wine --version
 
+# NOTE : ne PAS poser cap_net_raw sur wineserver/wine-preloader.
+# Hypothèse "scan ICMP des access-servers" testée et non confirmée
+# (le TCP passe sans). setcap sur wine-preloader active le mode
+# secure-execution : LD_* ignorés → Wine peut casser.
+
 echo "==> [2/8] Xvfb (:99) — display persistant partagé terminal+bridge"
 cat > /etc/systemd/system/xvfb.service <<'EOF'
 [Unit]
@@ -126,6 +131,13 @@ TimeoutStopSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# ufw : autoriser le subnet docker à joindre le bridge (bind privé).
+# Sans cette règle, l'engine container timeout même si le bridge écoute.
+if command -v ufw >/dev/null && ufw status | grep -qi active; then
+    ufw allow from 172.16.0.0/12 to any port "${MT5_BRIDGE_PORT:-5555}" \
+        comment "mt5-bridge docker" >/dev/null || true
+fi
 
 systemctl daemon-reload
 systemctl disable --now mt5-terminal 2>/dev/null || true

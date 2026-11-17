@@ -5,60 +5,51 @@ import { ExchangeConnector, OrderParams, OrderResult, BalanceResult } from './in
 import { ExchangeName } from '../exchange-connections/dto/exchange-connection.dto';
 
 /**
- * MT5 Connector — communicates with a Python MT5 bridge microservice.
+ * MT5 Connector — dialogue avec le bridge Wine tools/mt5-bridge/server.py.
  *
  * Architecture:
- *   NestJS (this connector) → HTTP → Python MT5 bridge (MetaTrader5 lib) → MT5 terminal
+ *   NestJS (this connector) → HTTP+Bearer → bridge (:5555) → terminal MT5 (Wine)
  *
- * The Python bridge must be running on a VPS with MT5 terminal installed.
- * It exposes REST endpoints that proxy requests to the MetaTrader5 Python library.
+ * Le bridge gère UN SEUL compte broker (MT5_LOGIN/PASSWORD/SERVER dans
+ * /etc/mt5-bridge.env sur le VPS). Les paramètres apiKey/apiSecret de
+ * l'interface ExchangeConnector sont donc ignorés — la connexion
+ * "exchange" enregistrée par l'utilisateur pointe vers ce compte partagé.
  *
- * Credentials mapping:
- *   apiKey    = MT5 login (account number)
- *   apiSecret = MT5 password
- *   The bridge URL is configured via MT5_BRIDGE_URL env var.
- *
- * Supported brokers (any MT5 broker): Exness, IC Markets, Pepperstone, FBS, RoboForex, Alpari, etc.
+ * Env : MT5_BRIDGE_URL + MT5_BRIDGE_TOKEN (partagés avec l'engine).
  */
 @Injectable()
 export class Mt5Connector implements ExchangeConnector {
   readonly exchange = ExchangeName.MT5;
   private readonly logger = new Logger(Mt5Connector.name);
   private readonly bridgeUrl: string;
+  private readonly headers: Record<string, string>;
 
   constructor(private config: ConfigService) {
-    this.bridgeUrl = this.config.get<string>('MT5_BRIDGE_URL') || 'http://localhost:8001';
+    this.bridgeUrl =
+      this.config.get<string>('MT5_BRIDGE_URL') || 'http://localhost:5555';
+    const token = this.config.get<string>('MT5_BRIDGE_TOKEN') || '';
+    this.headers = { Authorization: `Bearer ${token}` };
   }
 
-  async placeOrder(login: string, password: string, params: OrderParams): Promise<OrderResult> {
-    if (!login || !password) {
-      throw new BadRequestException('MT5: login et mot de passe requis.');
-    }
-
+  async placeOrder(_login: string, _password: string, params: OrderParams): Promise<OrderResult> {
     const symbol = this.mapSymbol(params.symbol);
     const volume = this.normalizeVolume(params.quantity);
-    const direction = params.side === 'BUY' ? 'BUY' : 'SELL';
 
-    const body: any = {
-      login: String(login),
-      password,
-      symbol,
-      volume,
-      direction,
-      order_type: params.type === 'LIMIT' ? 'ORDER_TYPE_BUY_LIMIT' : 'ORDER_TYPE_MARKET',
-    };
+    if (params.type !== 'MARKET') {
+      // Le bridge fait du TRADE_ACTION_DEAL (marché). Ordres LIMIT/STOP
+      // pendants = TRADE_ACTION_PENDING — pas encore exposé par le bridge.
+      throw new BadRequestException(
+        `MT5: seuls les ordres MARKET sont supportés (type=${params.type}).`
+      );
+    }
 
-    if (params.price && params.type === 'LIMIT') {
-      body.price = params.price;
-    }
-    if (params.stopPrice) {
-      body.sl = params.stopPrice;
-    }
+    const body: any = { symbol, side: params.side, volume };
+    if (params.stopPrice) body.sl = params.stopPrice;
 
     try {
-      const res = await axios.post(`${this.bridgeUrl}/mt5/order`, body, {
-        timeout: 15000,
-        headers: { 'Content-Type': 'application/json' },
+      const res = await axios.post(`${this.bridgeUrl}/order`, body, {
+        timeout: 20000,
+        headers: this.headers,
       });
 
       const d = res.data;
@@ -66,95 +57,87 @@ export class Mt5Connector implements ExchangeConnector {
         throw new BadRequestException(`MT5: ${d.error}`);
       }
 
-      const ticket = d.ticket || d.order_id || `mt5-${Date.now()}`;
-      const fillPrice = d.price || params.price || 0;
-      const fillVolume = d.volume || volume;
-
+      const ticket = d.order || d.deal || `mt5-${Date.now()}`;
       return {
         orderId: String(ticket),
         symbol: params.symbol,
         side: params.side,
         type: params.type,
-        status: d.status === 'FILLED' ? 'FILLED' : 'PENDING',
-        executedQty: String(fillVolume),
-        avgPrice: String(fillPrice),
-        transactTime: d.timestamp || Date.now(),
+        status: 'FILLED',
+        executedQty: String(d.volume ?? volume),
+        avgPrice: String(d.price ?? 0),
+        transactTime: Date.now(),
         exchange: ExchangeName.MT5,
         raw: {
-          mt5_ticket: ticket,
+          mt5_order: d.order,
+          mt5_deal: d.deal,
           mt5_symbol: symbol,
-          mt5_login: String(login),
-          broker: d.broker || 'unknown',
         },
       };
     } catch (err: any) {
-      const dErr = err?.response?.data;
-      const msg = dErr?.error || dErr?.message || err?.message || 'Unknown MT5 error';
-
-      if (err?.code === 'ECONNABORTED' || err?.code === 'ETIMEDOUT') {
-        throw new ServiceUnavailableException(
-          'MT5 bridge timeout — vérifiez que le bridge Python est démarré et que MT5 Terminal est en cours d\'exécution.'
-        );
-      }
-      if (err?.code === 'ECONNREFUSED') {
-        throw new ServiceUnavailableException(
-          'MT5 bridge inaccessible — démarrez le microservice Python (mt5_bridge.py).'
-        );
-      }
-      if (err?.response?.status === 401) {
-        throw new BadRequestException('MT5: login ou mot de passe invalide.');
-      }
-      if (err?.response?.status === 400) {
-        throw new BadRequestException(`MT5: ${msg}`);
-      }
-      throw new BadRequestException(`MT5 order failed: ${msg}`);
+      this._rethrow(err, 'order');
     }
   }
 
-  async getAccountBalance(login: string, password: string): Promise<BalanceResult[]> {
-    if (!login || !password) {
-      throw new BadRequestException('MT5: login et mot de passe requis.');
-    }
-
+  async getAccountBalance(_login: string, _password: string): Promise<BalanceResult[]> {
     try {
-      const res = await axios.post(
-        `${this.bridgeUrl}/mt5/balance`,
-        { login: String(login), password },
-        { timeout: 10000 },
-      );
-
+      const res = await axios.get(`${this.bridgeUrl}/account`, {
+        timeout: 10000,
+        headers: this.headers,
+      });
       const d = res.data;
       if (d.error) {
         throw new BadRequestException(`MT5: ${d.error}`);
       }
-
       return [{
         asset: d.currency || 'USD',
-        free: String(d.balance ?? 0),
-        locked: String(d.equity ? (d.balance - d.equity) : 0),
+        free: String(d.margin_free ?? d.balance ?? 0),
+        locked: String(d.margin ?? 0),
       }];
     } catch (err: any) {
-      const msg = err?.response?.data?.error || err?.message || 'Unknown error';
-      this.logger.error(`MT5 balance failed: ${msg}`);
-
-      if (err?.code === 'ECONNREFUSED') {
-        throw new ServiceUnavailableException('MT5 bridge inaccessible.');
-      }
-      throw new BadRequestException(`MT5 balance: ${msg}`);
+      this._rethrow(err, 'balance');
     }
   }
 
-  async validateCredentials(login: string, password: string): Promise<boolean> {
+  async validateCredentials(_login: string, _password: string): Promise<boolean> {
+    // Le "credential" réel est le compte configuré côté bridge : on valide
+    // que le bridge répond ET que le terminal est connecté au broker.
     try {
-      const res = await axios.post(
-        `${this.bridgeUrl}/mt5/validate`,
-        { login: String(login), password },
-        { timeout: 10000 },
-      );
-      return res.data?.valid === true;
+      const res = await axios.get(`${this.bridgeUrl}/health`, {
+        timeout: 30000, // _ensure() peut relancer le terminal (~1-2 min)
+        headers: this.headers,
+      });
+      return res.data?.connected === true;
     } catch {
       return false;
     }
+  }
+
+  private _rethrow(err: any, op: string): never {
+    const status = err?.response?.status;
+    const msg = err?.response?.data?.error || err?.message || 'Unknown MT5 error';
+
+    if (err instanceof BadRequestException) throw err;
+    if (err?.code === 'ECONNABORTED' || err?.code === 'ETIMEDOUT') {
+      throw new ServiceUnavailableException(
+        'MT5 bridge timeout — vérifiez tools/mt5-bridge (systemctl status mt5-bridge).'
+      );
+    }
+    if (err?.code === 'ECONNREFUSED') {
+      throw new ServiceUnavailableException(
+        'MT5 bridge inaccessible — service mt5-bridge arrêté sur le VPS.'
+      );
+    }
+    if (status === 401) {
+      this.logger.error(`MT5 bridge 401 — MT5_BRIDGE_TOKEN incorrect`);
+      throw new ServiceUnavailableException('MT5 bridge: token invalide.');
+    }
+    if (status === 503) {
+      throw new ServiceUnavailableException(
+        'Terminal MT5 non connecté au broker (mt5_disconnected).'
+      );
+    }
+    throw new BadRequestException(`MT5 ${op} failed: ${msg}`);
   }
 
   private mapSymbol(symbol: string): string {

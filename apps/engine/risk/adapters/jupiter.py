@@ -45,7 +45,10 @@ class JupiterAdapter(VenueAdapter):
         return cls(key, rpc)
 
     async def place_order(self, symbol: str, direction: str,
-                          qty: float, price: float | None) -> dict:
+                          qty: float, price: float | None,
+                          stop_loss: float | None = None,
+                          take_profit: float | None = None) -> dict:
+        _ = (stop_loss, take_profit)  # swap AMM : pas d'ordre conditionnel
         # symbol = mint address pour les gems
         mint = symbol if len(symbol) > 20 else symbol
         lamports = int(qty * 1_000_000)  # qty en USD → USDC 6 décimales

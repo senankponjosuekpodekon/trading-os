@@ -39,7 +39,9 @@ class OandaAdapter(VenueAdapter):
         return cls(token, account, base)
 
     async def place_order(self, symbol: str, direction: str,
-                          qty: float, price: float | None) -> dict:
+                          qty: float, price: float | None,
+                          stop_loss: float | None = None,
+                          take_profit: float | None = None) -> dict:
         inst = symbol.replace("/", "_")
         units = int(round(qty)) * (1 if direction == "BUY" else -1)
         body = {"order": {
@@ -47,6 +49,11 @@ class OandaAdapter(VenueAdapter):
             "type": "LIMIT" if price else "MARKET",
             "timeInForce": "GTC" if price else "FOK",
             **({"price": f"{price:.5f}"} if price else {}),
+            # Protection côté broker : SL/TP attachés au fill.
+            **({"stopLossOnFill": {"price": f"{stop_loss:.5f}"}}
+               if stop_loss else {}),
+            **({"takeProfitOnFill": {"price": f"{take_profit:.5f}"}}
+               if take_profit else {}),
         }}
         async with httpx.AsyncClient(base_url=self._base, timeout=10) as c:
             r = await c.post(

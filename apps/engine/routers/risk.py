@@ -441,6 +441,20 @@ async def execute(req: ExecuteRequest):
         req.entry, req.stop_loss, qty=req.qty, target_risk=req.target_risk)
 
 
+class CloseVenueRequest(BaseModel):
+    portfolio_id: str
+    symbol: str
+
+
+@router.post("/portfolio/close-venue")
+async def close_venue(req: CloseVenueRequest):
+    """Clôture la position au broker (MT5/Binance/Oanda…) selon le venue
+    du symbole. Appelé par le watcher API quand SL/TP/trailing se déclenche
+    sur une position d'un portfolio LIVE."""
+    from risk.execution import close_venue_position
+    return await close_venue_position(req.portfolio_id, req.symbol)
+
+
 class ConfirmOrderRequest(BaseModel):
     fill_price: float
     operator: str = "manual"

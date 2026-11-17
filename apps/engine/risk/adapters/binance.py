@@ -60,7 +60,12 @@ class BinanceAdapter(VenueAdapter):
             return r.json()
 
     async def place_order(self, symbol: str, direction: str,
-                          qty: float, price: float | None) -> dict:
+                          qty: float, price: float | None,
+                          stop_loss: float | None = None,
+                          take_profit: float | None = None) -> dict:
+        # TODO live : attacher un STOP_MARKET closePosition côté Binance
+        # (algo /fapi/v1/order type=STOP_MARKET) pour la protection broker.
+        _ = (stop_loss, take_profit)
         sym = symbol.replace("/", "")
         params = {
             "symbol": sym, "side": "BUY" if direction == "BUY" else "SELL",

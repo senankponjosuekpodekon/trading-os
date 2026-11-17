@@ -131,7 +131,9 @@ async def execute_signal(portfolio_id: str, signal_id: str | None,
         return {"status": "FAILED",
                 "reason": f"no live adapter for venue {venue} — phase C"}
     try:
-        fill = await adapter.place_order(symbol, direction, qty, entry)  # type: ignore
+        fill = await adapter.place_order(symbol, direction, qty, entry,  # type: ignore
+                                         stop_loss=stop_loss,
+                                         take_profit=None)
         await _insert_order(portfolio_id, signal_id, symbol, direction,
                             qty, entry, fill.get("price"), "FILLED", "live",
                             decision)
@@ -140,6 +142,25 @@ async def execute_signal(portfolio_id: str, signal_id: str | None,
         await _insert_order(portfolio_id, signal_id, symbol, direction,
                             qty, entry, None, "FAILED", "live", decision)
         return {"status": "FAILED", "reason": str(e)}
+
+
+async def close_venue_position(portfolio_id: str, symbol: str) -> dict:
+    """Clôture côté broker d'une position live : résout le venue du symbole
+    puis appelle adapter.close_position(). Jamais d'exception vers le caller —
+    retourne {"closed": bool, "reason"?: str}."""
+    try:
+        from utils.instrument_profile import get_instrument_profile
+        profile = await get_instrument_profile(symbol)
+        venue = profile.get("venue")
+        adapter = _LIVE_ADAPTERS.get(venue or "")
+        if adapter is None:
+            return {"closed": False,
+                    "reason": f"no live adapter for venue {venue}"}
+        res = await adapter.close_position(symbol)  # type: ignore
+        return {"closed": True, "venue": venue, "result": res}
+    except Exception as e:
+        logger.error("close_venue_error", symbol=symbol, error=str(e))
+        return {"closed": False, "reason": str(e)}
 
 
 async def confirm_manual_order(order_id: str, fill_price: float,

@@ -136,7 +136,7 @@ export class WatcherService {
         where: { status: 'OPEN' },
         include: {
           asset:     { select: { symbol: true } },
-          portfolio: { select: { userId: true } },
+          portfolio: { select: { userId: true, type: true } },
         },
       });
 
@@ -191,6 +191,23 @@ export class WatcherService {
 
     if (!triggered) return false;
 
+    // Portfolio LIVE : fermer d'abord la position au broker via l'engine.
+    // En cas d'échec on NE clôture PAS en DB — le prochain cron retentera
+    // (sinon DB close mais position broker encore ouverte = divergence).
+    if (pos.portfolio.type === 'LIVE') {
+      const brokerClosed = await this._closeVenuePosition(pos);
+      if (!brokerClosed) {
+        this.notifications.push({
+          userId: pos.portfolio.userId,
+          type: 'SYSTEM',
+          title: `⚠️ Clôture broker échouée — ${pos.asset.symbol}`,
+          message: `${triggered} déclenché à ${livePrice} mais la clôture venue a échoué. Nouvelle tentative au prochain scan — vérifiez le broker manuellement.`,
+          data: { positionId: pos.id, symbol: pos.asset.symbol, triggered },
+        });
+        return false;
+      }
+    }
+
     const result = await this.positions.closeByWatcher(pos.id, livePrice, triggered);
     if (!result) return false;
 
@@ -225,6 +242,31 @@ export class WatcherService {
     }
 
     return true;
+  }
+
+  /** Demande à l'engine de fermer la position au broker (venue résolu
+   *  côté engine via le profil instrument). */
+  private async _closeVenuePosition(pos: any): Promise<boolean> {
+    try {
+      const { data } = await firstValueFrom(
+        this.http.post<{ closed: boolean; reason?: string }>(
+          `${this.engineUrl}/portfolio/close-venue`,
+          { portfolio_id: pos.portfolioId, symbol: pos.asset.symbol },
+          { timeout: 15000, headers: engineHeaders(this.config) },
+        ),
+      );
+      if (!data?.closed) {
+        this.logger.error(
+          `Watcher: clôture broker refusée ${pos.asset.symbol} — ${data?.reason}`,
+        );
+      }
+      return data?.closed === true;
+    } catch (e: any) {
+      this.logger.error(
+        `Watcher: appel close-venue impossible ${pos.asset.symbol} — ${e?.message}`,
+      );
+      return false;
+    }
   }
 
   // Sprint 3 — Cycle de vie PENDING → ACTIVE / INVALIDATED pour les setups RETEST/LIMIT.
