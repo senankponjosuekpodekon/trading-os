@@ -48,14 +48,6 @@ function inferMarket(symbol?: string): string {
   return 'BRVM';
 }
 
-function computeOpportunityScore(s: Signal): number {
-  const conf = s.confidence ?? 50;
-  const rr = s.riskReward ? parseFloat(String(s.riskReward)) : 2;
-  const mtf = s.metadata?.mtf_context ?? {};
-  const mtfBonus = mtf.confluence === 'FULL' ? 1.25 : mtf.confluence === 'PARTIAL' ? 1 : 0.85;
-  return Math.round(Math.min(100, conf * Math.min(rr, 5) * mtfBonus / 2));
-}
-
 function ScannerPageInner() {
   const { toast } = useToast();
   const { notifications } = useNotifications();
@@ -314,8 +306,18 @@ function ScannerPageInner() {
         if (query && !s.asset?.symbol.toLowerCase().includes(query.toLowerCase())) return false;
         return true;
       })
-      .sort((a, b) => computeOpportunityScore(b) - computeOpportunityScore(a));
-  }, [allSignals, minConf, direction, timeframe, market, query]);
+      .sort((a, b) => {
+        const [field, dir] = sortBy.split(':');
+        const mul = dir === 'asc' ? 1 : -1;
+        if (field === 'confidence') {
+          return mul * ((a.confidence ?? 0) - (b.confidence ?? 0));
+        }
+        if (field === 'entryPrice') {
+          return mul * (Number(a.entryPrice ?? 0) - Number(b.entryPrice ?? 0));
+        }
+        return mul * (new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+      });
+  }, [allSignals, minConf, direction, timeframe, market, query, sortBy]);
 
   const counts = useMemo(() => {
     const buy = filtered.filter(s => s.signal === 'BUY').length;
