@@ -57,8 +57,11 @@ export class SignalOutcomeService {
     const detected = r.detectedPatterns ?? [];
     const topPattern = detected[0] ?? {};
     try {
-      // Expected PnL % based on predicted win rate for the confidence bucket
-      const expectedPnlPct = await this._estimateExpectedPnlPct(r.confidence, r.risk_reward, market, r.signal);
+      // Expected PnL % (prix) = p_win × dist(TP1) − (1−p_win) × dist(SL)
+      const expectedPnlPct = await this._estimateExpectedPnlPct(
+        r.confidence, r.risk_reward, market, r.signal,
+        r.entry_price, r.stop_loss, r.take_profit_1,
+      );
       await this.prisma.signalLog.create({
         data: {
           symbol:        r.symbol,
@@ -115,15 +118,31 @@ export class SignalOutcomeService {
     riskReward: number | null | undefined,
     market?: string,
     signalType?: string,
+    entryPrice?: number | null,
+    stopLoss?: number | null,
+    takeProfit1?: number | null,
   ): Promise<number | null> {
-    if (!riskReward || riskReward <= 0) return null;
     const calibration = await this.getConfidenceCalibration(market, signalType).catch(() => null);
     const bucket = this._confidenceBucket(confidence);
     const b = calibration?.buckets?.[bucket];
-    const winRate = b?.winRate ?? 50;
-    const winPct = (riskReward - 1) * 100;
-    const lossPct = -100;
-    return (winRate / 100) * winPct + ((100 - winRate) / 100) * lossPct;
+    const winRate = (b?.winRate ?? 50) / 100;
+
+    // Espérance en % de prix — nécessite la géométrie du trade.
+    const entry = entryPrice != null ? Number(entryPrice) : null;
+    const sl = stopLoss != null ? Number(stopLoss) : null;
+    const tp = takeProfit1 != null ? Number(takeProfit1) : null;
+    if (!entry || !sl || sl === entry) {
+      // Sans SL, impossible de normaliser le risque → pas d'estimation
+      // (l'ancien calcul renvoyait une espérance-R×100 confondue avec un % prix)
+      return null;
+    }
+    const slPct = (Math.abs(entry - sl) / entry) * 100;
+    if (slPct <= 0) return null;
+    const tpPct = tp && tp !== entry
+      ? (Math.abs(tp - entry) / entry) * 100
+      : (riskReward && riskReward > 0 ? riskReward * slPct : null);
+    if (!tpPct) return null;
+    return winRate * tpPct - (1 - winRate) * slPct;
   }
 
   @Cron('0 * * * *')
@@ -447,16 +466,16 @@ export class SignalOutcomeService {
     if (market) where.market = { equals: market, mode: 'insensitive' };
     const logs = await this.prisma.signalLog.findMany({ where, take: 5000 });
 
-    const stats: Record<string, { trades: number; wins: number; losses: number; pnl: number; winRate: number; avgDuration: number | null; avgConfluence: number | null; avgRealizedPnl: number | null; avgExpectedPnl: number | null; avgR: number | null }> = {};
+    const stats: Record<string, { trades: number; resolved: number; wins: number; losses: number; pnl: number; winRate: number | null; avgDuration: number | null; avgConfluence: number | null; avgRealizedPnl: number | null; avgExpectedPnl: number | null; avgR: number | null }> = {};
     for (const log of logs) {
       const name = log.patternName!;
       if (!stats[name]) {
-        stats[name] = { trades: 0, wins: 0, losses: 0, pnl: 0, winRate: 0, avgDuration: null, avgConfluence: null, avgRealizedPnl: null, avgExpectedPnl: null, avgR: null };
+        stats[name] = { trades: 0, resolved: 0, wins: 0, losses: 0, pnl: 0, winRate: null, avgDuration: null, avgConfluence: null, avgRealizedPnl: null, avgExpectedPnl: null, avgR: null };
       }
       const s = stats[name];
       s.trades += 1;
-      if (log.outcome === 'WIN_TP1' || log.outcome === 'WIN_TP2') s.wins += 1;
-      else if (log.outcome === 'LOSS_SL') s.losses += 1;
+      if (log.outcome === 'WIN_TP1' || log.outcome === 'WIN_TP2') { s.wins += 1; s.resolved += 1; }
+      else if (log.outcome === 'LOSS_SL') { s.losses += 1; s.resolved += 1; }
       s.pnl += parseFloat(log.outcomePrice?.toString() ?? '0') - parseFloat(log.entryPrice?.toString() ?? '0');
     }
 
@@ -472,7 +491,9 @@ export class SignalOutcomeService {
     for (const name of Object.keys(stats)) {
       const s = stats[name];
       const patternLogs = logs.filter(l => l.patternName === name);
-      s.winRate = s.trades > 0 ? Math.round((s.wins / s.trades) * 100) : 0;
+      // WR sur outcomes RÉSOLUS uniquement (WIN_TP*/LOSS_SL) — les autres
+      // (PENDING/EXPIRED/other) ne disent rien sur la qualité du setup.
+      s.winRate = s.resolved > 0 ? Math.round((s.wins / s.resolved) * 100) : null;
       s.avgDuration = patternLogs.length ? patternLogs.reduce((sum, l) => sum + (l.barsToOutcome ?? 0), 0) / patternLogs.length : null;
       s.avgConfluence = patternLogs.filter(l => l.patternConfluenceScore != null).length
         ? patternLogs.reduce((sum, l) => sum + (l.patternConfluenceScore ?? 0), 0) / patternLogs.filter(l => l.patternConfluenceScore != null).length
@@ -524,6 +545,7 @@ export class SignalOutcomeService {
       bias: Math.round(bias * 100) / 100,
       overestimating: bias < -0.1,
       underestimating: bias > 0.1,
+      insufficientSample: logs.length < 30,
     };
   }
 
@@ -552,22 +574,24 @@ export class SignalOutcomeService {
 
     const logs = await this.prisma.signalLog.findMany({ where, take: 5000 });
 
-    const buckets: Record<string, { total: number; win: number; loss: number; other: number; winRate: number | null }> = {};
+    const buckets: Record<string, { total: number; resolved: number; win: number; loss: number; other: number; winRate: number | null }> = {};
     for (const log of logs) {
       const bucket = this._confidenceBucket(log.confidence);
       if (!buckets[bucket]) {
-        buckets[bucket] = { total: 0, win: 0, loss: 0, other: 0, winRate: null };
+        buckets[bucket] = { total: 0, resolved: 0, win: 0, loss: 0, other: 0, winRate: null };
       }
       const b = buckets[bucket];
       b.total += 1;
       const key = this._outcomeKey(log.outcome);
-      if (key === 'win') b.win += 1;
-      else if (key === 'loss') b.loss += 1;
+      if (key === 'win') { b.win += 1; b.resolved += 1; }
+      else if (key === 'loss') { b.loss += 1; b.resolved += 1; }
       else b.other += 1;
     }
 
+    // WR sur outcomes résolus (win+loss) — 'other' (PENDING/EXPIRED)
+    // n'entre pas dans le dénominateur, sinon tout affiche 0%.
     for (const b of Object.values(buckets)) {
-      b.winRate = b.total > 0 ? Math.round((b.win / b.total) * 100) : null;
+      b.winRate = b.resolved > 0 ? Math.round((b.win / b.resolved) * 100) : null;
     }
 
     return { total: logs.length, buckets };

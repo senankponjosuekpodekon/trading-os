@@ -28,12 +28,13 @@ export function CalibrationCard({ data }: { data: CalibrationResponse }) {
           <Gauge size={16} className="text-indigo-400" />
           <span className="text-sm font-medium text-white">Confiance prédite vs win rate réel</span>
         </div>
-        <span className="text-xs text-gray-500">{data.total} signaux résolus</span>
+        <span className="text-xs text-gray-500">{data.total} logs (n = résolus / total)</span>
       </div>
 
       <div className="space-y-2.5">
         {buckets.map(([range, b]) => {
           const expected = parseInt(range, 10) + 5; // milieu du bucket "60-70" → 65%
+          const noData = b.winRate == null || (b.resolved ?? 0) === 0;
           const actual = b.winRate ?? 0;
           const delta = actual - expected;
           const ok = delta >= -10; // tolérance ±10pts
@@ -41,9 +42,9 @@ export function CalibrationCard({ data }: { data: CalibrationResponse }) {
             <div key={range} className="grid grid-cols-[70px_1fr_120px] items-center gap-3">
               <span className="text-xs font-mono text-gray-400">{range}%</span>
               <div className="relative h-5 rounded bg-gray-800 overflow-hidden">
-                {/* win rate réel */}
+                {/* win rate réel (outcomes résolus win+loss uniquement) */}
                 <div
-                  className={`absolute inset-y-0 left-0 rounded ${ok ? 'bg-emerald-500/70' : 'bg-amber-500/70'}`}
+                  className={`absolute inset-y-0 left-0 rounded ${noData ? 'bg-gray-700/50' : ok ? 'bg-emerald-500/70' : 'bg-amber-500/70'}`}
                   style={{ width: `${Math.min(100, actual)}%` }}
                 />
                 {/* marqueur de la confiance attendue */}
@@ -54,10 +55,12 @@ export function CalibrationCard({ data }: { data: CalibrationResponse }) {
                 />
               </div>
               <div className="text-right">
-                <span className={`text-xs font-mono ${ok ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {actual.toFixed(0)}% réel
+                <span className={`text-xs font-mono ${noData ? 'text-gray-500' : ok ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {noData ? 'pas de données' : `${actual.toFixed(0)}% réel`}
                 </span>
-                <span className="text-xs text-gray-600 ml-2">n={b.total}</span>
+                <span className="text-xs text-gray-600 ml-2" title={`${b.resolved ?? 0} résolus / ${b.total} logs`}>
+                  n={b.resolved ?? 0}/{b.total}
+                </span>
               </div>
             </div>
           );

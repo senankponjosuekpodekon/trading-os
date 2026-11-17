@@ -66,10 +66,11 @@ export interface JournalEntry {
 
 export interface PatternStats {
   trades: number;
+  resolved: number;
   wins: number;
   losses: number;
   pnl: number;
-  winRate: number;
+  winRate: number | null;
   avgDuration: number | null;
   avgConfluence: number | null;
   avgRealizedPnl: number | null;
@@ -92,10 +93,12 @@ export interface PostTradeAnalysis {
   bias: number;
   overestimating: boolean;
   underestimating: boolean;
+  insufficientSample?: boolean;
 }
 
 export interface CalibrationBucket {
   total: number;
+  resolved: number;
   win: number;
   loss: number;
   other: number;

@@ -36,7 +36,16 @@ export function PostTradeAnalysisCard({ analysis }: PostTradeAnalysisCardProps) 
         </div>
       </div>
 
-      {(analysis.overestimating || analysis.underestimating) && (
+      {analysis.insufficientSample && (
+        <div className="md:col-span-3 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-amber-300">
+          <AlertTriangle size={18} />
+          <span className="text-sm">
+            Échantillon insuffisant ({analysis.sampleSize} &lt; 30) — ces indicateurs ne sont pas exploitables.
+          </span>
+        </div>
+      )}
+
+      {(analysis.overestimating || analysis.underestimating) && !analysis.insufficientSample && (
         <div className={`md:col-span-3 flex items-center gap-2 rounded-xl border px-4 py-3 ${analysis.overestimating ? 'border-red-900/50 bg-red-950/20 text-red-300' : 'border-green-900/50 bg-green-950/20 text-green-300'}`}>
           {analysis.overestimating ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
           <span className="text-sm">
