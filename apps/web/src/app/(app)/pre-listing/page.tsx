@@ -10,7 +10,7 @@ export default function PreListingPage() {
   const [limit, setLimit] = useState(15);
   const [selectedPool, setSelectedPool] = useState<any | null>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['pre-listing', minScore, limit],
     queryFn: async () => {
       const res = await api.get('/ai/alpha/pre-listing/discover', {
@@ -36,8 +36,13 @@ export default function PreListingPage() {
   });
 
   const handleRefresh = async () => {
-    await refetch();
+    // refresh=true court-circuite le cache engine (10 min) + Redis (30 min)
+    await api.get('/ai/alpha/pre-listing/discover', {
+      params: { min_score: minScore, limit, refresh: true },
+    });
     queryClient.invalidateQueries({ queryKey: ['pre-listing'] });
+    queryClient.invalidateQueries({ queryKey: ['dex-new-pools'] });
+    queryClient.invalidateQueries({ queryKey: ['dex-risk-check'] });
   };
 
   const projects = data?.projects || [];
@@ -64,8 +69,8 @@ export default function PreListingPage() {
           <div className="flex items-center gap-3">
             <Rocket className="w-6 h-6 text-purple-400" />
             <div>
-              <h1 className="text-xl font-bold text-white">Pre-Listing Alpha</h1>
-              <p className="text-sm text-gray-400">IDO, IEO, ICO & presale discovery with asymmetric scoring</p>
+              <h1 className="text-xl font-bold text-white">Pre-Listing &amp; Just-Listed Alpha</h1>
+              <p className="text-sm text-gray-400">Nouveaux tokens DEX, IDO/IEO quand disponibles — scoring asymétrique</p>
             </div>
           </div>
           <button
@@ -83,8 +88,10 @@ export default function PreListingPage() {
             <label className="text-xs text-gray-400">Min Score</label>
             <input
               type="number"
+              min={0}
+              max={100}
               value={minScore}
-              onChange={(e) => setMinScore(Number(e.target.value))}
+              onChange={(e) => setMinScore(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
               className="w-20 px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded text-white"
             />
           </div>
@@ -92,8 +99,10 @@ export default function PreListingPage() {
             <label className="text-xs text-gray-400">Limit</label>
             <input
               type="number"
+              min={1}
+              max={50}
               value={limit}
-              onChange={(e) => setLimit(Number(e.target.value))}
+              onChange={(e) => setLimit(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
               className="w-16 px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded text-white"
             />
           </div>
@@ -129,16 +138,21 @@ export default function PreListingPage() {
               {(newPools.pools || newPools || []).slice(0, 6).map((pool: any, i: number) => (
                 <button
                   key={i}
-                  onClick={() => setSelectedPool({ chain: pool.chain || 'bsc', token_address: pool.token_address || pool.address })}
+                  disabled={!pool.chain || !pool.token_address}
+                  onClick={() => setSelectedPool({ chain: pool.chain, token_address: pool.token_address })}
                   className={`text-left p-3 rounded-lg border transition ${
-                    selectedPool?.token_address === (pool.token_address || pool.address)
+                    selectedPool?.token_address === pool.token_address
                       ? 'bg-purple-500/10 border-purple-500/30'
                       : 'bg-gray-800/30 border-gray-700 hover:border-purple-500/30'
-                  }`}
+                  } ${!pool.token_address ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
                   <p className="text-white text-sm font-medium truncate">{pool.symbol || pool.name || 'Unknown'}</p>
-                  <p className="text-xs text-gray-500">{pool.chain || 'bsc'} · {pool.token_address || pool.address}</p>
-                  {pool.liquidity !== undefined && <p className="text-xs text-gray-400 mt-1">Liquidity ${(pool.liquidity / 1000).toFixed(0)}K</p>}
+                  <p className="text-xs text-gray-500 truncate">{pool.chain || '?'} · {pool.token_address || '—'}</p>
+                  <div className="flex gap-3 mt-1">
+                    {pool.liquidity > 0 && <p className="text-xs text-gray-400">Liq ${(pool.liquidity / 1000).toFixed(1)}K</p>}
+                    {pool.volume_24h > 0 && <p className="text-xs text-gray-400">Vol ${(pool.volume_24h / 1000).toFixed(1)}K</p>}
+                    {pool.pool_created_at && <p className="text-xs text-gray-500">{new Date(pool.pool_created_at).toLocaleDateString('fr-FR')}</p>}
+                  </div>
                 </button>
               ))}
               {(newPools.pools || newPools || []).length === 0 && <p className="text-gray-500 text-sm">No new pools found.</p>}
@@ -154,23 +168,73 @@ export default function PreListingPage() {
                 </div>
                 {riskLoading && <p className="text-gray-500 text-xs">Checking token…</p>}
                 {riskCheck && (
-                  <div className="space-y-1 text-xs">
-                    <p className={riskCheck.is_honeypot ? 'text-red-400' : 'text-emerald-400'}>
-                      Honeypot: {riskCheck.is_honeypot ? 'YES' : 'No'}
-                    </p>
-                    <p className={riskCheck.mintable ? 'text-red-400' : 'text-emerald-400'}>
-                      Mintable: {riskCheck.mintable ? 'YES' : 'No'}
-                    </p>
-                    {riskCheck.owner_renounced !== undefined && (
-                      <p className={riskCheck.owner_renounced ? 'text-emerald-400' : 'text-yellow-400'}>
-                        Owner renounced: {riskCheck.owner_renounced ? 'Yes' : 'No'}
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded font-bold border ${
+                        riskCheck.risk_level === 'EXTREME' ? 'text-red-400 bg-red-500/10 border-red-500/30'
+                        : riskCheck.risk_level === 'HIGH' ? 'text-orange-400 bg-orange-500/10 border-orange-500/30'
+                        : riskCheck.risk_level === 'MODERATE' ? 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
+                        : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                      }`}>
+                        {riskCheck.risk_level ?? 'UNKNOWN'} {riskCheck.risk_score != null && `(${riskCheck.risk_score}/100)`}
+                      </span>
+                      {riskCheck.security_source && (
+                        <span className="text-gray-500">via {riskCheck.security_source}</span>
+                      )}
+                    </div>
+
+                    {/* Champs GoPlus — affichés seulement quand vraiment mesurés */}
+                    <div className="grid grid-cols-2 gap-1">
+                      {riskCheck.is_honeypot != null && (
+                        <p className={riskCheck.is_honeypot ? 'text-red-400 font-semibold' : 'text-emerald-400'}>
+                          Honeypot: {riskCheck.is_honeypot ? 'YES ⚠' : 'No'}
+                        </p>
+                      )}
+                      {riskCheck.mintable != null && (
+                        <p className={riskCheck.mintable ? 'text-red-400' : 'text-emerald-400'}>
+                          Mintable: {riskCheck.mintable ? 'YES' : 'No'}
+                        </p>
+                      )}
+                      {riskCheck.owner_renounced != null && (
+                        <p className={riskCheck.owner_renounced ? 'text-emerald-400' : 'text-yellow-400'}>
+                          Owner renounced: {riskCheck.owner_renounced ? 'Yes' : 'No'}
+                        </p>
+                      )}
+                      {riskCheck.liquidity_locked_pct != null && (
+                        <p className={riskCheck.liquidity_locked_pct >= 50 ? 'text-emerald-400' : 'text-yellow-400'}>
+                          LP locked: {Number(riskCheck.liquidity_locked_pct).toFixed(0)}%
+                        </p>
+                      )}
+                      {riskCheck.sell_tax != null && Number(riskCheck.sell_tax) > 0 && (
+                        <p className="text-gray-400">Sell tax: {Number(riskCheck.sell_tax).toFixed(1)}%</p>
+                      )}
+                      {riskCheck.holder_count != null && riskCheck.holder_count > 0 && (
+                        <p className="text-gray-400">Holders: {riskCheck.holder_count}</p>
+                      )}
+                    </div>
+
+                    {riskCheck.red_flags?.length > 0 && (
+                      <div className="space-y-0.5">
+                        {riskCheck.red_flags.map((f: string, j: number) => (
+                          <p key={j} className="text-red-400 flex items-start gap-1">
+                            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {f}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {riskCheck.warnings?.length > 0 && (
+                      <div className="space-y-0.5">
+                        {riskCheck.warnings.map((f: string, j: number) => (
+                          <p key={j} className="text-yellow-400/80">· {f}</p>
+                        ))}
+                      </div>
+                    )}
+                    {riskCheck.metrics && (
+                      <p className="text-gray-500">
+                        Liq ${(riskCheck.metrics.total_liquidity_usd / 1000).toFixed(1)}K ·
+                        Vol ${(riskCheck.metrics.total_volume_24h / 1000).toFixed(1)}K ·
+                        {riskCheck.metrics.pair_count} pair(s) · {riskCheck.metrics.total_tx_24h} tx/24h
                       </p>
-                    )}
-                    {riskCheck.liquidity_locked_pct !== undefined && (
-                      <p className="text-gray-400">Liquidity locked: {Number(riskCheck.liquidity_locked_pct).toFixed(1)}%</p>
-                    )}
-                    {riskCheck.risk_score !== undefined && (
-                      <p className="text-gray-400">Risk score: {riskCheck.risk_score}</p>
                     )}
                   </div>
                 )}

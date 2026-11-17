@@ -351,10 +351,74 @@ async def _fetch_coingecko_trending() -> List[Dict[str, Any]]:
 
 
 async def _fetch_dex_new_pairs() -> List[Dict[str, Any]]:
-    """Fetch newly created DEX pairs -- potential pre-listing or just-listed tokens."""
+    """Fetch latest token profiles from DexScreener — vrais tokens nouvellement
+    déclarés (pas une recherche mot-clé qui remonte des tokens établis)."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # DexScreener: search for "new" keyword
+            r = await client.get(
+                "https://api.dexscreener.com/token-profiles/latest/v1",
+            )
+            r.raise_for_status()
+            profiles = r.json()
+        if not isinstance(profiles, list):
+            return []
+
+        profiles = profiles[:15]
+
+        async def _pairs_for(prof: dict):
+            try:
+                async with httpx.AsyncClient(timeout=8) as client:
+                    r = await client.get(
+                        f"https://api.dexscreener.com/token-pairs/v1/"
+                        f"{prof['chainId']}/{prof['tokenAddress']}"
+                    )
+                    return prof, (r.json() if r.status_code == 200 else [])
+            except Exception:
+                return prof, []
+
+        fetched = await asyncio.gather(*(_pairs_for(p) for p in profiles))
+
+        projects = []
+        for prof, pairs in fetched:
+            if not isinstance(pairs, list) or not pairs:
+                continue
+            # Meilleur pair = le plus liquide
+            p = max(
+                pairs,
+                key=lambda x: float((x.get("liquidity") or {}).get("usd", 0) or 0),
+            )
+            base = p.get("baseToken", {})
+            symbol = base.get("symbol", "")
+            if not symbol or len(symbol) > 20:
+                continue
+            links = {l.get("type"): l.get("url") for l in (prof.get("links") or [])}
+            projects.append({
+                "name": base.get("name", "") or (prof.get("description") or "")[:60],
+                "symbol": symbol,
+                "chain": prof.get("chainId", ""),
+                "pair_address": p.get("pairAddress", ""),
+                "liquidity": float(p.get("liquidity", {}).get("usd", 0) or 0),
+                "volume_24h": float(p.get("volume", {}).get("h24", 0) or 0),
+                "price_change_24h": float(p.get("priceChange", {}).get("h24", 0) or 0),
+                "price": float(p.get("priceUsd", 0) or 0),
+                "token_address": prof.get("tokenAddress", ""),
+                "created_at": p.get("pairCreatedAt", ""),
+                "url": p.get("url") or prof.get("url", ""),
+                "website": links.get("website", ""),
+                "twitter": links.get("twitter", ""),
+                "listing_type": "JUST_LISTED",
+                "source": "dex_screener",
+            })
+        return projects
+    except Exception as exc:
+        logger.warning("dex_new_pairs_failed", error=str(exc))
+        return []
+
+
+async def _fetch_dex_search_pairs() -> List[Dict[str, Any]]:
+    """Fallback keyword search — garde-fou si token-profiles est down."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
                 "https://api.dexscreener.com/latest/dex/search",
                 params={"q": "new"},
@@ -849,8 +913,13 @@ async def discover_pre_listing(
     Discover pre-listing opportunities by aggregating multiple sources.
     Scores each project on asymmetric opportunity (0-100).
     """
-    # Fetch from all sources in parallel
-    tasks = [_fetch_dex_new_pairs()]
+    # Fetch from all sources in parallel (fallback keyword search si
+    # token-profiles ne renvoie rien)
+    async def _dex_pairs():
+        pairs = await _fetch_dex_new_pairs()
+        return pairs or await _fetch_dex_search_pairs()
+
+    tasks = [_dex_pairs()]
     if include_trending:
         tasks.append(_fetch_coingecko_trending())
     tasks.append(_fetch_cryptorank_idos())

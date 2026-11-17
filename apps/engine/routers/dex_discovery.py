@@ -41,6 +41,97 @@ async def _http_get(url: str, params: Optional[dict] = None, source: str = "dexs
     return await retry_async(_do, max_retries=1, base_delay=0.5, source=source)
 
 
+# ── GoPlus Security (free, no key) — real honeypot/mint/owner checks ──
+GOPLUS_CHAIN_IDS = {
+    "ethereum": "1", "eth": "1",
+    "bsc": "56", "binance": "56",
+    "polygon": "137", "matic": "137",
+    "arbitrum": "42161",
+    "avalanche": "43114", "avax": "43114",
+    "base": "8453",
+    "optimism": "10",
+    "fantom": "250",
+}
+
+
+async def _goplus_security(chain: str, token_address: str) -> dict:
+    """Best-effort GoPlus token security scan. Returns {} on failure."""
+    try:
+        chain_l = (chain or "").lower()
+        if chain_l in ("solana", "sol"):
+            data = await _http_get(
+                "https://api.gopluslabs.io/api/v1/solana_token_security",
+                params={"contract_addresses": token_address},
+                source="goplus",
+            )
+            info = (data.get("result") or {}).get(token_address) or {}
+            meta = info.get("metadata") or {}
+            mintable = info.get("mintable") or {}
+            freezable = info.get("freezable") or {}
+            closable = info.get("closable") or {}
+            creators = info.get("creators") or []
+            return {
+                "is_honeypot": None,  # GoPlus solana ne fournit pas de honeypot sim
+                "mintable": bool(mintable.get("status")),
+                "freezable": bool(freezable.get("status")),
+                "closable": bool(closable.get("status")),
+                "owner_renounced": not bool(creators),
+                "metadata_mutable": bool((info.get("metadata_mutable") or {}).get("status")),
+                "symbol": meta.get("symbol"),
+                "source_sec": "goplus_solana",
+            }
+
+        chain_id = GOPLUS_CHAIN_IDS.get(chain_l)
+        if not chain_id:
+            return {}
+        data = await _http_get(
+            f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}",
+            params={"contract_addresses": token_address},
+            source="goplus",
+        )
+        info = (data.get("result") or {}).get(token_address.lower()) or {}
+        if not info:
+            return {}
+
+        # LP lock : somme des parts de LP holders marqués locked/burned
+        lp_holders = info.get("lp_holders") or []
+        lp_total = 0.0
+        lp_locked = 0.0
+        for h in lp_holders:
+            try:
+                pct = float(h.get("percent", 0) or 0) * 100
+            except (TypeError, ValueError):
+                pct = 0.0
+            lp_total += pct
+            if h.get("is_locked") == 1:
+                lp_locked += pct
+        liquidity_locked_pct = round(lp_locked, 1) if lp_locked > 0 else None
+
+        def flag(k: str) -> bool:
+            return str(info.get(k, "0")) == "1"
+
+        return {
+            "is_honeypot": flag("is_honeypot"),
+            "mintable": flag("is_mintable"),
+            "is_proxy": flag("is_proxy"),
+            "is_open_source": flag("is_open_source"),
+            "hidden_owner": flag("hidden_owner"),
+            "selfdestruct": flag("selfdestruct"),
+            "external_call": flag("external_call"),
+            "can_take_back_ownership": flag("can_take_back_ownership"),
+            "owner_change_balance": flag("owner_change_balance"),
+            "owner_renounced": not bool(info.get("owner_address")),
+            "buy_tax": info.get("buy_tax"),
+            "sell_tax": info.get("sell_tax"),
+            "holder_count": int(info.get("holder_count") or 0),
+            "liquidity_locked_pct": liquidity_locked_pct,
+            "is_in_dex": flag("is_in_dex"),
+            "source_sec": "goplus",
+        }
+    except Exception:
+        return {}
+
+
 # ── DexScreener: search pairs across all chains ───────────────────
 @router.get("/search")
 async def search_dex_pairs(q: str):
@@ -211,8 +302,17 @@ async def new_pools(network: Optional[str] = None):
             attrs = p.get("attributes", {})
             rels = p.get("relationships", {})
             base_token_id = (rels.get("base_token") or {}).get("data", {}).get("id", "")
+            # GeckoTerminal ids: "{chain}_{address}" / pool id "{chain}_{pool}"
+            chain = base_token_id.split("_", 1)[0] if "_" in base_token_id else (p.get("id", "").split("_", 1)[0] or "")
+            token_address = base_token_id.split("_", 1)[1] if "_" in base_token_id else ""
+            name = attrs.get("name", "")
+            symbol = name.split(" / ")[0].strip() if " / " in name else name
             pools.append({
                 "pool_address": attrs.get("address"),
+                "chain": chain,
+                "token_address": token_address,
+                "symbol": symbol,
+                "liquidity": float(attrs.get("reserve_in_usd", 0) or 0),
                 "name": attrs.get("name"),
                 "base_token_price_usd": float(attrs.get("base_token_price_usd", 0) or 0),
                 "quote_token_price_usd": float(attrs.get("quote_token_price_usd", 0) or 0),
@@ -279,9 +379,14 @@ async def dex_risk_check(chain: str, token_address: str):
     if cached:
         return cached
     try:
-        data = await _http_get(
-            f"{DEXSCREENER_BASE}/token-pairs/v1/{chain}/{token_address}"
+        import asyncio
+        data, sec = await asyncio.gather(
+            _http_get(f"{DEXSCREENER_BASE}/token-pairs/v1/{chain}/{token_address}"),
+            _goplus_security(chain, token_address),
+            return_exceptions=True,
         )
+        if isinstance(sec, Exception):
+            sec = {}
         if not isinstance(data, list) or not data:
             raise HTTPException(status_code=404, detail="Token not found on DEX")
 
@@ -360,6 +465,46 @@ async def dex_risk_check(chain: str, token_address: str):
             warnings.append(f"LOW: Only {total_tx_24h} transactions in 24h — low activity")
             risk_score += 5
 
+        # 7. GoPlus contract security (real on-chain checks)
+        if isinstance(sec, dict) and sec:
+            if sec.get("is_honeypot"):
+                red_flags.append("CRITICAL: Honeypot détecté (GoPlus) — vente impossible")
+                risk_score += 50
+            if sec.get("mintable"):
+                red_flags.append("HIGH: Supply mintable — dilution possible à tout moment")
+                risk_score += 15
+            if sec.get("hidden_owner"):
+                red_flags.append("HIGH: Owner masqué dans le contrat")
+                risk_score += 15
+            if sec.get("selfdestruct"):
+                red_flags.append("HIGH: Fonction selfdestruct présente")
+                risk_score += 15
+            if sec.get("can_take_back_ownership"):
+                warnings.append("MODERATE: Ownership récupérable après renonciation")
+                risk_score += 10
+            if sec.get("owner_change_balance"):
+                warnings.append("MODERATE: Owner peut modifier les balances")
+                risk_score += 10
+            if sec.get("is_proxy"):
+                warnings.append("MODERATE: Contrat proxy — logique modifiable")
+                risk_score += 5
+            if sec.get("freezable") or sec.get("closable"):
+                red_flags.append("HIGH: Compte freezable/closable (Solana)")
+                risk_score += 15
+            if sec.get("liquidity_locked_pct") is not None and sec["liquidity_locked_pct"] < 50:
+                warnings.append(f"MODERATE: LP locké seulement à {sec['liquidity_locked_pct']}%")
+                risk_score += 10
+            try:
+                sell_tax = float(sec.get("sell_tax") or 0)
+                if sell_tax > 10:
+                    red_flags.append(f"HIGH: Taxe de vente {sell_tax:.0f}% — sortie coûteuse")
+                    risk_score += 15
+                elif sell_tax > 5:
+                    warnings.append(f"MODERATE: Taxe de vente {sell_tax:.0f}%")
+                    risk_score += 5
+            except (TypeError, ValueError):
+                pass
+
         # Determine risk level
         if risk_score >= 60:
             risk_level = "EXTREME"
@@ -393,6 +538,15 @@ async def dex_risk_check(chain: str, token_address: str):
                 "LARGE"
             ),
             "source": "dexscreener",
+            # Champs sécurité aplatis (GoPlus) — None si indisponible
+            "is_honeypot": sec.get("is_honeypot"),
+            "mintable": sec.get("mintable"),
+            "owner_renounced": sec.get("owner_renounced"),
+            "liquidity_locked_pct": sec.get("liquidity_locked_pct"),
+            "holder_count": sec.get("holder_count"),
+            "buy_tax": sec.get("buy_tax"),
+            "sell_tax": sec.get("sell_tax"),
+            "security_source": sec.get("source_sec"),
         }
         _set(cache_key, result)
         return result
