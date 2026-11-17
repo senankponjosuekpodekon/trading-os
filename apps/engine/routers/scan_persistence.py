@@ -263,8 +263,8 @@ async def _try_ingest_signal(result: dict, timeframe: str) -> None:
             _ingest_client = httpx.AsyncClient(timeout=5.0)
         await _ingest_client.post(
             f"{api_url.rstrip('/')}/api/signals/ingest",
-            json=result,
-            headers={"X-Engine-Key": api_key},
+            content=json.dumps(result, default=str),
+            headers={"X-Engine-Key": api_key, "Content-Type": "application/json"},
         )
     except Exception as e:
         try:

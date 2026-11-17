@@ -39,6 +39,7 @@ from utils.asset_config import (
 )
 from routers.scan_persistence import (
     _persist_scan,
+    _try_ingest_signal,
 )
 from routers.scan_hysteresis import _signal_state, apply_hysteresis_and_persistence
 from routers.scan_asset import get_asset_type
@@ -695,6 +696,7 @@ async def scan_multi(req: ScanRequest):
     # Persist scan results to Redis + DB batch queue
     for r in results:
         await _persist_scan(r, req.timeframe)
+        await _try_ingest_signal(r, req.timeframe)
 
     ws_module.set_latest_signals(results)
 
