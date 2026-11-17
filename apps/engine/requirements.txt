@@ -28,6 +28,7 @@ slowapi>=0.1.9
 python-dotenv>=1.1.0
 structlog>=25.3.0
 sentry-sdk>=2.20.0
+solders>=0.21.0                # Venue SPOT_CRYPTO/Jupiter — keypair + tx Solana
 
 # ── IA / LLM ─────────────────────────────────────────────────
 openai>=1.86.0               # LLM explanations via GPT-4o / Ollama

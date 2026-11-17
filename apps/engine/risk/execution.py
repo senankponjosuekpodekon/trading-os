@@ -51,8 +51,15 @@ async def _exec_config() -> dict:
                 "SELECT mode, live_venues, gate_fail_closed, updated_by "
                 "FROM execution_config WHERE id='default'")
             if row and row["updated_by"]:
+                venues = row["live_venues"] or []
+                if isinstance(venues, str):
+                    import json as _json
+                    try:
+                        venues = _json.loads(venues)
+                    except ValueError:
+                        venues = [v for v in venues.split(",") if v]
                 cfg = {"mode": row["mode"],
-                       "live_venues": set(row["live_venues"] or []),
+                       "live_venues": set(venues),
                        "gate_fail_closed": row["gate_fail_closed"],
                        "source": "db"}
     except Exception:

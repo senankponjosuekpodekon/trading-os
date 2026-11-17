@@ -302,8 +302,10 @@ async def get_candles_history(
     if df is None or df.empty:
         return _JSONResponse(status_code=404, content={"error": f"No data for {symbol}/{timeframe}"})
 
-    # Filter by time range
+    # Filter by time range (Deriv renvoie des secondes, Binance des ms → normaliser)
     df["time_ms"] = df["time"].astype(int)
+    if not df.empty and df["time_ms"].max() < 10**12:
+        df["time_ms"] = df["time_ms"] * 1000
     df = df[(df["time_ms"] >= start) & (df["time_ms"] <= end)]
     df = df.sort_values("time_ms")
 
