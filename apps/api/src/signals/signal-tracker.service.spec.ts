@@ -43,7 +43,7 @@ describe('SignalTrackerService', () => {
         { provide: 'CandleRepository', useValue: mockCandleRepo },
         { provide: SignalExecutionService, useValue: mockExecutionService },
         { provide: FeatureStoreService, useValue: { attachOutcome: jest.fn() } },
-        { provide: AutoTraderService, useValue: { handleSignalEvent: jest.fn() } },
+        { provide: AutoTraderService, useValue: { processPendingEvents: jest.fn() } },
         { provide: EngineHttpService, useValue: { post: jest.fn().mockResolvedValue({}) } },
       ],
     }).compile();

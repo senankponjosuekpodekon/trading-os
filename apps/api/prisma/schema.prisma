@@ -463,6 +463,12 @@ model SignalExecutionEvent {
   candleTimeframe String                     @map("candle_timeframe")
   resolvedBy      IntrabarResolutionMethod   @default(CANDLE_CLOSE) @map("resolved_by")
   metadata        Json?
+  autopilotStatus String                     @default("PENDING") @map("autopilot_status")
+  autopilotAttempts Int                      @default(0) @map("autopilot_attempts")
+  autopilotNextAttemptAt DateTime?            @map("autopilot_next_attempt_at")
+  autopilotLastAttemptAt DateTime?            @map("autopilot_last_attempt_at")
+  autopilotProcessedAt DateTime?              @map("autopilot_processed_at")
+  autopilotLastError String?                  @map("autopilot_last_error")
   createdAt       DateTime                   @default(now()) @map("created_at")
 
   // Unicité logique : un même type d'événement sur une même bougie ne doit
@@ -470,6 +476,7 @@ model SignalExecutionEvent {
   @@unique([signalId, type, candleTime])
   @@index([signalId, candleTime])
   @@index([signalId, type])
+  @@index([autopilotStatus, candleTime, createdAt], map: "signal_execution_events_autopilot_queue_idx")
   @@map("signal_execution_events")
 }
 

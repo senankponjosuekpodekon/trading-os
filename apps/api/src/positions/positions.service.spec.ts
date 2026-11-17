@@ -86,6 +86,15 @@ describe('PositionsService', () => {
     jest.clearAllMocks();
   });
 
+  it('excludes AutoPilot from the generic trailing-stop lifecycle', async () => {
+    mockPrisma.position.findMany.mockResolvedValue([]);
+    await service.syncTrailingStops();
+    expect(mockPrisma.position.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { user: { email: { not: 'autopilot@system.local' } } } },
+    }));
+    expect(mockPrisma.position.update).not.toHaveBeenCalled();
+  });
+
   describe('create', () => {
     beforeEach(() => {
       mockPrisma.position.findFirst.mockResolvedValue(null);

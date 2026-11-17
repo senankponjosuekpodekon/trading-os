@@ -67,6 +67,14 @@ describe('WatcherService', () => {
   });
 
   describe('watchPositions', () => {
+    it('excludes AutoPilot positions owned by the durable event worker', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      await service.watchPositions();
+      expect(mockPrisma.position.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { status: 'OPEN', portfolio: { user: { email: { not: 'autopilot@system.local' } } } },
+      }));
+      expect(mockPositions.closeByWatcher).not.toHaveBeenCalled();
+    });
     it('should close BUY position when TP is hit', async () => {
       mockPrisma.position.findMany.mockResolvedValue([
         {

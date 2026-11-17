@@ -12,6 +12,12 @@ interface ExecutionEvent {
   candleTime: string;
   resolvedBy: string;
   metadata?: { autopilot?: { reason: string; mode: string; recordedAt: string } };
+  autopilotStatus?: string;
+  autopilotAttempts?: number;
+  autopilotNextAttemptAt?: string | null;
+  autopilotLastAttemptAt?: string | null;
+  autopilotProcessedAt?: string | null;
+  autopilotLastError?: string | null;
 }
 
 interface SignalTrackingSheetProps {
@@ -63,6 +69,16 @@ const autopilotLabel: Record<string, string> = {
   GATE_UNAVAILABLE: 'Entrée refusée : contrôle de risque indisponible',
   GATE_REJECTED: 'Entrée refusée par le contrôle de risque',
   PROCESSING_ERROR: 'Erreur de traitement AutoPilot : vérification nécessaire',
+  STALE_ENTRY: 'Entrée trop ancienne ou signal clôturé : aucun rejeu rétroactif',
+};
+
+const processingLabel: Record<string, string> = {
+  HISTORICAL: 'Historique — hors reprise automatique',
+  PENDING: 'En attente de traitement',
+  RETRY: 'Reprise automatique programmée',
+  COMPLETED: 'Traitement paper terminé',
+  SKIPPED: 'Traitement ignoré',
+  FAILED: 'Échec définitif — intervention nécessaire',
 };
 
 const statusLabel: Record<string, string> = {
@@ -102,14 +118,27 @@ export function SignalTrackingSheet({
     setError(null);
     setEvents([]);
     setPnlCurve([]);
-    api.get(`/signals/${signalId}/execution`)
-      .then(res => { if (!cancelled) setEvents(res.data); })
-      .catch(() => { if (!cancelled) setError('Impossible de charger le suivi'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    let fetching = false;
+    const loadEvents = async () => {
+      if (fetching) return;
+      fetching = true;
+      try {
+        const res = await api.get(`/signals/${signalId}/execution`);
+        if (!Array.isArray(res.data)) throw new Error('Invalid execution timeline');
+        if (!cancelled) { setEvents(res.data); setError(null); }
+      } catch {
+        if (!cancelled) setError('Impossible de charger le suivi');
+      } finally {
+        fetching = false;
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void loadEvents();
+    const refresh = setInterval(() => { void loadEvents(); }, 15_000);
     api.get(`/signals/${signalId}/pnl-curve`)
       .then(res => { if (!cancelled) setPnlCurve(res.data?.points ?? []); })
       .catch(() => { if (!cancelled) setPnlCurve([]); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearInterval(refresh); };
   }, [open, signalId]);
 
   if (!open) return null;
@@ -260,6 +289,15 @@ export function SignalTrackingSheet({
                 <span>Taille {parseFloat(ev.sizePct)}%</span>
                 <span className="text-gray-600">{ev.resolvedBy}</span>
               </div>
+              {ev.autopilotStatus && (
+                <div className={`mt-2 text-xs ${ev.autopilotStatus === 'FAILED' ? 'text-red-400' : 'text-gray-400'}`}>
+                  <p>AutoPilot : {processingLabel[ev.autopilotStatus] ?? ev.autopilotStatus} · {ev.autopilotAttempts ?? 0} tentative(s)</p>
+                  {ev.autopilotLastAttemptAt && <p>Dernière tentative : {new Date(ev.autopilotLastAttemptAt).toLocaleString('fr-FR')}</p>}
+                  {ev.autopilotNextAttemptAt && <p>Prochaine tentative : {new Date(ev.autopilotNextAttemptAt).toLocaleString('fr-FR')}</p>}
+                  {ev.autopilotProcessedAt && <p>Traité le : {new Date(ev.autopilotProcessedAt).toLocaleString('fr-FR')}</p>}
+                  {ev.autopilotLastError && <p>{autopilotLabel[ev.autopilotLastError] ?? 'Erreur de traitement'}</p>}
+                </div>
+              )}
               {ev.metadata?.autopilot ? (
                 <p className="mt-2 text-xs text-amber-300">
                   AutoPilot paper : {autopilotLabel[ev.metadata.autopilot.reason] ?? ev.metadata.autopilot.reason}

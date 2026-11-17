@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 import { PrismaSystemService } from '../prisma/prisma.service';
 import { FeatureFlagsService } from '../common/services/feature-flags.service';
 import { engineHeaders } from '../utils/engine-headers.util';
@@ -24,11 +26,14 @@ const RISK_PCT = 0.01;                     // 1% du capital courant par trade
 const MAX_TOTAL_EXPOSURE_PCT = 0.10;       // cap global 10%
 const KILL_SWITCH_DRAWDOWN_PCT = 0.50;     // −50% → pause auto
 const MAX_CONCURRENT_POSITIONS = 5;
-const AUTOPILOT_EMAIL = 'autopilot@system.local';
+export const AUTOPILOT_EMAIL = 'autopilot@system.local';
 const AUTOPILOT_PORTFOLIO = 'AutoPilot';
 const AUTOPILOT_INITIAL_CAPITAL = 10_000;
 
 type TrackedEvent = 'ENTRY_HIT' | 'TP1_HIT' | 'TP2_HIT' | 'TP3_HIT' | 'SL_HIT' | 'EXPIRED' | 'MANUAL_CLOSE';
+const MAX_ATTEMPTS = 5;
+const LOCK_ID = 814_207;
+type PaperDb = Prisma.TransactionClient;
 
 @Injectable()
 export class AutoTraderService {
@@ -50,11 +55,11 @@ export class AutoTraderService {
     return side === 'buy' ? price * (1 + bps) : price * (1 - bps);
   }
 
-  private async getAutopilotPortfolio(createIfMissing = true) {
-    let user = await this.prisma.user.findUnique({ where: { email: AUTOPILOT_EMAIL } });
+  private async getAutopilotPortfolio(db: PaperDb, createIfMissing = true) {
+    let user = await db.user.findUnique({ where: { email: AUTOPILOT_EMAIL } });
     if (!user && !createIfMissing) return null;
     if (!user) {
-      user = await this.prisma.user.create({
+      user = await db.user.create({
         data: {
           email: AUTOPILOT_EMAIL,
           name: 'AutoPilot',
@@ -64,12 +69,12 @@ export class AutoTraderService {
         },
       });
     }
-    let portfolio = await this.prisma.portfolio.findFirst({
+    let portfolio = await db.portfolio.findFirst({
       where: { userId: user.id, name: AUTOPILOT_PORTFOLIO },
     });
     if (!portfolio && !createIfMissing) return null;
     if (!portfolio) {
-      portfolio = await this.prisma.portfolio.create({
+      portfolio = await db.portfolio.create({
         data: {
           userId: user.id,
           name: AUTOPILOT_PORTFOLIO,
@@ -82,47 +87,106 @@ export class AutoTraderService {
     return portfolio;
   }
 
-  /** Point d'entrée — appelé par le tracker après chaque event créé. */
-  async handleSignalEvent(signal: any, eventType: TrackedEvent, eventPrice: number): Promise<void> {
-    let reason = 'UNSUPPORTED_EVENT';
+  /** Point d'entrée — file persistante traitée par le tracker et le cron. */
+  @Cron('* * * * *')
+  async processPendingEvents(limit = 50): Promise<void> {
     try {
-      if (!Number.isFinite(eventPrice) || eventPrice <= 0) {
-        reason = 'INVALID_EVENT_PRICE';
-      } else if (eventType === 'ENTRY_HIT') {
-        reason = await this.flags.getFlag(AUTO_TRADER_FLAG, false)
-          ? await this.maybeOpen(signal, eventPrice)
-          : 'DISABLED';
-      } else if (eventType === 'SL_HIT' || eventType === 'EXPIRED' || eventType === 'MANUAL_CLOSE') {
-        reason = await this.closeRemaining(signal.id, eventPrice);
-      } else if (eventType.startsWith('TP')) {
-        reason = await this.partialClose(signal.id, eventPrice, eventType);
+      const pending = await this.prisma.signalExecutionEvent.findFirst({
+        where: { autopilotStatus: { in: ['PENDING', 'RETRY'] } },
+      });
+      if (!pending) return;
+      await this.prisma.$transaction(async db => {
+        const [lock] = await db.$queryRaw<{ acquired: boolean }[]>`SELECT pg_try_advisory_xact_lock(${LOCK_ID}::bigint) AS acquired`;
+        if (lock.acquired) await this.getAutopilotPortfolio(db);
+      });
+      for (let i = 0; i < limit; i++) {
+        let attempted: { id: string; autopilotAttempts: number } | null = null;
+        try {
+          const processed = await this.prisma.$transaction(async db => {
+            const [lock] = await db.$queryRaw<{ acquired: boolean }[]>`SELECT pg_try_advisory_xact_lock(${LOCK_ID}::bigint) AS acquired`;
+            if (!lock.acquired) return false;
+            const event = await db.signalExecutionEvent.findFirst({
+              where: {
+                autopilotStatus: { in: ['PENDING', 'RETRY'] },
+                OR: [{ autopilotNextAttemptAt: null }, { autopilotNextAttemptAt: { lte: new Date() } }],
+                signal: { executionEvents: { none: { OR: [
+                  { autopilotStatus: 'FAILED' },
+                  { autopilotStatus: 'RETRY', autopilotNextAttemptAt: { gt: new Date() } },
+                ] } } },
+              },
+              orderBy: [{ candleTime: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+              include: { signal: { include: { asset: true } } },
+            });
+            if (!event || (event.autopilotNextAttemptAt && event.autopilotNextAttemptAt > new Date())) return false;
+            attempted = event;
+            let reason: string;
+            if (event.type === 'ENTRY_HIT' && this.isStaleEntry(event)) {
+              reason = 'STALE_ENTRY';
+            } else {
+              reason = await this.applyEvent(db, event.signal, event.type as TrackedEvent, Number(event.price));
+            }
+            if (reason === 'GATE_UNAVAILABLE') throw new Error('GATE_UNAVAILABLE');
+            const metadata = event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata) ? event.metadata : {};
+            await db.signalExecutionEvent.update({
+              where: { id: event.id },
+              data: {
+                autopilotStatus: reason.startsWith('PAPER_') ? 'COMPLETED' : 'SKIPPED',
+                autopilotAttempts: { increment: 1 }, autopilotProcessedAt: new Date(), autopilotLastAttemptAt: new Date(),
+                autopilotNextAttemptAt: null, autopilotLastError: null,
+                metadata: { ...metadata, autopilot: { reason, mode: 'PAPER', recordedAt: new Date().toISOString() } },
+              },
+            });
+            return { id: event.id, reason };
+          }, { timeout: 15_000, maxWait: 5_000 });
+          if (!processed) break;
+          this.logger.log(`autopilot event=${processed.id} reason=${processed.reason}`);
+        } catch (error) {
+          const event = attempted as { id: string; autopilotAttempts: number } | null;
+          if (!event) throw error;
+          const attempts = event.autopilotAttempts + 1;
+          const reason = error instanceof Error && error.message === 'GATE_UNAVAILABLE' ? 'GATE_UNAVAILABLE' : 'PROCESSING_ERROR';
+          await this.prisma.signalExecutionEvent.updateMany({
+            where: { id: event.id, autopilotStatus: { in: ['PENDING', 'RETRY'] }, autopilotAttempts: event.autopilotAttempts },
+            data: {
+              autopilotStatus: attempts >= MAX_ATTEMPTS ? 'FAILED' : 'RETRY',
+              autopilotAttempts: { increment: 1 }, autopilotLastError: reason, autopilotLastAttemptAt: new Date(),
+              autopilotProcessedAt: attempts >= MAX_ATTEMPTS ? new Date() : null,
+              autopilotNextAttemptAt: attempts >= MAX_ATTEMPTS ? null : new Date(Date.now() + 60_000 * 2 ** (attempts - 1)),
+            },
+          });
+          this.logger.error(`autopilot event=${event.id} attempt=${attempts} reason=${reason}`);
+          break;
+        }
       }
     } catch {
-      reason = 'PROCESSING_ERROR';
-      this.logger.error(`autopilot ${eventType} signal=${signal.id}: ${reason}`);
-    }
-    await this.recordDecision(signal.id, eventType, reason);
-  }
-
-  private async recordDecision(signalId: string, type: TrackedEvent, reason: string): Promise<void> {
-    this.logger.log(`autopilot signal=${signalId} event=${type} reason=${reason}`);
-    try {
-      const event = await this.prisma.signalExecutionEvent.findFirst({
-        where: { signalId, type }, orderBy: { candleTime: 'desc' },
-      });
-      if (!event) return;
-      const metadata = event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata)
-        ? event.metadata : {};
-      await this.prisma.signalExecutionEvent.update({
-        where: { id: event.id },
-        data: { metadata: { ...metadata, autopilot: { reason, mode: 'PAPER', recordedAt: new Date().toISOString() } } },
-      });
-    } catch {
-      this.logger.error(`autopilot decision persistence failed signal=${signalId} event=${type}`);
+      this.logger.error('autopilot queue processing unavailable; committed events remain pending');
     }
   }
 
-  private async maybeOpen(signal: any, hitPrice: number): Promise<string> {
+  private isStaleEntry(event: { createdAt: Date; candleTime: Date; candleTimeframe: string; signal: { executionStatus: string } }): boolean {
+    const timeframe = /^(\d+)(m|h|d|w)$/.exec(event.candleTimeframe);
+    if (!timeframe) return true;
+    const duration = Number(timeframe[1]) * ({ m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[timeframe[2]] ?? 0);
+    return event.createdAt.getTime() < Date.now() - 15 * 60_000
+      || event.candleTime.getTime() + duration < Date.now() - 15 * 60_000
+      || !['PENDING', 'ACTIVE'].includes(event.signal.executionStatus);
+  }
+
+  private async applyEvent(db: PaperDb, signal: any, eventType: TrackedEvent, eventPrice: number): Promise<string> {
+    if (!Number.isFinite(eventPrice) || eventPrice <= 0) return 'INVALID_EVENT_PRICE';
+    if (eventType === 'ENTRY_HIT') {
+      return await this.flags.getFlag(AUTO_TRADER_FLAG, false) ? this.maybeOpen(db, signal, eventPrice) : 'DISABLED';
+    }
+    if (eventType === 'SL_HIT' || eventType === 'EXPIRED' || eventType === 'MANUAL_CLOSE') {
+      return this.closeRemaining(db, signal.id, eventPrice);
+    }
+    if (eventType === 'TP1_HIT' || eventType === 'TP2_HIT' || eventType === 'TP3_HIT') {
+      return this.partialClose(db, signal.id, eventPrice, eventType);
+    }
+    return 'UNSUPPORTED_EVENT';
+  }
+
+  private async maybeOpen(db: PaperDb, signal: any, hitPrice: number): Promise<string> {
     const confidence = Number(signal.confidence);
     const threshold = Number(this.minConfidence);
     if (!Number.isFinite(confidence) || !Number.isFinite(threshold) || threshold < 0 || threshold > 100) return 'INVALID_CONFIDENCE';
@@ -132,7 +196,7 @@ export class AutoTraderService {
     const entry = hitPrice;
     if (!Number.isFinite(sl) || sl <= 0 || (signal.signal === 'BUY' ? sl >= entry : sl <= entry)) return 'INVALID_STOP';
 
-    const portfolio = await this.getAutopilotPortfolio();
+    const portfolio = await this.getAutopilotPortfolio(db);
     if (!portfolio || portfolio.type !== 'PAPER') return 'NOT_PAPER_PORTFOLIO';
     const capital = Number(portfolio.currentCapital);
     if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(Number(portfolio.initialCapital)) || Number(portfolio.initialCapital) <= 0) return 'INVALID_CAPITAL';
@@ -145,13 +209,13 @@ export class AutoTraderService {
     }
 
     // Dédup : une seule position ouverte par actif
-    const existing = await this.prisma.position.findFirst({
+    const existing = await db.position.findFirst({
       where: { portfolioId: portfolio.id, OR: [{ signalId: signal.id }, { assetId: signal.assetId, status: 'OPEN' }] },
     });
     if (existing) return existing.signalId === signal.id ? 'ALREADY_PROCESSED' : 'ASSET_ALREADY_OPEN';
 
     // Max positions concurrentes
-    const open = await this.prisma.position.findMany({
+    const open = await db.position.findMany({
       where: { portfolioId: portfolio.id, status: 'OPEN' },
       select: { quantity: true, entryPrice: true, stopLoss: true },
     });
@@ -191,7 +255,7 @@ export class AutoTraderService {
       return 'GATE_REJECTED';
     }
 
-    await this.prisma.position.create({
+    await db.position.create({
       data: {
         portfolioId: portfolio.id,
         assetId: signal.assetId,
@@ -210,7 +274,6 @@ export class AutoTraderService {
         openedAt: new Date(),
       },
     });
-    this.logger.log(`autopilot OPEN ${direction === 'BUY' ? 'LONG' : 'SHORT'} ${signal.asset?.symbol} qty=${quantity.toFixed(6)} @ ${effectiveEntry.toFixed(2)} (conf ${signal.confidence}%)`);
     return 'PAPER_OPENED';
   }
 
@@ -253,17 +316,17 @@ export class AutoTraderService {
   }
 
   /** Ferme sizePct% de la taille ORIGINALE (sémantique tracker : 33.3% par TP). */
-  private async partialClose(signalId: string, rawPrice: number, tp: 'TP1_HIT' | 'TP2_HIT' | 'TP3_HIT'): Promise<string> {
+  private async partialClose(db: PaperDb, signalId: string, rawPrice: number, tp: 'TP1_HIT' | 'TP2_HIT' | 'TP3_HIT'): Promise<string> {
     // Filtrer par portfolioId : sans ça, une position USER ouverte depuis le
     // même signal serait modifiée par l'AutoPilot (écriture cross-user).
-    const portfolio = await this.getAutopilotPortfolio(false);
+    const portfolio = await this.getAutopilotPortfolio(db, false);
     if (!portfolio) return 'NO_OPEN_POSITION';
     if (portfolio.type !== 'PAPER') return 'NOT_PAPER_PORTFOLIO';
-    const position = await this.prisma.position.findFirst({
+    const position = await db.position.findFirst({
       where: { signalId, portfolioId: portfolio.id, status: 'OPEN' },
     });
     if (!position) return 'NO_OPEN_POSITION';
-    if (tp === 'TP3_HIT') return this.closeRemaining(signalId, rawPrice);
+    if (tp === 'TP3_HIT') return this.closeRemaining(db, signalId, rawPrice);
     if ((tp === 'TP1_HIT' && position.partialExitAt) || (tp === 'TP2_HIT' && position.secondPartialExitAt)) return 'ALREADY_PROCESSED';
 
     const isLong = position.direction === 'BUY';
@@ -287,31 +350,28 @@ export class AutoTraderService {
     const f = fieldMap[tp];
     const newQty = remainingQty - closeQty;
 
-    await this.prisma.$transaction([
-      this.prisma.position.update({
-        where: { id: position.id },
-        data: {
-          quantity: newQty,
-          pnl: totalPnl,
-          pnlPercent: realizedPct,
-          ...(f ? { [f.at]: new Date(), [f.price]: exitPrice, [f.pnl]: Number(position[f.pnl] ?? 0) + realized } : {}),
-        },
-      }),
-      this.prisma.portfolio.update({
-        where: { id: position.portfolioId },
-        data: { currentCapital: { increment: realized } },
-      }),
-    ]);
-    this.logger.log(`autopilot ${tp} position=${position.id} closeQty=${closeQty.toFixed(6)} pnl=${realized.toFixed(2)}`);
+    await db.position.update({
+      where: { id: position.id },
+      data: {
+        quantity: newQty,
+        pnl: totalPnl,
+        pnlPercent: realizedPct,
+        ...(f ? { [f.at]: new Date(), [f.price]: exitPrice, [f.pnl]: Number(position[f.pnl] ?? 0) + realized } : {}),
+      },
+    });
+    await db.portfolio.update({
+      where: { id: position.portfolioId },
+      data: { currentCapital: { increment: realized } },
+    });
     return 'PAPER_PARTIAL_CLOSED';
   }
 
-  private async closeRemaining(signalId: string, rawPrice: number): Promise<string> {
+  private async closeRemaining(db: PaperDb, signalId: string, rawPrice: number): Promise<string> {
     // Même garde : restreindre au portfolio AutoPilot (cf. partialClose).
-    const portfolio = await this.getAutopilotPortfolio(false);
+    const portfolio = await this.getAutopilotPortfolio(db, false);
     if (!portfolio) return 'NO_OPEN_POSITION';
     if (portfolio.type !== 'PAPER') return 'NOT_PAPER_PORTFOLIO';
-    const position = await this.prisma.position.findFirst({
+    const position = await db.position.findFirst({
       where: { signalId, portfolioId: portfolio.id, status: 'OPEN' },
     });
     if (!position) return 'NO_OPEN_POSITION';
@@ -327,24 +387,21 @@ export class AutoTraderService {
     const cost = entry * Number(position.originalQuantity ?? remainingQty);
     const pnlPct = cost > 0 ? (totalPnl / cost) * 100 : 0;
 
-    await this.prisma.$transaction([
-      this.prisma.position.update({
-        where: { id: position.id },
-        data: {
-          status: 'CLOSED',
-          quantity: 0,
-          exitPrice,
-          closedAt: new Date(),
-          pnl: totalPnl,
-          pnlPercent: pnlPct,
-        },
-      }),
-      this.prisma.portfolio.update({
-        where: { id: position.portfolioId },
-        data: { currentCapital: { increment: realized } },
-      }),
-    ]);
-    this.logger.log(`autopilot CLOSE position=${position.id} realized=${realized.toFixed(2)} total=${totalPnl.toFixed(2)}`);
+    await db.position.update({
+      where: { id: position.id },
+      data: {
+        status: 'CLOSED',
+        quantity: 0,
+        exitPrice,
+        closedAt: new Date(),
+        pnl: totalPnl,
+        pnlPercent: pnlPct,
+      },
+    });
+    await db.portfolio.update({
+      where: { id: position.portfolioId },
+      data: { currentCapital: { increment: realized } },
+    });
     return 'PAPER_CLOSED';
   }
 }

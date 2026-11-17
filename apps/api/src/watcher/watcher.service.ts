@@ -13,6 +13,7 @@ import { retryWithBackoff } from '../utils/retry';
 import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
 import { CronConfigService } from '../admin/cron-config.service';
+import { AUTOPILOT_EMAIL } from '../signals/auto-trader.service';
 
 const BINANCE_PRICES = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -133,7 +134,7 @@ export class WatcherService {
   async watchPositions() {
     await this._run('WATCHER_POSITIONS_ENABLED', async () => {
       const openPositions = await this.systemPrisma.position.findMany({
-        where: { status: 'OPEN' },
+        where: { status: 'OPEN', portfolio: { user: { email: { not: AUTOPILOT_EMAIL } } } },
         include: {
           asset:     { select: { symbol: true } },
           portfolio: { select: { userId: true, type: true } },

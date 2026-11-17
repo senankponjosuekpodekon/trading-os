@@ -166,7 +166,6 @@ export class SignalTrackerService {
       .filter((v) => v != null)
       .map(Number);
     let worstPrice = signal.worstExcursionPrice != null ? Number(signal.worstExcursionPrice) : null;
-    const newEvents: { type: string; price: number }[] = [];
 
     const entryBase = signal.entryPrice ? Number(signal.entryPrice) : 0;
     const bufferPct = this._entryBufferPct(newCandles, entryBase);
@@ -190,7 +189,6 @@ export class SignalTrackerService {
           await tx.signalExecutionEvent.create({
             data: { signalId, type: 'EXPIRED', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe },
           });
-          newEvents.push({ type: 'EXPIRED', price: candle.close });
           await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'EXPIRED', lastProcessedCandle: new Date(candle.openTime) } });
           await this.featureStore.attachOutcome(signalId, 'EXPIRED', null);
           this._resolveMemory(signalId, 'EXPIRED', null);
@@ -204,7 +202,6 @@ export class SignalTrackerService {
             await tx.signalExecutionEvent.create({
               data: { signalId, type: 'ENTRY_HIT', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe },
             });
-            newEvents.push({ type: 'ENTRY_HIT', price: candle.close });
             entryAlreadyHit = true;
             worstPrice = candle.close;
             await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'ACTIVE', worstExcursionPrice: candle.close } });
@@ -236,7 +233,6 @@ export class SignalTrackerService {
               resolvedBy: result.method,
             },
           });
-          newEvents.push({ type, price });
           if (touch === 'SL') break;
         }
 
@@ -245,9 +241,7 @@ export class SignalTrackerService {
     }
 
     // AutoPilot : portfolio PAPER piloté par les events réels (best-effort)
-    for (const ev of newEvents) {
-      await this.autoTrader.handleSignalEvent(signal, ev.type as any, ev.price);
-    }
+    await this.autoTrader.processPendingEvents();
 
     await this.recalculateOutcome(signalId, direction, worstPrice, newCandles);
   }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import SignalsPage from '../page';
@@ -64,6 +64,49 @@ describe('SignalTrackingSheet paper decisions', () => {
       ? [{ ...event, metadata: { autopilot: { reason: 'GATE_UNAVAILABLE', mode: 'PAPER' } } }] : { points: [] } }));
     render(<SignalTrackingSheet {...props} />);
     expect(await screen.findByText(/contrôle de risque indisponible/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['PENDING', 'En attente de traitement'],
+    ['RETRY', 'Reprise automatique programmée'],
+    ['FAILED', 'Échec définitif — intervention nécessaire'],
+    ['HISTORICAL', 'Historique — hors reprise automatique'],
+  ])('shows durable processing status %s', async (status, label) => {
+    (api.get as jest.Mock).mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/execution')
+      ? [{ ...event, autopilotStatus: status, autopilotAttempts: 2, autopilotLastAttemptAt: '2026-11-17T15:00:00Z', autopilotNextAttemptAt: status === 'RETRY' ? '2026-11-17T15:02:00Z' : null }]
+      : { points: [] } }));
+    render(<SignalTrackingSheet {...props} />);
+    expect(await screen.findByText(new RegExp(label))).toBeInTheDocument();
+    expect(screen.getByText(/2 tentative/)).toBeInTheDocument();
+    expect(screen.getByText(/Dernière tentative/)).toBeInTheDocument();
+    if (status === 'RETRY') expect(screen.getByText(/Prochaine tentative/)).toBeInTheDocument();
+  });
+
+  it('refreshes processing status and stops polling on unmount', async () => {
+    jest.useFakeTimers();
+    try {
+      let status = 'PENDING';
+      (api.get as jest.Mock).mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/execution')
+        ? [{ ...event, autopilotStatus: status }] : { points: [] } }));
+      const { unmount } = render(<SignalTrackingSheet {...props} />);
+      await act(async () => {});
+      expect(screen.getByText(/En attente de traitement/)).toBeInTheDocument();
+      status = 'COMPLETED';
+      await act(async () => { jest.advanceTimersByTime(15_000); });
+      expect(screen.getByText(/Traitement paper terminé/)).toBeInTheDocument();
+      unmount();
+      const calls = (api.get as jest.Mock).mock.calls.length;
+      await act(async () => { jest.advanceTimersByTime(15_000); });
+      expect((api.get as jest.Mock).mock.calls.length).toBe(calls);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('reports a malformed timeline response instead of crashing', async () => {
+    (api.get as jest.Mock).mockResolvedValue({ data: { unexpected: true } });
+    render(<SignalTrackingSheet {...props} />);
+    expect(await screen.findByText('Impossible de charger le suivi')).toBeInTheDocument();
   });
 
   it('clears stale errors when changing signal', async () => {

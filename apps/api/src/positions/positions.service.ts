@@ -13,6 +13,7 @@ import { engineHeaders } from '../utils/engine-headers.util';
 import { SystemHealthService } from '../system-health/system-health.service';
 import { CrossPositionRiskService } from './cross-position-risk.service';
 import { CronConfigService } from '../admin/cron-config.service';
+import { AUTOPILOT_EMAIL } from '../signals/auto-trader.service';
 
 const BINANCE_TICKER = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -704,7 +705,7 @@ export class PositionsService {
     await this._run('TRAILING_STOPS_ENABLED', async () => {
       this.logger.log('TRAILING: synchronisation des trailing stops');
       const open = await this.systemPrisma.position.findMany({
-        where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] } },
+        where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { user: { email: { not: AUTOPILOT_EMAIL } } } },
         include: {
           asset: { select: { symbol: true } },
           portfolio: { select: { userId: true } },
