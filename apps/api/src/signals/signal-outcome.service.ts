@@ -151,8 +151,10 @@ export class SignalOutcomeService {
       this.logger.log('OUTCOME: vérification des signaux PENDING');
 
       const pending = await this.prisma.signalLog.findMany({
-        where: { outcome: 'PENDING' },
-        take: 500,
+        // STILL_OPEN inclus : sinon un log marqué STILL_OPEN à sa première
+        // passe n'est plus jamais re-consulté (gelé à vie, ~3 500 cas).
+        where: { outcome: { in: ['PENDING', 'STILL_OPEN'] } },
+        take: 1000,
         orderBy: { createdAt: 'asc' },
       });
 
@@ -228,11 +230,13 @@ export class SignalOutcomeService {
     let outcomePrice: number | null = null;
     let barsToOutcome: number | null = null;
     let outcomeAt: Date | null = null;
+    let barsSinceSignal = 0;
 
     for (let i = 0; i < data.length; i++) {
       const bar = data[i];
       const barTs = parseInt(bar[0]);
       if (barTs < created) continue;
+      barsSinceSignal += 1;
 
       const high = parseFloat(bar[2]);
       const low  = parseFloat(bar[3]);
@@ -248,7 +252,7 @@ export class SignalOutcomeService {
       }
 
       if (outcome) {
-        barsToOutcome = i;
+        barsToOutcome = barsSinceSignal;
         outcomeAt = new Date(barTs);
         break;
       }
@@ -352,11 +356,14 @@ export class SignalOutcomeService {
       let outcomePrice: number | null = null;
       let barsToOutcome: number | null = null;
       let outcomeAt: Date | null = null;
+      let barsSinceSignal = 0;
 
       for (let i = 0; i < candles.length; i++) {
         const c = candles[i];
-        const barTs = typeof c.timestamp === 'number' ? c.timestamp * 1000 : new Date(c.timestamp ?? c.time ?? c.date).getTime();
+        let barTs = typeof c.timestamp === 'number' ? c.timestamp : new Date(c.timestamp ?? c.time ?? c.date).getTime();
+        if (barTs < 1e12) barTs *= 1000; // secondes → millisecondes
         if (barTs < created) continue;
+        barsSinceSignal += 1;
 
         const high = parseFloat(c.high ?? c.h);
         const low = parseFloat(c.low ?? c.l);
@@ -372,7 +379,7 @@ export class SignalOutcomeService {
         }
 
         if (outcome) {
-          barsToOutcome = i;
+          barsToOutcome = barsSinceSignal;
           outcomeAt = new Date(barTs);
           break;
         }
