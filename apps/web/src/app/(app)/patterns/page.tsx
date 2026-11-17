@@ -80,7 +80,7 @@ export default function PatternsPage() {
           <>
             {stats?.resolved != null && stats.resolved > 0 && (stats.stalePriceSource ?? 0) > 0 && (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-300">
-                ⚠ {stats.stalePriceSource}/{stats.resolved} signaux résolus antérieurs à la persistance <code>price_source</code> — le win rate historique n'est pas comparable à l'exécution live (écarts feed mesurés : XAU +1.5%).
+                ⚠ {stats.stalePriceSource}/{stats.resolved} signaux résolus antérieurs à la persistance <code>price_source</code> — le win rate historique n&apos;est pas comparable à l&apos;exécution live (écarts feed mesurés : XAU +1.5%).
               </div>
             )}
 

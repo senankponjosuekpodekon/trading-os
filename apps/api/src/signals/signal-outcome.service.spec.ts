@@ -18,6 +18,10 @@ describe('SignalOutcomeService', () => {
       findMany: jest.fn(),
       update: jest.fn(),
     },
+    signal: {
+      count: jest.fn().mockResolvedValue(0),
+    },
+    $queryRaw: jest.fn().mockResolvedValue([{ n: 0n }]),
   };
 
   const mockHttp = {
@@ -349,10 +353,11 @@ describe('SignalOutcomeService', () => {
 
       expect(calibration.total).toBe(5);
       expect(calibration.buckets['70-80']).toEqual({
-        total: 3, win: 2, loss: 1, other: 0, winRate: 67,
+        total: 3, resolved: 3, win: 2, loss: 1, other: 0, winRate: 67,
       });
+      // EXPIRED = 'other' → exclu du dénominateur : 1 win / 1 résolu = 100%
       expect(calibration.buckets['80-90']).toEqual({
-        total: 2, win: 1, loss: 0, other: 1, winRate: 50,
+        total: 2, resolved: 1, win: 1, loss: 0, other: 1, winRate: 100,
       });
     });
 
