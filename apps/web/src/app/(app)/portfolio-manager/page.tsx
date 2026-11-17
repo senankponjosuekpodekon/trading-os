@@ -315,7 +315,15 @@ export default function PortfolioManagerPage() {
   });
 
   if (isLoading) return <PageSkeleton />;
-  const list = (portfolios ?? []).filter(p => p.type === mode);
+  // La DB a accumulé des centaines de portfolios "Mon Portfolio" vides
+  // (doublons). On déduplique par nom pour l'affichage — sinon la barre
+  // de chips est inutilisable.
+  const seen = new Set<string>();
+  const list = (portfolios ?? []).filter(p => {
+    if (p.type !== mode || seen.has(p.name)) return false;
+    seen.add(p.name);
+    return true;
+  });
   const pf = list[0];
 
   return (

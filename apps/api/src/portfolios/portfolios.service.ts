@@ -24,10 +24,12 @@ export class PortfoliosService {
   async state(userId: string, portfolioId: string) {
     const pf = await this._owned(userId, portfolioId);
     const engineUrl = this.config.get<string>('ENGINE_URL', 'http://engine:8000');
+    const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 8000);
-      const res = await fetch(`${engineUrl}/portfolio/state/${portfolioId}`, { signal: ctrl.signal });
+      const res = await fetch(`${engineUrl}/portfolio/state/${portfolioId}`,
+        { signal: ctrl.signal, headers: { 'X-Engine-Key': engineKey } });
       clearTimeout(t);
       if (res.ok) return await res.json();
     } catch {}
@@ -71,10 +73,12 @@ export class PortfoliosService {
     const db = rows[0] ?? null;
     let engine: any = null;
     const engineUrl = this.config.get<string>('ENGINE_URL', 'http://engine:8000');
+    const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 5000);
-      const res = await fetch(`${engineUrl}/portfolio/execution-status`, { signal: ctrl.signal });
+      const res = await fetch(`${engineUrl}/portfolio/execution-status`,
+        { signal: ctrl.signal, headers: { 'X-Engine-Key': engineKey } });
       clearTimeout(t);
       if (res.ok) engine = await res.json();
     } catch {}
