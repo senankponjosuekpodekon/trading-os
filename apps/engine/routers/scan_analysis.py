@@ -80,13 +80,23 @@ router = APIRouter()
 def _report_rejection(*, symbol: str, timeframe: str, direction: str,
                       layer: str, reason: str, asset_type=None,
                       entry=None, strategy=None, quality_score=None,
-                      metadata=None) -> None:
+                      metadata=None, stop_loss=None, take_profit=None,
+                      price_source=None) -> None:
     """Persiste chaque rejet du pipeline (batch DB via scan_persistence).
 
     Sans ce journal, les signaux neutralisés par le gate sont invisibles :
     on ne peut pas mesurer où les SELL disparaissent ni quelle couche
     filtre quoi. Best-effort : un échec ne doit jamais casser le scan.
+    SL/TP/price_source passent dans metadata — sinon un rejet ne peut
+    pas être rejoué pour comparer "bloqués vs passés".
     """
+    md = dict(metadata or {})
+    if stop_loss is not None:
+        md["stop_loss"] = stop_loss
+    if take_profit is not None:
+        md["take_profit"] = take_profit
+    if price_source is not None:
+        md["price_source"] = price_source
     try:
         from routers.scan_persistence import queue_gate_rejection
         queue_gate_rejection({
@@ -100,7 +110,7 @@ def _report_rejection(*, symbol: str, timeframe: str, direction: str,
             "strategy_name": (strategy or {}).get("name"),
             "entry_price": entry,
             "quality_score": quality_score,
-            "metadata": metadata or {},
+            "metadata": md,
         })
     except Exception:
         pass
@@ -173,6 +183,8 @@ def analyze_candles(
                     entry=_syn_result.get("entry_price"),
                     strategy=strategy,
                     quality_score=_syn_gate.get("quality_score"),
+                    stop_loss=_syn_result.get("stop_loss"),
+                    take_profit=_syn_result.get("take_profit_1"),
                 )
             _syn_result["signal"] = "NEUTRAL"
             _syn_result["confidence"] = 0
@@ -1193,6 +1205,8 @@ def analyze_candles(
                 reason=f"Liquidité insuffisante (score={_final_liquidity['score']})",
                 asset_type=asset_type, entry=entry,
                 strategy=strategy,
+                stop_loss=sl, take_profit=tp1,
+                price_source=getattr(df, "attrs", {}).get("provider"),
             )
             signal = "NEUTRAL"
             confidence = 0
@@ -1207,6 +1221,8 @@ def analyze_candles(
             reason=str(_red_flags.get("warning") or "Projet à risque extrême"),
             asset_type=asset_type, entry=entry, strategy=strategy,
             metadata={"red_flags": _red_flags.get("red_flags", [])},
+            stop_loss=sl, take_profit=tp1,
+            price_source=getattr(df, "attrs", {}).get("provider"),
         )
         signal = "NEUTRAL"
         confidence = 0
@@ -1253,6 +1269,8 @@ def analyze_candles(
                 strategy=strategy,
                 quality_score=_quality_gate.get("quality_score"),
                 metadata={"quality_flags": _quality_gate.get("quality_flags", [])},
+                stop_loss=sl, take_profit=tp1,
+                price_source=getattr(df, "attrs", {}).get("provider"),
             )
         signal = "NEUTRAL"
         confidence = 0

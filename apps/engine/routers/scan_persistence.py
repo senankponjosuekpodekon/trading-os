@@ -98,6 +98,11 @@ async def _queue_scan_for_batch(result: dict, timeframe: str) -> None:
 
 _rej_batch: list[dict] = []
 _rej_batch_lock = asyncio.Lock()
+# Dédup : le même setup rejeté à chaque cycle de scan produirait une
+# ligne par cycle (observé : 427 lignes / 57 setups ≈ ×7.5). On garde
+# une ligne par (symbol, timeframe, direction, layer) par fenêtre.
+_rej_seen: dict[tuple, float] = {}
+REJ_DEDUP_TTL = 1800  # s — un rejet persistant est ré-émis toutes les 30 min
 
 
 def queue_gate_rejection(rejection: dict) -> None:
@@ -107,9 +112,20 @@ def queue_gate_rejection(rejection: dict) -> None:
     atomique sous le GIL ; le flush recopie le batch sous lock.
     Champs attendus : symbol, timeframe, direction, layer, reason,
     asset_type, strategy_id, strategy_name, entry_price, quality_score,
-    metadata. Persiste chaque rejet du pipeline — sans ça, les SELL
+    metadata (inclut stop_loss/take_profit/price_source pour rejouer le
+    setup). Persiste chaque rejet du pipeline — sans ça, les SELL
     disparus et les couches qui filtrent ne sont pas mesurables.
     """
+    key = (rejection.get("symbol"), rejection.get("timeframe"),
+           rejection.get("direction"), rejection.get("layer"))
+    now = time.monotonic()
+    if now - _rej_seen.get(key, -REJ_DEDUP_TTL) < REJ_DEDUP_TTL:
+        return
+    _rej_seen[key] = now
+    if len(_rej_seen) > 5000:  # borne mémoire — purge les clés expirées
+        for k in [k for k, t in _rej_seen.items()
+                  if now - t >= REJ_DEDUP_TTL]:
+            del _rej_seen[k]
     _rej_batch.append(rejection)
     if len(_rej_batch) > 2000:
         _rej_batch[:] = _rej_batch[-2000:]
