@@ -74,6 +74,7 @@ model User {
   passwordResetToken       String?        @map("password_reset_token")
   passwordResetTokenExpires DateTime?     @map("password_reset_token_expires")
   refreshTokenVersion      Int            @default(0) @map("refresh_token_version")
+  lastLoginAt              DateTime?      @map("last_login_at")
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt
 

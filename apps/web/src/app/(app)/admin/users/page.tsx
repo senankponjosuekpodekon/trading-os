@@ -13,6 +13,13 @@ interface AdminUser {
   isActive: boolean;
   timezone: string;
   createdAt: string;
+  lastLoginAt: string | null;
+  notificationPreference?: {
+    pushEnabled: boolean;
+    telegramEnabled: boolean;
+    emailEnabled: boolean;
+    minConfidence: number;
+  } | null;
   _count: { portfolios: number; strategies: number };
 }
 
@@ -56,6 +63,24 @@ export default function AdminUsersPage() {
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
   });
+
+  const notifMutation = useMutation({
+    mutationFn: async ({ id, ...body }: { id: string; pushEnabled?: boolean }) => {
+      const { data } = await api.patch(`/admin/users/${id}/notifications`, body);
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+  });
+
+  const lastLoginLabel = (iso: string | null) => {
+    if (!iso) return 'Jamais';
+    const d = new Date(iso);
+    const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+    if (days === 0) return `aujourd'hui ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+    if (days === 1) return 'hier';
+    if (days < 30) return `il y a ${days}j`;
+    return `il y a ${Math.floor(days / 30)} mois`;
+  };
 
   if (user?.role !== 'ADMIN' && user?.role !== 'SUPER_ADMIN') {
     return (
@@ -106,7 +131,8 @@ export default function AdminUsersPage() {
                   <th className="pb-3 pr-4">Statut</th>
                   <th className="pb-3 pr-4">Portefeuilles</th>
                   <th className="pb-3 pr-4">Stratégies</th>
-                  <th className="pb-3 pr-4">Créé le</th>
+                  <th className="pb-3 pr-4">Dernier login</th>
+                  <th className="pb-3 pr-4">Push</th>
                   <th className="pb-3">Actions</th>
                 </tr>
               </thead>
@@ -136,7 +162,24 @@ export default function AdminUsersPage() {
                     </td>
                     <td className="py-3 pr-4 text-gray-400">{u._count.portfolios}</td>
                     <td className="py-3 pr-4 text-gray-400">{u._count.strategies}</td>
-                    <td className="py-3 pr-4 text-gray-500 text-xs">{new Date(u.createdAt).toLocaleDateString()}</td>
+                    <td className={`py-3 pr-4 text-xs ${u.lastLoginAt ? 'text-gray-400' : 'text-gray-600'}`}
+                        title={u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('fr-FR') : 'Jamais connecté'}>
+                      {lastLoginLabel(u.lastLoginAt)}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <button
+                        onClick={() => notifMutation.mutate({ id: u.id, pushEnabled: !(u.notificationPreference?.pushEnabled ?? false) })}
+                        disabled={notifMutation.isPending}
+                        className={`text-xs px-2 py-1 rounded border transition ${
+                          u.notificationPreference?.pushEnabled
+                            ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
+                            : 'border-gray-700 text-gray-500 hover:bg-gray-800'
+                        }`}
+                        title={u.notificationPreference?.pushEnabled ? 'Push activé — cliquer pour couper' : 'Push désactivé — cliquer pour activer'}
+                      >
+                        {u.notificationPreference?.pushEnabled ? 'ON' : 'OFF'}
+                      </button>
+                    </td>
                     <td className="py-3">
                       <select
                         value={u.role}

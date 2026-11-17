@@ -34,13 +34,22 @@ export class NotificationPreferenceService {
 
   async findPushSubscribed() {
     return this.systemDb.notificationPreference.findMany({
-      where: { pushEnabled: true, pushSubscription: { not: Prisma.DbNull } },
+      where: {
+        pushEnabled: true,
+        pushSubscription: { not: Prisma.DbNull },
+        // Compte désactivé → plus de push : la sub FCM resterait valide
+        // côté Google même sans login possible.
+        user: { isActive: true },
+      },
       select: { userId: true, pushSubscription: true, minConfidence: true },
     });
   }
 
   async findAllUserIds(): Promise<string[]> {
-    const users = await this.systemDb.user.findMany({ select: { id: true } });
+    const users = await this.systemDb.user.findMany({
+      where: { isActive: true },
+      select: { id: true },
+    });
     return users.map((u) => u.id);
   }
 

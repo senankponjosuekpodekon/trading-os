@@ -100,7 +100,7 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { failedLoginAttempts: 0, lockedUntil: null },
+      data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
     const tokens = await this.generateTokenPair(user.id, user.email, user.role, undefined, user.refreshTokenVersion);
