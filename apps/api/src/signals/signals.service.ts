@@ -372,6 +372,12 @@ export class SignalsService {
     if ((result.confidence ?? 0) < 70) return null;
     try {
       const saved = await this.persistence.saveSignals([result], '*');
+      // Déclencher le pass 2 comme dans le chemin cron — sinon les signaux
+      // ingestés sans sentiment restent sentiment_pending à vie et ne sont
+      // jamais notifiés (bug : aucun push pour les signaux warmup).
+      setImmediate(() => Promise.resolve(
+        this.persistence.enrichSentimentPass2(saved, [result], '*'),
+      ).catch(() => {}));
       if (saved.length > 0) {
         this.logger.log(
           `ingestSignal: ${result.signal} ${result.symbol} conf=${result.confidence} → Signal ${saved[0].id}`,

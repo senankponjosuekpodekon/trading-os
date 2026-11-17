@@ -555,7 +555,29 @@ export class SignalPersistenceService {
       if (!meta.sentiment_pending) continue;  // déjà enrichi au pass 1
 
       const hasSentiment = !!(raw.news_sentiment || raw.scraper_sentiment);
-      if (!hasSentiment) continue;  // pas de sentiment disponible, on laisse
+
+      // Pas de sentiment disponible → rien qui puisse invalider le signal :
+      // on clôture sentiment_pending et on notifie quand même (sinon les
+      // signaux sans news — warmup/ingest — ne sont JAMAIS notifiés).
+      if (!hasSentiment) {
+        await this.prisma.signal.update({
+          where: { id: signal.id },
+          data: {
+            metadata: { ...meta, sentiment_pending: false },
+          },
+        });
+        this.alertService.sendSignal(alertUserId, {
+          symbol: sym,
+          signal: raw.signal,
+          confidence: signal.confidence,
+          timeframe: raw.timeframe,
+          opportunityScore: this._opportunityScore(raw),
+          expectedMove: (signal.metadata as any)?.expected_move_summary ?? undefined,
+          mlConfidence: (signal.metadata as any)?.ml_confidence ?? undefined,
+          mlRegime: (signal.metadata as any)?.ml_regime ?? undefined,
+        });
+        continue;
+      }
 
       // Confidence finale après sentiment
       const newConf = raw.confidence;
