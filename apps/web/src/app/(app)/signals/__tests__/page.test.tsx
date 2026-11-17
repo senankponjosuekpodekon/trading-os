@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import SignalsPage from '../page';
+import { SignalTrackingSheet } from '@/components/signals/SignalTrackingSheet';
 import { createTestQueryClient } from '@/lib/test-utils';
 import { useTradingStore } from '@/store/trading.store';
 import { ToastProvider } from '@/components/ui/ToastProvider';
@@ -47,6 +48,34 @@ const mockSignals = [
     metadata: {},
   },
 ];
+
+describe('SignalTrackingSheet paper decisions', () => {
+  const props = { signalId: 's1', symbol: 'SOL/USDT', signal: 'BUY', open: true, onClose: jest.fn() };
+  const event = { id: 'e1', type: 'ENTRY_HIT', price: '73.71', sizePct: '100', candleTime: '2026-11-17T14:00:00Z', resolvedBy: 'CANDLE_CLOSE' };
+
+  it('distinguishes theoretical tracking from confirmed paper execution', async () => {
+    (api.get as jest.Mock).mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/execution') ? [event] : { points: [] } }));
+    render(<SignalTrackingSheet {...props} />);
+    expect(await screen.findByText(/exécution paper non confirmée/)).toBeInTheDocument();
+  });
+
+  it('shows persisted AutoPilot refusal reasons', async () => {
+    (api.get as jest.Mock).mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/execution')
+      ? [{ ...event, metadata: { autopilot: { reason: 'GATE_UNAVAILABLE', mode: 'PAPER' } } }] : { points: [] } }));
+    render(<SignalTrackingSheet {...props} />);
+    expect(await screen.findByText(/contrôle de risque indisponible/)).toBeInTheDocument();
+  });
+
+  it('clears stale errors when changing signal', async () => {
+    (api.get as jest.Mock).mockRejectedValue(new Error('unavailable'));
+    const { rerender } = render(<SignalTrackingSheet {...props} />);
+    expect(await screen.findByText('Impossible de charger le suivi')).toBeInTheDocument();
+    (api.get as jest.Mock).mockImplementation((url: string) => Promise.resolve({ data: url.endsWith('/execution') ? [event] : { points: [] } }));
+    rerender(<SignalTrackingSheet {...props} signalId="s2" />);
+    expect(await screen.findByText(/exécution paper non confirmée/)).toBeInTheDocument();
+    expect(screen.queryByText('Impossible de charger le suivi')).not.toBeInTheDocument();
+  });
+});
 
 describe('SignalsPage', () => {
   beforeEach(() => {

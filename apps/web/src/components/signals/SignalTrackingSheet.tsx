@@ -11,6 +11,7 @@ interface ExecutionEvent {
   sizePct: string;
   candleTime: string;
   resolvedBy: string;
+  metadata?: { autopilot?: { reason: string; mode: string; recordedAt: string } };
 }
 
 interface SignalTrackingSheetProps {
@@ -37,6 +38,31 @@ const typeLabel: Record<string, string> = {
   TP3_HIT: 'TP3 atteint',
   EXPIRED: 'Signal expiré',
   MANUAL_CLOSE: 'Clôture manuelle',
+};
+
+const autopilotLabel: Record<string, string> = {
+  PAPER_OPENED: 'Position paper ouverte',
+  PAPER_CLOSED: 'Position paper clôturée',
+  PAPER_PARTIAL_CLOSED: 'Clôture partielle paper effectuée',
+  NO_OPEN_POSITION: 'Aucune position paper ouverte à clôturer',
+  ALREADY_PROCESSED: 'Événement paper déjà traité',
+  DISABLED: 'Entrée ignorée : AutoPilot désactivé',
+  LOW_CONFIDENCE: 'Confiance sous le seuil AutoPilot',
+  INVALID_CONFIDENCE: 'Confiance ou seuil invalide',
+  INVALID_DIRECTION: 'Direction invalide',
+  INVALID_EVENT_PRICE: 'Prix de suivi invalide',
+  INVALID_STOP: 'Stop invalide',
+  NOT_PAPER_PORTFOLIO: 'Refus : portefeuille non paper',
+  INVALID_CAPITAL: 'Capital invalide',
+  INVALID_SIZE: 'Taille de position invalide',
+  INVALID_OPEN_RISK: 'Risque des positions existantes non calculable',
+  KILL_SWITCH: 'Entrées suspendues : limite de drawdown',
+  ASSET_ALREADY_OPEN: 'Une position existe déjà sur cet actif',
+  MAX_POSITIONS: 'Nombre maximal de positions atteint',
+  EXPOSURE_LIMIT: 'Limite de risque global atteinte',
+  GATE_UNAVAILABLE: 'Entrée refusée : contrôle de risque indisponible',
+  GATE_REJECTED: 'Entrée refusée par le contrôle de risque',
+  PROCESSING_ERROR: 'Erreur de traitement AutoPilot : vérification nécessaire',
 };
 
 const statusLabel: Record<string, string> = {
@@ -71,14 +97,19 @@ export function SignalTrackingSheet({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     setLoading(true);
+    setError(null);
+    setEvents([]);
+    setPnlCurve([]);
     api.get(`/signals/${signalId}/execution`)
-      .then(res => setEvents(res.data))
-      .catch(() => setError('Impossible de charger le suivi'))
-      .finally(() => setLoading(false));
+      .then(res => { if (!cancelled) setEvents(res.data); })
+      .catch(() => { if (!cancelled) setError('Impossible de charger le suivi'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     api.get(`/signals/${signalId}/pnl-curve`)
-      .then(res => setPnlCurve(res.data?.points ?? []))
-      .catch(() => setPnlCurve([]));
+      .then(res => { if (!cancelled) setPnlCurve(res.data?.points ?? []); })
+      .catch(() => { if (!cancelled) setPnlCurve([]); });
+    return () => { cancelled = true; };
   }, [open, signalId]);
 
   if (!open) return null;
@@ -229,6 +260,13 @@ export function SignalTrackingSheet({
                 <span>Taille {parseFloat(ev.sizePct)}%</span>
                 <span className="text-gray-600">{ev.resolvedBy}</span>
               </div>
+              {ev.metadata?.autopilot ? (
+                <p className="mt-2 text-xs text-amber-300">
+                  AutoPilot paper : {autopilotLabel[ev.metadata.autopilot.reason] ?? ev.metadata.autopilot.reason}
+                </p>
+              ) : ev.type === 'ENTRY_HIT' && (
+                <p className="mt-2 text-xs text-gray-500">Suivi théorique — exécution paper non confirmée.</p>
+              )}
             </div>
           ))}
           {!loading && events.length === 0 && !error && (

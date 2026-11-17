@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -11,11 +11,15 @@ export const REGISTRATION_FLAG = 'REGISTRATION_ENABLED';
  * L'état survit aux restarts — contrairement à un boolean en mémoire.
  */
 @Injectable()
-export class FeatureFlagsService {
+export class FeatureFlagsService implements OnModuleDestroy {
   private redis: Redis;
 
   constructor(private config: ConfigService) {
     this.redis = new Redis(this.config.get<string>('REDIS_URL', 'redis://localhost:6379'));
+  }
+
+  onModuleDestroy(): void {
+    this.redis.disconnect();
   }
 
   private flagKey(name: string): string {

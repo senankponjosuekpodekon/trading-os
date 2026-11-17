@@ -244,12 +244,12 @@ export class SignalTrackerService {
       });
     }
 
-    await this.recalculateOutcome(signalId, direction, worstPrice, newCandles);
-
     // AutoPilot : portfolio PAPER piloté par les events réels (best-effort)
     for (const ev of newEvents) {
       await this.autoTrader.handleSignalEvent(signal, ev.type as any, ev.price);
     }
+
+    await this.recalculateOutcome(signalId, direction, worstPrice, newCandles);
   }
 
   // ATR(14) des bougies récentes → taille de zone proportionnelle à la volatilité
