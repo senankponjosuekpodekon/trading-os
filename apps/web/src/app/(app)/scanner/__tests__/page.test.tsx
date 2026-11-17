@@ -160,11 +160,11 @@ describe('ScannerPage', () => {
     expect(document.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
   });
 
-  it('sorts signals by opportunity score descending', async () => {
+  it('sorts signals by creation date descending by default', async () => {
     mockApiGet({
       signals: [
-        { id: '1', signal: 'BUY', confidence: 60, timeframe: '1h', asset: { symbol: 'ETH/USDT' }, entryPrice: '3000', stopLoss: '2950', takeProfit1: '3100', metadata: {} },
-        { id: '2', signal: 'BUY', confidence: 90, timeframe: '1h', asset: { symbol: 'BTC/USDT' }, entryPrice: '60000', stopLoss: '59000', takeProfit1: '63000', metadata: {} },
+        { id: '1', signal: 'BUY', confidence: 60, timeframe: '1h', asset: { symbol: 'ETH/USDT' }, entryPrice: '3000', stopLoss: '2950', takeProfit1: '3100', metadata: {}, createdAt: '2026-01-01T10:00:00Z' },
+        { id: '2', signal: 'BUY', confidence: 90, timeframe: '1h', asset: { symbol: 'BTC/USDT' }, entryPrice: '60000', stopLoss: '59000', takeProfit1: '63000', metadata: {}, createdAt: '2026-01-02T10:00:00Z' },
       ],
     });
 

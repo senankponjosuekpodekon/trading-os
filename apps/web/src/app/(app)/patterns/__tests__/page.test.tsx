@@ -54,12 +54,12 @@ describe('PatternsPage', () => {
 
   it('renders pattern stats and post-trade analysis', async () => {
     (api.get as jest.Mock).mockImplementation((url: string) => {
-      if (url === '/signals/pattern-stats') {
+      if (url.startsWith('/signals/pattern-stats')) {
         return Promise.resolve({
           data: {
             total: 2,
             patterns: {
-              double_top: { trades: 2, wins: 1, losses: 1, pnl: 5, winRate: 50, avgDuration: 4, avgConfluence: 0.75, avgRealizedPnl: 1.5, avgExpectedPnl: 2.0 },
+              double_top: { trades: 2, resolved: 2, wins: 1, losses: 1, pnl: 5, winRate: 50, avgDuration: 4, avgConfluence: 0.75, avgRealizedPnl: 1.5, avgExpectedPnl: 2.0 },
             },
           },
         });

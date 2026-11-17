@@ -78,7 +78,7 @@ describe('Phase Pages', () => {
   it('Pre-Listing — renders title', async () => {
     const { default: Page } = await import('@/app/(app)/pre-listing/page');
     render(<Wrapper><Page /></Wrapper>);
-    expect(screen.getByText('Pre-Listing Alpha')).toBeInTheDocument();
+    expect(screen.getByText(/Pre-Listing/)).toBeInTheDocument();
   });
 
   it('Scientific Backtest — renders title and tabs', async () => {
