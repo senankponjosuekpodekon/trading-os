@@ -13,6 +13,7 @@ logger = get_logger(__name__)
 DAILY_PULSE_INTERVAL = 3600  # 1h check, but only generates once per day at 6h UTC
 HIDDEN_GEMS_INTERVAL = 1800  # 30 min
 REBALANCE_INTERVAL = 3600 * 6  # 6h
+PRELISTING_INTERVAL = 3600  # 1h — Early Alpha broadcasts (score ≥80, dedup 72h)
 
 
 async def cron_daily_pulse():
@@ -65,6 +66,26 @@ async def cron_majors_tracker():
             logger.warning("cron_majors_tracker_failed", error=str(exc))
 
         await asyncio.sleep(HIDDEN_GEMS_INTERVAL)
+
+
+async def cron_prelisting_alpha():
+    """Scan Pre-Listing & Just-Listed Alpha every hour.
+
+    Sans ce cron, discover_pre_listing() ne tournait qu'à l'ouverture de la
+    page — les broadcasts Early Alpha (score ≥80) ne partaient jamais en
+    arrière-plan.
+    """
+    while True:
+        try:
+            from routers.pre_listing import discover_pre_listing
+            logger.info("cron_prelisting_start")
+            result = await discover_pre_listing()
+            logger.info("cron_prelisting_done",
+                        projects=len(result.get("projects", [])),
+                        high_score=result.get("high_score_count"))
+        except Exception as exc:
+            logger.warning("cron_prelisting_failed", error=str(exc))
+        await asyncio.sleep(PRELISTING_INTERVAL)
 
 
 async def cron_gem_paper_trader():
@@ -354,6 +375,7 @@ async def run_all_crons():
     await asyncio.gather(
         cron_daily_pulse(),
         cron_hidden_gems(),
+        cron_prelisting_alpha(),
         cron_majors_tracker(),
         cron_gem_paper_trader(),
         cron_gem_model(),

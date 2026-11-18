@@ -227,6 +227,7 @@ async def _record_gem_snapshot(t: Dict[str, Any]) -> None:
             "price": t.get("price", 0),
             "liquidity": t.get("liquidity", 0),
             "volume_24h": t.get("volume_24h", 0),
+            "symbol": t.get("symbol"),
             "holders": oc.get("holder_count", 0),
             "top10_pct": oc.get("top10_pct", 0),
             "buys": t.get("buys_24h", 0),
@@ -234,6 +235,7 @@ async def _record_gem_snapshot(t: Dict[str, Any]) -> None:
             "buzz": t.get("social_buzz", 0),
             "narr_mom": t.get("narrative_momentum"),
             "creator": oc.get("creator_address"),
+            "honeypot": bool(oc.get("honeypot")),
             # Features de calibration : le profil winner mesuré (x3+) était
             # vol ~210k, ~800 holders, buy/sell ~1.0 — on les rend entraînables.
             "fdv": t.get("fdv", 0),
@@ -1489,6 +1491,70 @@ async def discover_hidden_gems(
         )
         for c in top_gems if c.moonshot
     ), return_exceptions=True)
+
+    # Réévaluation moonshot sur les tokens déjà trackés : ils sortent du feed
+    # des paires fraîches avant que leur trajectoire ne mûrisse (≥6h), donc
+    # ne sont plus jamais candidats — leur flag ne pouvait jamais se lever.
+    tracked_broadcasts = 0
+    try:
+        from utils.cache import cache
+        r = await cache.client()
+        tracked = await r.smembers(_GEM_TRACKED_SET)
+        candidate_addrs = {c.token_address for c in top_gems if c.token_address}
+
+        async def _eval_tracked(entry: str):
+            if isinstance(entry, bytes):
+                entry = entry.decode()
+            chain, _, addr = (entry or "").partition(":")
+            if not addr or addr in candidate_addrs:
+                return None
+            history = await _load_gem_history(chain, addr)
+            if not history:
+                return None
+            traj = _compute_trajectory(history)
+            _, _, _, moonshot = _score_trajectory(traj)
+            if not moonshot:
+                return None
+            latest = history[0]
+            if latest.get("honeypot"):
+                return None
+            return chain, addr, latest, traj
+
+        _res = await _asyncio.gather(
+            *(_eval_tracked(e) for e in tracked), return_exceptions=True)
+        # Plafond par cycle : on ne pousse que les 3 trajectoires les plus
+        # fortes pour éviter une rafale de push quand le backlog se déclenche.
+        flagged = sorted(
+            (x for x in _res if x),
+            key=lambda x: x[3].get("holder_growth_pct") or 0, reverse=True,
+        )[:3]
+        _sent = await _asyncio.gather(*(
+            broadcast_once(
+                f"moonshot:{chain}:{addr}",
+                f"🚀 Moonshot — {latest.get('symbol') or addr[:6]}…",
+                f"{latest.get('symbol') or 'Token'} ({chain}) : trajectoire explosive détectée. "
+                f"Holders {traj.get('holder_growth_pct'):+.0f}%/24h, "
+                f"buy ratio {round((traj.get('buy_ratio_avg') or 0) * 100)}% "
+                f"sur {traj.get('tracked_hours'):.0f}h de suivi",
+                {"type": "moonshot", "symbol": latest.get("symbol"),
+                 "chain": chain, "track": True, "price": latest.get("price"),
+                 "token_address": addr,
+                 "holder_growth_pct": traj.get("holder_growth_pct"),
+                 "buy_ratio_avg": traj.get("buy_ratio_avg"),
+                 "tracked_hours": traj.get("tracked_hours"),
+                 "url": f"https://dexscreener.com/{chain}/{addr}"},
+                cooldown_seconds=48 * 3600,
+            )
+            for chain, addr, latest, traj in flagged
+        ), return_exceptions=True)
+        tracked_broadcasts = sum(1 for x in _sent if x is True)
+    except Exception as exc:
+        logger.debug("moonshot_tracked_eval_failed", error=str(exc))
+
+    logger.info("hidden_gems_moonshot_eval",
+                candidates_moonshot=moonshots,
+                tracked_broadcasts=tracked_broadcasts,
+                candidates=len(candidates))
 
     # Brief analyste LLM par gem shortlistée (cache 6h/token) — le commentaire
     # qualitatif qu'un coach écrirait, généré sur les données mesurées.
