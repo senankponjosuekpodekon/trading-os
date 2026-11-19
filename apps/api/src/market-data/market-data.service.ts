@@ -147,7 +147,7 @@ export class MarketDataService {
         .filter((item: any) => ['High', 'Medium'].includes(item.impact))
         .map((item: any) => ({
           date: String(item.date),
-          time: String(item.time),
+          time: item.time ? String(item.time) : '',
           currency: String(item.country),
           impact: String(item.impact),
           title: String(item.title),

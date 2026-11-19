@@ -124,11 +124,19 @@ export default function EconomicCalendarPage() {
             <div className="px-4 py-12 text-center text-gray-500 text-sm">Aucun événement ne correspond au filtre.</div>
           )}
           <div className="divide-y divide-gray-800">
-            {filtered.map((e, i) => (
+            {filtered.map((e, i) => {
+              // e.date est un ISO complet (ex. 2026-11-15T16:30:00-05:00) ;
+              // e.time peut être absent — l'heure se lit alors dans le ISO.
+              const dt = new Date(e.date);
+              const invalid = isNaN(dt.getTime());
+              const timeLabel = e.time && e.time !== '—'
+                ? e.time
+                : invalid ? '' : dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+              return (
               <div key={i} className="grid grid-cols-12 gap-4 px-4 py-3 text-xs items-center hover:bg-gray-800/30 transition-colors">
                 <div className="col-span-3 text-gray-300">
-                  <span className="font-mono">{new Date(`${e.date}T00:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
-                  <span className="text-gray-600 ml-2">{e.time}</span>
+                  <span className="font-mono">{invalid ? '—' : dt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
+                  <span className="text-gray-600 ml-2">{timeLabel}</span>
                 </div>
                 <div className="col-span-2 text-white font-medium">{e.currency}</div>
                 <div className="col-span-3 text-gray-300 flex items-center gap-1.5">
@@ -141,7 +149,7 @@ export default function EconomicCalendarPage() {
                 <div className="col-span-1 text-right text-gray-400 font-mono">{e.forecast}</div>
                 <div className="col-span-1 text-right text-gray-500 font-mono">{e.previous}</div>
               </div>
-            ))}
+            );})}
           </div>
         </div>
       </div>
