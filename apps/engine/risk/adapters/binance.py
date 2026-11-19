@@ -3,6 +3,9 @@
 Env :
   BINANCE_API_KEY / BINANCE_API_SECRET — requis pour s'enregistrer
   BINANCE_TESTNET=1 (défaut) → testnet-futures ; 0 → prod RÉELLE
+  BINANCE_BASE_URL — hôte démo autorisé uniquement en mode testnet
+  (ex: https://demo-fapi.binance.com). Les ordres conditionnels passent
+  par /fapi/v1/algoOrder depuis la migration Binance du 09/12/2025.
 
 L'adapter place des ordres LIMIT au prix demandé (pas de market order
 aveugle — le slippage se mesure via requested vs fill).
@@ -25,10 +28,18 @@ logger = get_logger(__name__)
 
 _BASE_PROD = "https://fapi.binance.com"
 _BASE_TEST = "https://testnet.binancefuture.com"
+# Hôtes hors production acceptés : ancien testnet et Futures Demo actuel.
+_DEMO_HOSTS = {"testnet.binancefuture.com", "demo-fapi.binance.com"}
 
 
 class BinanceAdapter(VenueAdapter):
     venue = "FUTURES"
+
+    @staticmethod
+    def is_demo_base(base: str) -> bool:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(base)
+        return parsed.scheme == "https" and parsed.netloc in _DEMO_HOSTS
 
     def __init__(self, key: str, secret: str, base: str):
         self._key, self._secret, self._base = key, secret, base
@@ -48,7 +59,14 @@ class BinanceAdapter(VenueAdapter):
         testnet = os.getenv("BINANCE_TESTNET", "1") != "0"
         if not testnet:
             logger.warning("binance_adapter_LIVE_MODE")
-        return cls(key, secret, _BASE_TEST if testnet else _BASE_PROD)
+        base = _BASE_TEST if testnet else _BASE_PROD
+        override = os.getenv("BINANCE_BASE_URL", "")
+        if override:
+            if not testnet or not cls.is_demo_base(override):
+                logger.warning("binance_adapter_base_refused", base=override)
+            else:
+                base = override
+        return cls(key, secret, base)
 
     def _sign(self, params: dict) -> str:
         q = urlencode(params)
@@ -153,23 +171,28 @@ class BinanceAdapter(VenueAdapter):
 
         # Protection côté broker : SL/TP natifs Binance — survivent à un
         # crash de notre système (closePosition, trigger sur mark price).
+        # Depuis le 09/12/2025, les ordres conditionnels passent par
+        # POST /fapi/v1/algoOrder (algoType=CONDITIONAL, triggerPrice) ;
+        # /fapi/v1/order renvoie -4120 pour ces types.
         close_side = "SELL" if direction == "BUY" else "BUY"
         if stop_loss:
             try:
-                await self._post("/fapi/v1/order", {
+                await self._post("/fapi/v1/algoOrder", {
+                    "algoType": "CONDITIONAL",
                     "symbol": sym, "side": close_side,
                     "type": "STOP_MARKET", "closePosition": "true",
-                    "stopPrice": self._fmt(stop_loss, f.get("tick_size") or 1e-8),
+                    "triggerPrice": self._fmt(stop_loss, f.get("tick_size") or 1e-8),
                     "workingType": "MARK_PRICE",
                 })
             except Exception as e:
                 logger.error("binance_stop_failed", symbol=sym, error=str(e))
         if take_profit:
             try:
-                await self._post("/fapi/v1/order", {
+                await self._post("/fapi/v1/algoOrder", {
+                    "algoType": "CONDITIONAL",
                     "symbol": sym, "side": close_side,
                     "type": "TAKE_PROFIT_MARKET", "closePosition": "true",
-                    "stopPrice": self._fmt(take_profit, f.get("tick_size") or 1e-8),
+                    "triggerPrice": self._fmt(take_profit, f.get("tick_size") or 1e-8),
                     "workingType": "MARK_PRICE",
                 })
             except Exception as e:
