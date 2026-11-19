@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Settings, Cpu } from 'lucide-react';
+import { Mt5ReadStatus } from '@/components/Mt5ReadStatus';
 
 interface CronConfig {
   name: string;
@@ -104,6 +105,8 @@ export default function AdminOpsPage() {
         <Cpu className="w-6 h-6 text-emerald-400" />
         <h1 className="text-2xl font-bold text-white">Gestion des crons</h1>
       </div>
+
+      <Mt5ReadStatus />
 
       {loading && <p className="text-gray-500">Chargement…</p>}
       {error && <p className="text-red-400">{error}</p>}

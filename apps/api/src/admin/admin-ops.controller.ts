@@ -10,6 +10,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { CronConfigService } from './cron-config.service';
 import { MaintenanceService } from './maintenance.service';
+import { Mt5ReadService } from './mt5-read.service';
 
 const execAsync = promisify(exec);
 
@@ -23,11 +24,17 @@ export class AdminOpsController {
     private config: ConfigService,
     private cronConfig: CronConfigService,
     private maintenanceService: MaintenanceService,
+    private mt5ReadService: Mt5ReadService,
   ) {}
 
   @Get('health')
   async health() {
     return this.healthService.getCronStatus();
+  }
+
+  @Get('mt5')
+  async mt5() {
+    return this.mt5ReadService.snapshot();
   }
 
   @Get('db-stats')

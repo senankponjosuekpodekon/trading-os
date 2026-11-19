@@ -5,6 +5,11 @@ import { SystemHealthService } from '../system-health/system-health.service';
 import { ConfigService } from '@nestjs/config';
 import { CronConfigService } from './cron-config.service';
 import { MaintenanceService } from './maintenance.service';
+import { Mt5ReadService } from './mt5-read.service';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { UserRole } from '@prisma/client';
 
 describe('AdminOpsController', () => {
   let controller: AdminOpsController;
@@ -35,6 +40,7 @@ describe('AdminOpsController', () => {
       providers: [
         { provide: PrismaService, useValue: prisma },
         { provide: SystemHealthService, useValue: healthService },
+        { provide: Mt5ReadService, useValue: { snapshot: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', executionEnabled: false }) } },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('') } },
         { provide: CronConfigService, useValue: { getAll: jest.fn().mockResolvedValue([]), setEnabled: jest.fn() } },
         { provide: MaintenanceService, useValue: { isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn(), isRegistrationEnabled: jest.fn().mockReturnValue(true), setRegistrationEnabled: jest.fn() } },
@@ -42,6 +48,16 @@ describe('AdminOpsController', () => {
     }).compile();
 
     controller = module.get(AdminOpsController);
+  });
+
+  it('keeps MT5 supervision behind JWT and admin roles', () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, AdminOpsController)).toEqual([JwtAuthGuard, RolesGuard]);
+    expect(Reflect.getMetadata('roles', AdminOpsController)).toEqual([UserRole.ADMIN, UserRole.SUPER_ADMIN]);
+    expect(Reflect.getMetadata('roles', AdminOpsController.prototype.mt5)).toBeUndefined();
+  });
+
+  it('returns the separate read-only MT5 snapshot', async () => {
+    expect(await controller.mt5()).toEqual({ status: 'NOT_CONFIGURED', executionEnabled: false });
   });
 
   it('should return db stats', async () => {

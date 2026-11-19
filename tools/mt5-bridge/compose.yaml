@@ -1,0 +1,49 @@
+name: trading-mt5-sandbox
+services:
+  mt5:
+    build:
+      context: .
+    image: trading-os-mt5-sandbox:local
+    restart: unless-stopped
+    env_file:
+      - path: .env.identity.local
+        required: false
+    ports:
+      - "127.0.0.1:16901:6901"
+      - "127.0.0.1:15555:5555"
+    environment:
+      VNC_PW: ${MT5_SANDBOX_DESKTOP_PASSWORD:?Set a dedicated desktop password}
+      MT5_BRIDGE_TOKEN: ${MT5_SANDBOX_BRIDGE_TOKEN:?Set a dedicated bridge token}
+      MT5_READ_ONLY: "1"
+      MT5_LOGIN: ""
+      MT5_PASSWORD: ""
+      MT5_SERVER: ""
+    networks:
+      default:
+      mt5_read:
+        aliases: [mt5-read]
+    volumes:
+      - desktop:/home/kasm-user
+    healthcheck:
+      test: ["CMD", "python3", "/opt/mt5-bridge/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5m
+      retries: 3
+    shm_size: "512mb"
+    mem_limit: 2g
+    cpus: 1.5
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  desktop:
+networks:
+  mt5_read:
+    external: true
+    name: trading-mt5-read

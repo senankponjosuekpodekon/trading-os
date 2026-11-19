@@ -85,7 +85,21 @@ def _filling(info) -> int:
 
 
 def _auth():
-    return request.headers.get("Authorization") == f"Bearer {TOKEN}"
+    import hmac
+    return hmac.compare_digest(
+        request.headers.get("Authorization", ""), f"Bearer {TOKEN}")
+
+
+def _account_mode(acct):
+    return {0: "DEMO", 1: "CONTEST", 2: "REAL"}.get(
+        getattr(acct, "trade_mode", None), "UNKNOWN")
+
+
+def _identity_matches(acct):
+    login = os.getenv("MT5_EXPECTED_LOGIN", os.getenv("MT5_LOGIN", ""))
+    server = os.getenv("MT5_EXPECTED_SERVER", os.getenv("MT5_SERVER", ""))
+    return bool(acct and login and server
+                and str(acct.login) == login and acct.server == server)
 
 
 def _ensure() -> bool:
@@ -124,10 +138,15 @@ def _ensure() -> bool:
 def guard():
     if not _auth():
         return jsonify({"error": "unauthorized"}), 401
+    if request.method != "GET" and os.getenv("MT5_READ_ONLY", "1") != "0":
+        return jsonify({"error": "read_only"}), 403
     if request.path != "/health":
         try:
             if not _ensure():
                 return jsonify({"error": "mt5_disconnected"}), 503
+            with _locked():
+                if not _identity_matches(mt5.account_info()):
+                    return jsonify({"error": "account_identity_mismatch"}), 503
         except _Mt5Busy:
             return _busy()
 
@@ -152,11 +171,15 @@ def health():
                      and acct is not None and acct.login)
     return {
         "connected": connected,
+        "identity_matches": _identity_matches(acct),
+        "read_only": os.getenv("MT5_READ_ONLY", "1") != "0",
+        "ready_for_read": connected and _identity_matches(acct),
         "initialized": ok,
         "last_error": err,
         "terminal": str(info.build) if info else None,
         "trade_allowed": bool(info.trade_allowed) if info else None,
         "account_login": acct.login if acct else None,
+        "account_mode": _account_mode(acct),
         "server": acct.server if acct else None,
         "balance": acct.balance if acct and connected else None,
     }
@@ -173,14 +196,17 @@ def account():
         return {"error": "no_account"}, 404
     return {"equity": a.equity, "balance": a.balance, "margin": a.margin,
             "margin_free": a.margin_free, "currency": a.currency,
-            "leverage": a.leverage, "login": a.login, "server": a.server}
+            "leverage": a.leverage, "login": a.login, "server": a.server,
+            "account_mode": _account_mode(a)}
 
 
 @app.get("/positions")
 def positions():
     try:
         with _locked():
-            pos = mt5.positions_get() or []
+            pos = mt5.positions_get()
+            if pos is None:
+                return {"error": "positions_unavailable"}, 503
     except _Mt5Busy:
         return _busy()
     return jsonify([{
@@ -200,8 +226,12 @@ def quote(symbol):
             t = mt5.symbol_info_tick(symbol)
     except _Mt5Busy:
         return _busy()
-    if not t or t.bid == 0:
+    import math
+    if not t or not all(math.isfinite(v) and v > 0 for v in (t.bid, t.ask)) or t.ask < t.bid:
         return {"error": "no_tick"}, 404
+    age = time.time() - t.time
+    if not math.isfinite(age) or age < -5 or age > 60:
+        return {"error": "stale_tick"}, 503
     return {"bid": t.bid, "ask": t.ask, "time": t.time}
 
 

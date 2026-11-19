@@ -79,6 +79,7 @@ services:
     networks:
       - default
       - ollama_net
+      - mt5_read
     ports:
       # nginx tourne sur l'hôte et proxy_pass vers 127.0.0.1 — bind loopback
       # uniquement : les ports ne sont plus exposés sur l'IP publique.
@@ -153,3 +154,6 @@ networks:
   ollama_net:
     external:
       name: ollama_default
+  mt5_read:
+    external: true
+    name: trading-mt5-read
