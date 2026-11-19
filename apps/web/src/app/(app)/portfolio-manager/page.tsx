@@ -313,12 +313,14 @@ export default function PortfolioManagerPage() {
   const user = useAuthStore(s => s.user);
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
   const [mode, setMode] = useState<Mode>('PAPER');
+  const [tab, setTab] = useState<'personal' | 'autopilot'>('personal');
+  const showAutopilot = isAdmin && tab === 'autopilot';
   const { data: portfolios, isLoading } = useQuery<Portfolio[]>({
     queryKey: ['portfolios'],
     queryFn: async () => (await api.get('/portfolios')).data,
+    enabled: !showAutopilot,
   });
 
-  if (isLoading) return <PageSkeleton />;
   // La DB a accumulé des centaines de portfolios "Mon Portfolio" vides
   // (doublons). On déduplique par nom pour l'affichage — sinon la barre
   // de chips est inutilisable.
@@ -337,7 +339,7 @@ export default function PortfolioManagerPage() {
           <h1 className="text-2xl font-bold">Gestion de portefeuille</h1>
           <p className="text-sm text-gray-500 mt-1">État consolidé temps réel — marge, risque, clusters, ledger.</p>
         </div>
-        <div className="flex bg-gray-900 border border-gray-800 rounded-lg p-1">
+        {!showAutopilot && <div className="flex bg-gray-900 border border-gray-800 rounded-lg p-1">
           {(['PAPER', 'LIVE'] as Mode[]).map(m => (
             <button key={m} onClick={() => setMode(m)}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -345,32 +347,58 @@ export default function PortfolioManagerPage() {
               {m === 'PAPER' ? 'Demo' : 'Réel'}
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
-      <ExecutionPanel />
+      {isAdmin && <div role="tablist" aria-label="Portefeuille à superviser" className="flex flex-wrap gap-2 border-b border-gray-800 pb-2">
+        {(['personal', 'autopilot'] as const).map(key => {
+          const selected = key === (showAutopilot ? 'autopilot' : 'personal');
+          return <button key={key} id={`portfolio-tab-${key}`} role="tab" aria-selected={selected}
+            aria-controls={`portfolio-panel-${key}`} tabIndex={selected ? 0 : -1}
+            onClick={() => setTab(key)}
+            onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 'personal' : event.key === 'End' ? 'autopilot' : key === 'personal' ? 'autopilot' : 'personal';
+              setTab(next);
+              document.getElementById(`portfolio-tab-${next}`)?.focus();
+            }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium ${selected ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}>
+            {key === 'personal' ? 'Mon portefeuille' : 'AutoPilot système — Paper'}
+          </button>;
+        })}
+      </div>}
 
-      {mode === 'PAPER' && isAdmin && <AutopilotPortfolio />}
-
-      {!pf ? (
-        <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-10 text-center text-gray-500">
-          {mode === 'PAPER'
-            ? 'Aucun portefeuille paper personnel. La supervision AutoPilot système est réservée aux administrateurs.'
-            : 'Aucun portfolio Réel — l\'exécution live n\'est pas encore activée (phase C).'}
+      {showAutopilot ? (
+        <div id="portfolio-panel-autopilot" role="tabpanel" aria-labelledby="portfolio-tab-autopilot">
+          <AutopilotPortfolio />
         </div>
       ) : (
-        <div>
-          {list.length > 1 && (
-            <div className="flex gap-2 mb-4">
-              {list.map(p => (
-                <span key={p.id} className="text-xs px-2 py-1 bg-gray-800 rounded text-gray-400">{p.name}</span>
-              ))}
+        <div id="portfolio-panel-personal" role={isAdmin ? 'tabpanel' : undefined}
+          aria-labelledby={isAdmin ? 'portfolio-tab-personal' : undefined} className="space-y-6">
+          <ExecutionPanel />
+
+          {isLoading ? <PageSkeleton /> : !pf ? (
+            <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-10 text-center text-gray-500">
+              {mode === 'PAPER'
+                ? 'Aucun portefeuille paper personnel. La supervision AutoPilot système est réservée aux administrateurs.'
+                : 'Aucun portfolio Réel — l\'exécution live n\'est pas encore activée (phase C).'}
+            </div>
+          ) : (
+            <div>
+              {list.length > 1 && (
+                <div className="flex gap-2 mb-4">
+                  {list.map(p => (
+                    <span key={p.id} className="text-xs px-2 py-1 bg-gray-800 rounded text-gray-400">{p.name}</span>
+                  ))}
+                </div>
+              )}
+              <div className="mb-3 text-sm text-gray-500">
+                <span className="font-medium text-gray-300">{pf.name}</span> · {pf.currency}
+              </div>
+              <Dashboard portfolio={pf} />
             </div>
           )}
-          <div className="mb-3 text-sm text-gray-500">
-            <span className="font-medium text-gray-300">{pf.name}</span> · {pf.currency}
-          </div>
-          <Dashboard portfolio={pf} />
         </div>
       )}
     </div>
