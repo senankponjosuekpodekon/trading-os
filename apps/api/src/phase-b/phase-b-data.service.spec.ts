@@ -29,16 +29,19 @@ describe('PhaseBDataService', () => {
       of({
         data: {
           symbol: 'ETH',
-          circulating_supply: 120000000,
-          market_cap: 300000000000,
-          inflation_rate: 0.4,
+          next_unlock_pct: 0.4,
+          next_unlock_date: null,
+          top10_holders_pct: 42.0,
+          source: 'api',
         },
       }),
     );
     const data = await service.tokenomics('ETH');
     expect(data).toHaveLength(1);
     expect(data[0].assetSymbol).toBe('ETH');
-    expect(data[0].marketCap).toBe(300000000000);
+    expect(data[0].nextUnlockPct).toBe(0.4);
+    expect(data[0].top10HoldersPct).toBe(42.0);
+    expect(data[0].source).toBe('api');
   });
 
   it('falls back to mock tokenomics when engine is down', async () => {

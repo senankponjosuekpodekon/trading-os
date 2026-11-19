@@ -19,17 +19,20 @@ function Panel({ title, icon, children }: { title: React.ReactNode; icon: React.
 
 interface TokenomicsMetric {
   assetSymbol: string;
-  marketCap?: number;
-  supply?: number;
-  holders?: number;
-  volume24h?: number;
+  nextUnlockPct?: number;
+  nextUnlockDate?: string | null;
+  top10HoldersPct?: number;
+  source?: string;
 }
 
 interface SocialMetric {
   assetSymbol: string;
-  sentimentScore: number;
-  mentionCount24h: number;
-  trending?: boolean;
+  galaxyScore?: number;
+  altRank?: number;
+  socialDominance?: number;
+  interactionsPerPost?: number;
+  sentiment?: number | null;
+  source?: string;
 }
 
 interface BrvmStock {
@@ -73,9 +76,11 @@ function TokenomicsWidget() {
         <div className="space-y-2">
           {data.slice(0, 3).map((t) => (
             <div key={t.assetSymbol} className="flex justify-between text-sm">
-              <span className="text-white font-medium">{t.assetSymbol}</span>
+              <span className="text-white font-medium">{t.assetSymbol}
+                {t.source === 'mock' && <span className="ml-1.5 text-[10px] text-amber-400 border border-amber-400/30 rounded px-1">mock</span>}
+              </span>
               <span className="text-gray-400">
-                Cap: {t.marketCap ? `$${(t.marketCap / 1e6).toFixed(1)}M` : '—'}
+                Unlock: {t.nextUnlockPct != null ? `${t.nextUnlockPct}%` : '—'} · Top10: {t.top10HoldersPct != null ? `${t.top10HoldersPct}%` : '—'}
               </span>
             </div>
           ))}
@@ -104,9 +109,11 @@ function SocialWidget() {
         <div className="space-y-2">
           {data.slice(0, 3).map((s) => (
             <div key={s.assetSymbol} className="flex justify-between text-sm">
-              <span className="text-white">{s.assetSymbol}</span>
-              <span className={s.sentimentScore >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                {(s.sentimentScore ?? 0).toFixed(2)}
+              <span className="text-white">{s.assetSymbol}
+                {s.source === 'mock' && <span className="ml-1.5 text-[10px] text-amber-400 border border-amber-400/30 rounded px-1">mock</span>}
+              </span>
+              <span className="text-gray-400">
+                Galaxy {(s.galaxyScore ?? 0).toFixed(0)} · AltRank {(s.altRank ?? 0)}
               </span>
             </div>
           ))}

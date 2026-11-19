@@ -4,21 +4,20 @@ import { PhaseBDataService } from './phase-b-data.service';
 
 export interface TokenomicsMetric {
   assetSymbol: string;
-  maxSupply: number;
-  circulatingSupply: number;
-  marketCap: number;
-  fullyDilutedValuation: number;
-  inflationRate: number;
-  stakingRatio: number;
-  unlockRisk: 'Low' | 'Medium' | 'High';
+  nextUnlockPct: number;
+  nextUnlockDate: string | null;
+  top10HoldersPct: number;
+  source: string; // 'api' | 'mock' — le front badge les données simulées
 }
 
 export interface SocialSentiment {
   assetSymbol: string;
-  mentionCount24h: number;
-  sentimentScore: number; // -100 to 100
-  trending: boolean;
-  topInfluencers: string[];
+  galaxyScore: number;
+  altRank: number;
+  socialDominance: number;
+  interactionsPerPost: number;
+  sentiment: number | null;
+  source: string; // 'lunarcrush' | 'mock'
 }
 
 export interface BrvmStock {

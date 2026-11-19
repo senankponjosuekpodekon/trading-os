@@ -13,13 +13,13 @@ import {
 const DEFAULT_SYMBOLS = ['BTC', 'ETH', 'SOL'];
 
 const MOCK_TOKENOMICS: TokenomicsMetric[] = [
-  { assetSymbol: 'ETH', maxSupply: 0, circulatingSupply: 120_500_000, marketCap: 320_000_000_000, fullyDilutedValuation: 320_000_000_000, inflationRate: 0.5, stakingRatio: 28, unlockRisk: 'Low' },
-  { assetSymbol: 'SOL', maxSupply: 0, circulatingSupply: 475_000_000, marketCap: 65_000_000_000, fullyDilutedValuation: 85_000_000_000, inflationRate: 4.8, stakingRatio: 65, unlockRisk: 'Medium' },
+  { assetSymbol: 'ETH', nextUnlockPct: 0, nextUnlockDate: null, top10HoldersPct: 42, source: 'mock' },
+  { assetSymbol: 'SOL', nextUnlockPct: 0.4, nextUnlockDate: null, top10HoldersPct: 35, source: 'mock' },
 ];
 
 const MOCK_SENTIMENT: SocialSentiment[] = [
-  { assetSymbol: 'BTC', mentionCount24h: 142_000, sentimentScore: 34, trending: true, topInfluencers: ['@cryptoQuant', '@whale_alert'] },
-  { assetSymbol: 'ETH', mentionCount24h: 89_000, sentimentScore: 18, trending: false, topInfluencers: ['@ethBull', '@defiPulse'] },
+  { assetSymbol: 'BTC', galaxyScore: 62, altRank: 12, socialDominance: 18.5, interactionsPerPost: 245, sentiment: null, source: 'mock' },
+  { assetSymbol: 'ETH', galaxyScore: 58, altRank: 18, socialDominance: 12.3, interactionsPerPost: 198, sentiment: null, source: 'mock' },
 ];
 
 const MOCK_BRVM: BrvmStock[] = [
@@ -77,13 +77,10 @@ export class PhaseBDataService {
     const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
     return {
       assetSymbol: (r['symbol'] as string) ?? symbol,
-      maxSupply: num(r['max_supply']),
-      circulatingSupply: num(r['circulating_supply']),
-      marketCap: num(r['market_cap']),
-      fullyDilutedValuation: num(r['fully_diluted_valuation'] ?? r['fdv']),
-      inflationRate: num(r['inflation_rate']),
-      stakingRatio: num(r['staking_ratio']),
-      unlockRisk: (r['unlock_risk'] as TokenomicsMetric['unlockRisk']) ?? 'Low',
+      nextUnlockPct: num(r['next_unlock_pct']),
+      nextUnlockDate: (r['next_unlock_date'] as string) ?? null,
+      top10HoldersPct: num(r['top10_holders_pct']),
+      source: (r['source'] as string) ?? 'mock',
     };
   }
 
@@ -98,7 +95,6 @@ export class PhaseBDataService {
 
     let data = live.length > 0 ? live : MOCK_SENTIMENT;
     if (live.length === 0) this.logger.warn('Engine social sentiment unavailable, falling back to mock data');
-    if (trending === 'true') data = data.filter(s => s.trending);
     return data;
   }
 
@@ -107,10 +103,12 @@ export class PhaseBDataService {
     const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
     return {
       assetSymbol: (r['symbol'] as string) ?? symbol,
-      mentionCount24h: num(r['mention_count_24h'] ?? r['mentions']),
-      sentimentScore: num(r['sentiment_score'] ?? r['score']),
-      trending: Boolean(r['trending']),
-      topInfluencers: Array.isArray(r['top_influencers']) ? (r['top_influencers'] as string[]) : [],
+      galaxyScore: num(r['galaxy_score']),
+      altRank: num(r['alt_rank']),
+      socialDominance: num(r['social_dominance']),
+      interactionsPerPost: num(r['interactions_per_post']),
+      sentiment: typeof r['sentiment'] === 'number' ? (r['sentiment'] as number) : null,
+      source: (r['source'] as string) ?? 'mock',
     };
   }
 
