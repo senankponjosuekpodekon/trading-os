@@ -44,6 +44,11 @@ export class AdminOpsController {
     return this.mt5ReadService.snapshot();
   }
 
+  @Get('mt5/activity')
+  async mt5Activity() {
+    return this.mt5ReadService.activity();
+  }
+
   @Get('db-stats')
   async dbStats() {
     const [

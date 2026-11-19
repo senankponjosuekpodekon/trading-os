@@ -45,7 +45,7 @@ describe('AdminOpsController', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: SystemHealthService, useValue: healthService },
         { provide: AutopilotReadService, useValue: { snapshot: jest.fn().mockResolvedValue({ mode: 'PAPER', readOnly: true, portfolio: null }) } },
-        { provide: Mt5ReadService, useValue: { snapshot: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', executionEnabled: false }) } },
+        { provide: Mt5ReadService, useValue: { snapshot: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', executionEnabled: false }), activity: jest.fn().mockResolvedValue({ status: 'NOT_CONFIGURED', executionEnabled: false }) } },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('') } },
         { provide: CronConfigService, useValue: { getAll: jest.fn().mockResolvedValue([]), setEnabled: jest.fn() } },
         { provide: MaintenanceService, useValue: { isMaintenanceMode: jest.fn().mockReturnValue(false), setMaintenanceMode: jest.fn(), isRegistrationEnabled: jest.fn().mockReturnValue(true), setRegistrationEnabled: jest.fn() } },
@@ -84,6 +84,21 @@ describe('AdminOpsController', () => {
       for (const role of ['ADMIN', 'SUPER_ADMIN']) {
         const response = await request(app.getHttpServer()).get('/admin/ops/autopilot').set('x-test-role', role).expect(200);
         expect(response.body).toEqual({ mode: 'PAPER', readOnly: true, portfolio: null });
+      }
+    } finally { await app.close(); }
+  }, 30000);
+
+  it('restricts broker activity to authenticated administrators', async () => {
+    const app = module.createNestApplication();
+    await app.init();
+    try {
+      await request(app.getHttpServer()).get('/admin/ops/mt5/activity').expect(401);
+      for (const role of ['TRADER', 'INVESTOR']) {
+        await request(app.getHttpServer()).get('/admin/ops/mt5/activity').set('x-test-role', role).expect(403);
+      }
+      for (const role of ['ADMIN', 'SUPER_ADMIN']) {
+        const response = await request(app.getHttpServer()).get('/admin/ops/mt5/activity').set('x-test-role', role).expect(200);
+        expect(response.body).toEqual({ status: 'NOT_CONFIGURED', executionEnabled: false });
       }
     } finally { await app.close(); }
   }, 30000);

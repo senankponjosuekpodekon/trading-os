@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { Mt5BrokerActivity } from './Mt5BrokerActivity';
 
 const labels = {
   READY: 'Démo connectée et vérifiée',
@@ -85,6 +86,7 @@ export function Mt5ReadStatus() {
         </dl>
       )}
       {snapshot && <p className="mt-2 text-xs text-gray-500">Contrôle : {snapshot.checkedAt}</p>}
+      <Mt5BrokerActivity />
     </section>
   );
 }
