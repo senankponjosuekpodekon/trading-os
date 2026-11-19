@@ -8,6 +8,7 @@ export interface OrderParams {
   price?: number;
   timeInForce?: 'GTC' | 'IOC' | 'FOK';
   stopPrice?: number;
+  takeProfit?: number;
 }
 
 export interface OrderResult {

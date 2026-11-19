@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { ExchangeConnector, OrderParams, OrderResult, BalanceResult } from './interfaces/exchange-connector.interface';
 import { ExchangeName } from '../exchange-connections/dto/exchange-connection.dto';
+import { Mt5Contract, Mt5SizingError, unitsToLots, validateStops, riskToStop, marginRequired } from './mt5-sizing';
 
 /**
  * MT5 Connector — dialogue avec le bridge Wine tools/mt5-bridge/server.py.
@@ -33,7 +34,6 @@ export class Mt5Connector implements ExchangeConnector {
 
   async placeOrder(_login: string, _password: string, params: OrderParams): Promise<OrderResult> {
     const symbol = this.mapSymbol(params.symbol);
-    const volume = this.normalizeVolume(params.quantity);
 
     if (params.type !== 'MARKET') {
       // Le bridge fait du TRADE_ACTION_DEAL (marché). Ordres LIMIT/STOP
@@ -43,9 +43,34 @@ export class Mt5Connector implements ExchangeConnector {
       );
     }
 
-    const body: any = { symbol, side: params.side, volume };
-    if (params.stopPrice) body.sl = params.stopPrice;
+    // 1. Specs broker réelles — fail-closed : pas de sizing sans contrat.
+    const contract = await this._getContract(symbol);
+    // 2. quantity = unités de base → lots (floor au volume_step, jamais plus)
+    const volume = unitsToLots(params.quantity, contract);
+    // 3. Tick courant : référence pour la distance SL/TP (stops_level)
+    const quote = await this._getQuote(symbol);
+    const referencePrice = params.side === 'BUY' ? quote.ask : quote.bid;
+    const sl = params.stopPrice;
+    const tp = params.takeProfit;
+    validateStops(params.side, referencePrice, sl, tp, contract);
+    // 4. Marge : seulement si le broker publie une marge fixe par lot ;
+    //    mode flottant (forex) → on laisse le broker rejeter.
+    const margin = marginRequired(volume, contract);
+    if (margin !== null) {
+      const account = await this._getAccount();
+      if (margin > account.margin_free) {
+        throw new BadRequestException(
+          `MT5: marge insuffisante — requis ${margin} ${contract.currency_margin ?? ''}, ` +
+          `disponible ${account.margin_free}`
+        );
+      }
+    }
 
+    const body: any = { symbol, side: params.side, volume };
+    if (sl) body.sl = sl;
+    if (tp) body.tp = tp;
+
+    const sentAt = Date.now();
     try {
       const res = await axios.post(`${this.bridgeUrl}/order`, body, {
         timeout: 20000,
@@ -72,10 +97,96 @@ export class Mt5Connector implements ExchangeConnector {
           mt5_order: d.order,
           mt5_deal: d.deal,
           mt5_symbol: symbol,
+          lots: volume,
+          riskToStop: riskToStop(volume, referencePrice, sl, contract),
+          reconciled: false,
         },
       };
     } catch (err: any) {
+      // Réponse incertaine (timeout, 5xx) : l'ordre a peut-être été
+      // exécuté côté broker. Avant de remonter l'échec — et surtout avant
+      // tout retry — on réconcilie via l'historique des deals récents.
+      if (err instanceof BadRequestException) throw err;
+      const reconciled = await this._reconcileFill(symbol, sentAt).catch(() => null);
+      if (reconciled) {
+        this.logger.warn(`MT5 order reconciled from deal history: ${reconciled.orderId}`);
+        return reconciled;
+      }
       this._rethrow(err, 'order');
+    }
+  }
+
+  /** Après une réponse incertaine, cherche le deal correspondant dans
+   *  l'historique récent (magic trading-os + symbole). Retourne null si
+   *  rien ne prouve le fill — jamais de retry automatique aveugle. */
+  private async _reconcileFill(symbol: string, sentAt: number): Promise<OrderResult | null> {
+    const from = new Date(sentAt - 60_000).toISOString();
+    const to = new Date(Date.now() + 1000).toISOString();
+    const res = await axios.get(`${this.bridgeUrl}/history/deals`, {
+      params: { from, to, limit: 50 },
+      timeout: 10000,
+      headers: this.headers,
+    });
+    const items = res.data?.items;
+    if (!Array.isArray(items)) return null;
+    const deal = items.find((d: any) =>
+      d.symbol === symbol && d.magic === '20261118' &&
+      typeof d.time_msc === 'number' && d.time_msc >= sentAt - 30_000);
+    if (!deal) return null;
+    return {
+      orderId: String(deal.order ?? deal.ticket),
+      symbol,
+      side: deal.type === 0 ? 'BUY' : 'SELL',
+      type: 'MARKET',
+      status: 'FILLED',
+      executedQty: String(deal.volume ?? 0),
+      avgPrice: String(deal.price ?? 0),
+      transactTime: deal.time_msc,
+      exchange: ExchangeName.MT5,
+      raw: { mt5_deal: deal.ticket, mt5_order: deal.order, reconciled: true },
+    };
+  }
+
+  private async _getContract(symbol: string): Promise<Mt5Contract> {
+    try {
+      const res = await axios.get(`${this.bridgeUrl}/contract/${encodeURIComponent(symbol)}`, {
+        timeout: 10000, headers: this.headers,
+      });
+      if (res.data?.error) {
+        throw new BadRequestException(`MT5: contrat ${symbol} indisponible (${res.data.error})`);
+      }
+      return res.data as Mt5Contract;
+    } catch (err: any) {
+      this._rethrow(err, 'contract');
+    }
+  }
+
+  private async _getQuote(symbol: string): Promise<{ bid: number; ask: number }> {
+    try {
+      const res = await axios.get(`${this.bridgeUrl}/quote/${encodeURIComponent(symbol)}`, {
+        timeout: 10000, headers: this.headers,
+      });
+      const d = res.data;
+      if (d.error || !(d.bid > 0) || !(d.ask > 0)) {
+        throw new ServiceUnavailableException(`MT5: pas de cotation live pour ${symbol}`);
+      }
+      return { bid: d.bid, ask: d.ask };
+    } catch (err: any) {
+      this._rethrow(err, 'quote');
+    }
+  }
+
+  private async _getAccount(): Promise<{ margin_free: number }> {
+    try {
+      const res = await axios.get(`${this.bridgeUrl}/account`, {
+        timeout: 10000, headers: this.headers,
+      });
+      if (res.data?.error) {
+        throw new ServiceUnavailableException(`MT5: compte indisponible (${res.data.error})`);
+      }
+      return { margin_free: Number(res.data.margin_free) || 0 };
+    } catch (err: any) {
+      this._rethrow(err, 'account');
     }
   }
 
@@ -137,6 +248,9 @@ export class Mt5Connector implements ExchangeConnector {
         'Terminal MT5 non connecté au broker (mt5_disconnected).'
       );
     }
+    if (err instanceof Mt5SizingError) {
+      throw new BadRequestException(`MT5 sizing: ${err.message}`);
+    }
     throw new BadRequestException(`MT5 ${op} failed: ${msg}`);
   }
 
@@ -181,14 +295,5 @@ export class Mt5Connector implements ExchangeConnector {
       );
     }
     return mapped;
-  }
-
-  private normalizeVolume(quantity: number): number {
-    // MT5 uses lots — typical minimum is 0.01 lot
-    // If quantity looks like units (e.g. 10000), convert to lots
-    if (quantity >= 1000) {
-      return Math.round((quantity / 100000) * 100) / 100;
-    }
-    return Math.max(0.01, Math.round(quantity * 100) / 100);
   }
 }
