@@ -11,6 +11,7 @@ import { promisify } from 'util';
 import { CronConfigService } from './cron-config.service';
 import { MaintenanceService } from './maintenance.service';
 import { Mt5ReadService } from './mt5-read.service';
+import { AutopilotReadService } from './autopilot-read.service';
 
 const execAsync = promisify(exec);
 
@@ -25,7 +26,13 @@ export class AdminOpsController {
     private cronConfig: CronConfigService,
     private maintenanceService: MaintenanceService,
     private mt5ReadService: Mt5ReadService,
+    private autopilotReadService: AutopilotReadService,
   ) {}
+
+  @Get('autopilot')
+  async autopilot() {
+    return this.autopilotReadService.snapshot();
+  }
 
   @Get('health')
   async health() {

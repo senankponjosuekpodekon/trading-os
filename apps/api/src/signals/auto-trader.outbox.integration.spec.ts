@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { AutoTraderService } from './auto-trader.service';
+import { AutopilotReadService } from '../admin/autopilot-read.service';
 
 const databaseUrl = process.env.AUTOPILOT_TEST_DATABASE_URL
   ?? (process.env.CI === 'true' ? process.env.DATABASE_URL : undefined);
@@ -147,6 +148,29 @@ describeDatabase('AutoPilot durable outbox (dedicated PostgreSQL)', () => {
     await db.signalExecutionEvent.update({ where: { id: retry.id }, data: { autopilotStatus: 'SKIPPED' } });
     await worker().processPendingEvents();
     await close(independent.id);
+  });
+
+  it('supervises real paper accounting without including another user portfolio', async () => {
+    const signal = await newSignal();
+    await event(signal.id, 'ENTRY_HIT', 100);
+    await worker().processPendingEvents();
+    await event(signal.id, 'TP1_HIT', 110);
+    await worker().processPendingEvents();
+    const position = await db.position.findFirstOrThrow({ where: { signalId: signal.id } });
+    const asset = await db.asset.findUniqueOrThrow({ where: { id: signal.assetId } });
+    await db.candle.create({ data: { symbol: asset.symbol, timeframe: '1m', openTime: new Date(Date.now() - 120000), open: 105, high: 105, low: 105, close: 105 } });
+    const otherUser = await db.user.create({ data: { email: `${prefix}@test.invalid`, name: 'Other user', password: 'disabled-login' } });
+    const otherPortfolio = await db.portfolio.create({ data: { userId: otherUser.id, name: 'AutoPilot', type: 'PAPER' } });
+    const otherPosition = await db.position.create({ data: { portfolioId: otherPortfolio.id, assetId: asset.id, direction: 'BUY', entryPrice: 999, quantity: 1 } });
+    const reader = new AutopilotReadService(db as any, { isAutoTraderEnabled: async () => true } as any);
+    const snapshot = await reader.snapshot();
+    expect(snapshot.portfolio?.id).toBe(position.portfolioId);
+    expect(snapshot.portfolio?.positions.map(p => p.id)).toContain(position.id);
+    expect(snapshot.portfolio?.positions.map(p => p.id)).not.toContain(otherPosition.id);
+    expect(snapshot.portfolio?.positions.find(p => p.id === position.id)?.unrealizedPnl).toBeCloseTo((105 - Number(position.entryPrice)) * Number(position.quantity));
+    expect(snapshot.portfolio?.accountingDifference).toBeCloseTo(0, 6);
+    expect(snapshot.signals.find(s => s.id === signal.id)?.events.some(e => e.reason === 'PAPER_PARTIAL_CLOSED')).toBe(true);
+    await close(signal.id);
   });
 
   it('migration excludes pre-existing events while queuing new inserts', async () => {

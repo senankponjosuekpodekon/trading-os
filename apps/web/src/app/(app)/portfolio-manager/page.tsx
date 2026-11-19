@@ -8,6 +8,8 @@ import {
 import { api } from '@/lib/api';
 import { Portfolio } from '@/types';
 import { PageSkeleton } from '@/components/ui/PageSkeleton';
+import { AutopilotPortfolio } from '@/components/AutopilotPortfolio';
+import { useAuthStore } from '@/store/auth.store';
 
 type Mode = 'PAPER' | 'LIVE';
 
@@ -308,6 +310,8 @@ function ExecutionPanel() {
 }
 
 export default function PortfolioManagerPage() {
+  const user = useAuthStore(s => s.user);
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
   const [mode, setMode] = useState<Mode>('PAPER');
   const { data: portfolios, isLoading } = useQuery<Portfolio[]>({
     queryKey: ['portfolios'],
@@ -346,10 +350,12 @@ export default function PortfolioManagerPage() {
 
       <ExecutionPanel />
 
+      {mode === 'PAPER' && isAdmin && <AutopilotPortfolio />}
+
       {!pf ? (
         <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-10 text-center text-gray-500">
           {mode === 'PAPER'
-            ? 'Aucun portfolio Demo — l\'AutoPilot ou un portfolio paper apparaîtra ici.'
+            ? 'Aucun portefeuille paper personnel. La supervision AutoPilot système est réservée aux administrateurs.'
             : 'Aucun portfolio Réel — l\'exécution live n\'est pas encore activée (phase C).'}
         </div>
       ) : (

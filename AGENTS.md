@@ -1,12 +1,14 @@
 # Verification
 
 - API: run `npx tsc --noEmit` and `npx jest --coverage --runInBand` from `apps/api`.
-- AutoPilot PostgreSQL outbox tests use `AUTOPILOT_TEST_DATABASE_URL` pointing to a dedicated disposable database with the Prisma schema applied. In CI they use the CI `DATABASE_URL`. They create isolated fixtures and a migration probe schema; never point them at production.
+- AutoPilot PostgreSQL outbox tests use `AUTOPILOT_TEST_DATABASE_URL` pointing to a dedicated disposable database with the Prisma schema applied. In CI they use the CI `DATABASE_URL`. They create isolated fixtures and a migration probe schema; never point them at production. When provisioning a disposable PostgreSQL server, also create an empty `app` database before applying migrations to the test database: the legacy RLS migration grants CONNECT on `app`.
 - API auth integration tests use Redis through FeatureFlagsService. Supply a dedicated disposable test Redis with `REDIS_URL`; do not point tests at production Redis. Disable SMTP for tests with `SMTP_HOST=`.
 - Web: run `npx tsc --noEmit` from `apps/web`. Target Jest files with `npx jest --runInBand --runTestsByPath '<path>'` (quote paths containing parentheses).
 - Cron-owned AutoPilot operations require `PrismaSystemService`; request-scoped `PrismaService` uses the `app_runtime` role and portfolio/position RLS fails closed without a user context.
 - AutoPilot paper positions are managed only by the durable event worker. Generic position/trailing watchers must exclude `AUTOPILOT_EMAIL`. Outbox migration marks existing events `HISTORICAL`; do not reset old entries for automatic replay.
 - Signal execution events describe theoretical price tracking, not proof of a paper portfolio position or a broker fill. Verify linked positions separately.
+- Admin AutoPilot supervision uses `GET /admin/ops/autopilot`, restricted to ADMIN/SUPER_ADMIN. Its system-client portfolio reads must remain scoped to `AUTOPILOT_EMAIL`, name `AutoPilot`, type PAPER; never accept a client-supplied system portfolio/user ID or create a portfolio from this read endpoint.
+- AutoPilot `Position.pnl` already includes realized partial exits. Do not add `partialPnl`/`secondPartialPnl` again. The supervision view marks remaining quantities with closed 1m candles only (open time 1–5 minutes old); missing/stale marks mean unavailable latent P&L/equity, not zero.
 - Keep production deployment CI-driven. Do not change execution mode, enable live venues, or send broker orders during paper-pipeline verification.
 - Admin MT5 monitoring uses only `MT5_READ_BRIDGE_URL` and `MT5_READ_BRIDGE_TOKEN`, never the execution connector's `MT5_BRIDGE_*` settings. Its Docker URL is `http://mt5-read:5555` on the external `trading-mt5-read` network; create that network before deploying the API (the sandbox start script also creates it). Keep the token server-side; the admin endpoint returns only sanitized demo snapshots.
 - MT5 bridge unit tests: install `apps/engine/requirements-test.txt`, then run `python -m pytest tests/test_mt5_bridge.py -q` from `apps/engine`; MT5 is mocked and no broker is contacted.
