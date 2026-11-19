@@ -72,6 +72,12 @@ def _extract_features(metadata: Dict[str, Any]) -> Dict[str, Any]:
     """Extract key features for pattern matching."""
     regime = metadata.get("regime", {})
     mtf = metadata.get("mtf_context", {})
+    # Contexte macro crypto : la dominance BTC et la phase de rotation
+    # changent la probabilité de succès d'un même setup (BUY altcoin en
+    # phase refuge ≠ BUY altcoin en altseason).
+    ctx = metadata.get("context") or {}
+    btc_dom = ctx.get("btc_dominance") or {}
+    macro_rot = metadata.get("macro_rotation") or {}
     return {
         "regime": regime.get("regime", "UNKNOWN"),
         "adx": regime.get("adx"),
@@ -81,6 +87,9 @@ def _extract_features(metadata: Dict[str, Any]) -> Dict[str, Any]:
         "has_news": bool(metadata.get("news_sentiment")),
         "has_social": bool(metadata.get("social_context")),
         "has_tokenomics": bool(metadata.get("tokenomics_context")),
+        "btc_dominance": btc_dom.get("btc_dominance") if isinstance(btc_dom, dict) else None,
+        "btc_dom_change_24h": btc_dom.get("change_24h_pct") if isinstance(btc_dom, dict) else None,
+        "macro_phase": macro_rot.get("phase") or None,
     }
 
 

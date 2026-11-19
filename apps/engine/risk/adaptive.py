@@ -37,11 +37,43 @@ def multiplier_from_stats(stats: Dict[str, Any]) -> Dict[str, Any]:
     return {"multiplier": MULT_MID, "reason": f"win_rate {wr}%"}
 
 
+# ── Couplage phase macro → sizing (niveau 3) ──────────────────────────
+# La phase de rotation BTC→ETH→alts→memecoins module le risque des
+# ouvertures crypto. BUY seulement : un SELL est une sortie, pas un
+# short spéculatif à moduler.
+PHASE_MULT = {
+    "BTC":       {"BTC": 1.10, "ETH": 0.95, "alt": 0.80},
+    "ETH":       {"BTC": 1.00, "ETH": 1.10, "alt": 0.90},
+    "ALTCOINS":  {"BTC": 0.95, "ETH": 1.05, "alt": 1.15},
+    "MEMECOINS": {"BTC": 0.95, "ETH": 0.95, "alt": 0.75},  # fin de cycle
+    "RISK_OFF":  {"BTC": 0.70, "ETH": 0.60, "alt": 0.50},
+    "TRANSITION": {"BTC": 1.00, "ETH": 1.00, "alt": 1.00},
+}
+
+
+def phase_multiplier(signal_type: str, symbol: str,
+                     phase: str | None) -> Dict[str, Any]:
+    """Règle pure — testable. SELL = sortie → ×1.0 toujours."""
+    if signal_type != "BUY" or not phase or phase in ("UNKNOWN", ""):
+        return {"multiplier": MULT_MID, "reason": "phase_neutral"}
+    if not symbol.endswith("/USDT"):
+        return {"multiplier": MULT_MID, "reason": "not_crypto"}
+    table = PHASE_MULT.get(phase)
+    if not table:
+        return {"multiplier": MULT_MID, "reason": "phase_neutral"}
+    base = symbol.split("/")[0]
+    bucket = "BTC" if base == "BTC" else ("ETH" if base == "ETH" else "alt")
+    mult = table[bucket]
+    return {"multiplier": mult,
+            "reason": f"macro_phase {phase} → {bucket} ×{mult}"}
+
+
 async def risk_multiplier(symbol: str, signal_type: str,
                           metadata: Dict[str, Any] | None = None,
                           timeframe: str = "1h") -> Dict[str, Any]:
-    """Multiplicateur de risque pour une ouverture, issu du track record.
-    Échec de lecture → ×1.0 (neutre, jamais bloquant)."""
+    """Multiplicateur de risque pour une ouverture, issu du track record
+    ET de la phase macro. Échec de lecture → ×1.0 (jamais bloquant).
+    Combiné borné dans [0.5, 1.2]."""
     try:
         from ml.market_memory import get_pattern_stats
         stats = await get_pattern_stats(symbol, timeframe, signal_type,
@@ -49,7 +81,25 @@ async def risk_multiplier(symbol: str, signal_type: str,
         out = multiplier_from_stats(stats)
         out.update({"win_rate": stats.get("win_rate"),
                     "sample_size": stats.get("sample_size")})
-        return out
     except Exception as exc:
         logger.debug("adaptive_sizing_fallback", error=str(exc))
-        return {"multiplier": MULT_MID, "reason": "stats_unavailable"}
+        out = {"multiplier": MULT_MID, "reason": "stats_unavailable"}
+
+    phase_adj = {"multiplier": MULT_MID, "reason": "phase_unavailable"}
+    try:
+        from utils.cache import mem_cached
+        from risk.macro_rotation import compute_macro_rotation
+        macro = await mem_cached("macro:rotation",
+                                 lambda: compute_macro_rotation(), ttl=600)
+        phase_adj = phase_multiplier(signal_type, symbol,
+                                     (macro or {}).get("phase"))
+    except Exception as exc:
+        logger.debug("phase_sizing_fallback", error=str(exc))
+
+    combined = out["multiplier"] * phase_adj["multiplier"]
+    combined = max(MULT_LOW, min(MULT_HIGH, combined))
+    out["multiplier"] = round(combined, 3)
+    out["phase_multiplier"] = phase_adj["multiplier"]
+    out["phase_reason"] = phase_adj["reason"]
+    out["reason"] = f"{out['reason']} | {phase_adj['reason']}"
+    return out

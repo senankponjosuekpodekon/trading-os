@@ -443,6 +443,8 @@ export class SignalPersistenceService {
           regime: r.regime, mtf_context: r.mtf_context,
           risk_reward: r.risk_reward, confidence: r.confidence,
           news_sentiment: r.news_sentiment ?? r.scraper_sentiment ?? null,
+          context: r.context ?? null,
+          macro_rotation: r.metadata?.macro_rotation ?? null,
         },
       }, { timeout: 3000 }).catch((err) => {
         this.logger.debug(`market_memory store failed for ${signal.id}: ${(err as Error)?.message}`);
@@ -474,6 +476,15 @@ export class SignalPersistenceService {
         volume_ratio:    indicators.volume_ratio    ?? null,
         confidence:      r.confidence               ?? null,
         risk_reward:     r.risk_reward              ?? null,
+        // Contexte macro crypto : dominance BTC + phase de rotation.
+        // Persisté avec chaque signal pour que l'apprentissage distingue
+        // un BUY altcoin en altseason du même BUY en phase refuge.
+        btc_dominance:       (r.context?.btc_dominance as any)?.btc_dominance
+                             ?? r.metadata?.macro_rotation?.data?.btc_dominance ?? null,
+        btc_dom_change_24h:  (r.context?.btc_dominance as any)?.change_24h_pct ?? null,
+        macro_phase:         r.metadata?.macro_rotation?.phase ?? null,
+        fear_greed:          (r.context?.fear_greed as any)?.value
+                             ?? r.metadata?.macro_rotation?.data?.fear_greed ?? null,
       };
       await this.featureStore.upsertSnapshot({
         signalId: signal.id,

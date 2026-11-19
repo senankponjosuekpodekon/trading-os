@@ -1,0 +1,77 @@
+"""Dominance BTC / phase macro — règles pures (feature + sizing)."""
+
+from risk.adaptive import phase_multiplier, multiplier_from_stats, MULT_LOW, MULT_HIGH
+from ml.market_memory import _extract_features
+
+
+# ── phase_multiplier ─────────────────────────────────────────────────
+
+class TestPhaseMultiplier:
+    def test_sell_always_neutral(self):
+        out = phase_multiplier("SELL", "BTC/USDT", "RISK_OFF")
+        assert out["multiplier"] == 1.0
+
+    def test_non_crypto_neutral(self):
+        assert phase_multiplier("BUY", "EUR/USD", "RISK_OFF")["multiplier"] == 1.0
+        assert phase_multiplier("BUY", "XAU/USD", "ALTCOINS")["multiplier"] == 1.0
+
+    def test_no_phase_neutral(self):
+        assert phase_multiplier("BUY", "BTC/USDT", None)["multiplier"] == 1.0
+        assert phase_multiplier("BUY", "BTC/USDT", "UNKNOWN")["multiplier"] == 1.0
+
+    def test_btc_phase_favors_btc_penalizes_alts(self):
+        assert phase_multiplier("BUY", "BTC/USDT", "BTC")["multiplier"] > 1.0
+        assert phase_multiplier("BUY", "SOL/USDT", "BTC")["multiplier"] < 1.0
+
+    def test_altseason_favors_alts(self):
+        assert phase_multiplier("BUY", "SOL/USDT", "ALTCOINS")["multiplier"] > 1.0
+        assert phase_multiplier("BUY", "BTC/USDT", "ALTCOINS")["multiplier"] < 1.0
+
+    def test_risk_off_crushes_alt_buys(self):
+        assert phase_multiplier("BUY", "SOL/USDT", "RISK_OFF")["multiplier"] == 0.50
+        assert phase_multiplier("BUY", "BTC/USDT", "RISK_OFF")["multiplier"] < 1.0
+
+    def test_memecoins_late_cycle_caution(self):
+        assert phase_multiplier("BUY", "DOGE/USDT", "MEMECOINS")["multiplier"] < 1.0
+
+    def test_transition_neutral(self):
+        assert phase_multiplier("BUY", "SOL/USDT", "TRANSITION")["multiplier"] == 1.0
+
+
+# ── Feature extraction (market_memory) ───────────────────────────────
+
+class TestFeatureExtraction:
+    def test_dominance_and_phase_extracted(self):
+        md = {
+            "regime": {"regime": "TRENDING", "adx": 28},
+            "context": {"btc_dominance": {"btc_dominance": 57.8, "change_24h_pct": 0.6}},
+            "macro_rotation": {"phase": "BTC"},
+        }
+        f = _extract_features(md)
+        assert f["btc_dominance"] == 57.8
+        assert f["btc_dom_change_24h"] == 0.6
+        assert f["macro_phase"] == "BTC"
+
+    def test_missing_context_safe(self):
+        f = _extract_features({"regime": {}})
+        assert f["btc_dominance"] is None
+        assert f["btc_dom_change_24h"] is None
+        assert f["macro_phase"] is None
+
+    def test_old_features_intact(self):
+        md = {"regime": {"regime": "RANGING", "adx": 15},
+              "mtf_context": {"confluence": "ALIGNED"}, "risk_reward": 2.0}
+        f = _extract_features(md)
+        assert f["regime"] == "RANGING" and f["mtf_confluence"] == "ALIGNED" and f["rr"] == 2.0
+
+
+# ── Bornes combinées ──────────────────────────────────────────────────
+
+class TestBounds:
+    def test_combined_capped(self):
+        # Le pire cas : adaptive 0.5 × phase 0.5 = 0.25 → doit rester ≥ 0.5
+        stats = multiplier_from_stats({"win_rate": 30, "sample_size": 50})
+        phase = phase_multiplier("BUY", "SOL/USDT", "RISK_OFF")
+        combined = max(MULT_LOW, min(MULT_HIGH, stats["multiplier"] * phase["multiplier"]))
+        assert combined >= 0.5
+        assert combined <= 1.2

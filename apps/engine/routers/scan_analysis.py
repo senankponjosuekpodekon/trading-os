@@ -1707,6 +1707,12 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
                 _macro_bonus = 5 if _mcap_tier in ("MICRO", "SMALL") else (-15 if _base in ("BTC", "ETH") else -5)
             elif _phase == "RISK_OFF":
                 _macro_bonus = -15
+            # Gradient de dominance : à BTC.D ≥ 60, les altcoins souffrent
+            # structurellement (le capital ne rotate pas encore vers eux),
+            # indépendamment de la phase détectée.
+            _btc_dom = ((_macro.get("data") or {}).get("btc_dominance") or 0)
+            if _btc_dom >= 60 and _base not in ("BTC", "ETH") and result.get("signal") == "BUY":
+                _macro_bonus -= 5
             if _macro_bonus != 0 and "confidence" in result:
                 result["confidence"] = max(0, min(100, result["confidence"] + _macro_bonus))
                 if "metadata" not in result:
@@ -1718,6 +1724,7 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
                     "implication": _macro.get("implication"),
                     "warning": _macro.get("warning"),
                     "confidence": _macro.get("confidence"),
+                    "data": _macro.get("data"),
                 }
         except Exception as exc:
             logger.debug("macro_rotation_failed", symbol=symbol, error=str(exc))
