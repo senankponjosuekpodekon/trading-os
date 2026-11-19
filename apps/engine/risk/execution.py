@@ -200,13 +200,10 @@ def _register_adapters():
             _LIVE_ADAPTERS["SPOT_CRYPTO"] = a
     except Exception as e:
         logger.info("adapter_binance_unavailable", error=str(e))
-    try:
-        from risk.adapters.deriv import DerivAdapter
-        d = DerivAdapter.from_env()
-        if d:
-            _LIVE_ADAPTERS["SYNTHETIC"] = d
-    except Exception as e:
-        logger.info("adapter_deriv_unavailable", error=str(e))
+    # Pas d'adapter SYNTHETIC : l'ancien DerivAdapter achetait des contrats
+    # digitaux CALL/PUT (sémantique ≠ position directionnelle, close_position
+    # non implémenté). Le CFD/synthétique passe par la voie MT5 — venue sans
+    # adapter = exécution live explicitement refusée.
     try:
         from risk.adapters.oanda import OandaAdapter
         o = OandaAdapter.from_env()
