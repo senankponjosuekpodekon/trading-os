@@ -30,6 +30,20 @@ def _get(key: str):
     return None
 
 
+def _get_stale(key: str):
+    """Dernière valeur connue, même expirée — pour servir du dégradé
+    honnête (stale=True) plutôt qu'un 503 sec quand la source tombe."""
+    import time
+    if key in _cache:
+        ts, val = _cache[key]
+        age_min = int((time.monotonic() - ts) / 60)
+        out = dict(val) if isinstance(val, dict) else {"value": val}
+        out["stale"] = True
+        out["stale_age_min"] = age_min
+        return out
+    return None
+
+
 def _set(key: str, val: any):
     import time
     _cache[key] = (time.monotonic(), val)
@@ -165,6 +179,9 @@ async def btc_dominance():
         _set(cache_key, result)
         return result
     except Exception as e:
+        stale = _get_stale(cache_key)
+        if stale:
+            return stale
         raise HTTPException(status_code=503, detail=f"BTC dominance unavailable: {e}") from e
 
 

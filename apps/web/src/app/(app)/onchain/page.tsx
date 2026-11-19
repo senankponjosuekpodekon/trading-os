@@ -195,10 +195,15 @@ export default function OnChainPage() {
             <Percent className="w-4 h-4 text-yellow-400" /> BTC Dominance
           </h3>
           {btcDominance ? (
-            <div className="grid grid-cols-2 gap-4">
-              <Metric label="BTC Dominance" value={`${(btcDominance.dominance_pct ?? 0).toFixed(2)}%`} sub={btcDominance.timestamp ? new Date(btcDominance.timestamp).toLocaleString() : '—'} icon={Percent} color="text-yellow-400" />
-              <Metric label="Dominance 24h" value={`${(btcDominance.change_24h_pct ?? 0).toFixed(2)}%`} icon={TrendingUp} color={btcDominance.change_24h_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} />
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <Metric label="BTC Dominance" value={`${(btcDominance.dominance_pct ?? 0).toFixed(2)}%`} sub={btcDominance.timestamp ? new Date(btcDominance.timestamp).toLocaleString() : '—'} icon={Percent} color="text-yellow-400" />
+                <Metric label="Dominance 24h" value={`${(btcDominance.change_24h_pct ?? 0).toFixed(2)}%`} icon={TrendingUp} color={btcDominance.change_24h_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+              </div>
+              {btcDominance.stale && (
+                <p className="text-xs text-amber-400 mt-2">Donnée en cache — CoinGecko indisponible{btcDominance.stale_age_min != null ? ` (${btcDominance.stale_age_min} min)` : ''}</p>
+              )}
+            </>
           ) : (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">BTC dominance unavailable</div>
           )}
