@@ -9,9 +9,7 @@ Tiers:
 Source: CoinGecko API (free, no key required) with in-memory cache (TTL 1h).
 For non-crypto assets, tier is inferred from asset type.
 """
-import asyncio
 
-import httpx
 
 from utils.cache import cache
 
@@ -60,36 +58,29 @@ async def fetch_market_cap_tier(symbol: str) -> str:
     except Exception:
         pass
 
-    # CoinGecko API (free, no key)
+    # CoinGecko API (free, no key) — file pacée partagée
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # Search for coin ID
-            resp = await client.get(
-                "https://api.coingecko.com/api/v3/search",
-                params={"query": base},
+        from utils.coingecko import cg_get
+        search = await cg_get("/search", params={"query": base})
+        coins = search.get("coins", [])
+        if coins:
+            coin_id = coins[0]["id"]
+            detail = await cg_get(
+                f"/coins/{coin_id}",
+                params={"localization": "false", "tickers": "false",
+                        "market_data": "true", "community_data": "false",
+                        "developer_data": "false", "sparkline": "false"},
             )
-            if resp.status_code == 200:
-                coins = resp.json().get("coins", [])
-                if coins:
-                    coin_id = coins[0]["id"]
-                    # Fetch market data
-                    detail = await client.get(
-                        f"https://api.coingecko.com/api/v3/coins/{coin_id}",
-                        params={"localization": "false", "tickers": "false",
-                                "market_data": "true", "community_data": "false",
-                                "developer_data": "false", "sparkline": "false"},
-                    )
-                    if detail.status_code == 200:
-                        mcap = detail.json().get("market_data", {}).get("market_cap", {}).get("usd")
-                        if mcap and isinstance(mcap, (int, float)):
-                            tier = _tier_from_mcap(float(mcap))
-                            # Cache it
-                            try:
-                                await cache.set(f"{_CACHE_PREFIX}{base}", tier, ttl=_CACHE_TTL)
-                            except Exception:
-                                pass
-                            return tier
-    except (httpx.HTTPError, asyncio.TimeoutError, Exception):
+            mcap = detail.get("market_data", {}).get("market_cap", {}).get("usd")
+            if mcap and isinstance(mcap, (int, float)):
+                tier = _tier_from_mcap(float(mcap))
+                # Cache it
+                try:
+                    await cache.set(f"{_CACHE_PREFIX}{base}", tier, ttl=_CACHE_TTL)
+                except Exception:
+                    pass
+                return tier
+    except Exception:
         pass
 
     # Default for unknown crypto

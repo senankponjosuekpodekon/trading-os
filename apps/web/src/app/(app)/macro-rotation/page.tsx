@@ -144,12 +144,13 @@ export default function MacroRotationPage() {
                 <MetricCard label="Altcoins avg 24h" value={(data.data.altcoins_avg_24h ?? 0)} suffix="%" />
                 <MetricCard label="Altcoins max 24h" value={(data.data.altcoins_max_24h ?? 0)} suffix="%" />
                 <MetricCard label="Total MCap 24h" value={(data.data.total_mcap_change_24h ?? 0)} suffix="%" />
-                <MetricCard label="Fear & Greed" value={(data.data.fear_greed ?? 0)} color={
+                <MetricCard label="Fear & Greed (contrarien)" value={(data.data.fear_greed ?? 0)} color={
                   (data.data.fear_greed ?? 0) >= 75 ? 'text-red-400' :
                   (data.data.fear_greed ?? 0) >= 55 ? 'text-amber-400' :
                   (data.data.fear_greed ?? 0) <= 25 ? 'text-emerald-400' : 'text-white'
                 } />
               </div>
+              <p className="text-xs text-gray-600 mt-2">Lecture contrarienne du Fear &amp; Greed : la peur extrême (≤25) a historiquement marqué des zones d&apos;achat, l&apos;avidité extrême (≥75) des zones de distribution.</p>
             </div>
           </>
         ) : (

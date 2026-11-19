@@ -157,8 +157,9 @@ async def fetch_mvrv(symbol: str) -> Optional[dict]:
         return _mock_mvrv(base)
 
     try:
-        data = await _http_get(
-            f"{COINGECKO_BASE}/coins/{cg_id}",
+        from utils.coingecko import cg_get
+        data = await cg_get(
+            f"/coins/{cg_id}",
             params={"localization": "false", "tickers": "false", "market_data": "true", "community_data": "false", "developer_data": "false"},
         )
         md = data.get("market_data", {}) if isinstance(data, dict) else {}
@@ -176,7 +177,7 @@ async def fetch_mvrv(symbol: str) -> Optional[dict]:
 
         # Try to get 30d ago price for a better realized-cap proxy
         try:
-            hist = await _http_get(f"{COINGECKO_BASE}/coins/{cg_id}/market_chart", params={"vs_currency": "usd", "days": "30"})
+            hist = await cg_get(f"/coins/{cg_id}/market_chart", params={"vs_currency": "usd", "days": "30"})
             prices = hist.get("prices", []) if isinstance(hist, dict) else []
             if prices and circulating > 0:
                 avg_price_30d = sum(p[1] for p in prices) / len(prices)
@@ -350,8 +351,9 @@ async def fetch_nvt(symbol: str) -> Optional[dict]:
         return _mock_nvt(base)
 
     try:
-        data = await _http_get(
-            f"{COINGECKO_BASE}/coins/{cg_id}",
+        from utils.coingecko import cg_get
+        data = await cg_get(
+            f"/coins/{cg_id}",
             params={"localization": "false", "tickers": "false", "market_data": "true", "community_data": "false", "developer_data": "false"},
         )
         md = data.get("market_data", {}) if isinstance(data, dict) else {}

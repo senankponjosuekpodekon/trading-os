@@ -93,7 +93,8 @@ async def _fetch_coingecko_coin(base: str) -> Optional[dict]:
     if not coin_id:
         return None
     try:
-        return await _http_get(f"{COINGECKO_BASE}/coins/{coin_id}")
+        from utils.coingecko import cg_get
+        return await cg_get(f"/coins/{coin_id}")
     except Exception:
         return None
 
