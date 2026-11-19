@@ -184,3 +184,51 @@ class TestGemAdapterRegistration:
         finally:
             monkeypatch.delenv("EXECUTION_LIVE_VENUES", raising=False)
             importlib.reload(ex)
+
+
+# ── close_venue_position : MARGIN/SYNTHETIC → bridge MT5 ───────────
+
+import risk.execution as rx
+
+
+def test_close_venue_mt5_missing_bridge(monkeypatch):
+    """Sans MT5_BRIDGE_URL/TOKEN → refus explicite, jamais d'appel HTTP."""
+    import asyncio
+    monkeypatch.setenv("MT5_BRIDGE_URL", "")
+    monkeypatch.setenv("MT5_BRIDGE_TOKEN", "")
+    r = asyncio.run(rx._close_via_mt5_bridge("EUR/USD"))
+    assert r["closed"] is False
+    assert "non configuré" in r["reason"]
+
+
+def test_mt5_symbol_mapping():
+    assert rx._mt5_symbol("EUR/USD") == "EURUSD"
+    assert rx._mt5_symbol("V75") == "V75"
+    assert rx._mt5_symbol("boom1000") == "BOOM1000"
+
+
+def test_close_venue_routes_margin_to_bridge(monkeypatch):
+    """Profil venue=MARGIN → _close_via_mt5_bridge, jamais _LIVE_ADAPTERS."""
+    import asyncio
+    calls = []
+
+    async def fake_bridge(symbol):
+        calls.append(symbol)
+        return {"closed": True, "venue": "MT5"}
+
+    class FakeProfile:
+        async def get(self, symbol):
+            return {"venue": "MARGIN"}
+
+    monkeypatch.setattr(rx, "_close_via_mt5_bridge", fake_bridge)
+    monkeypatch.setenv("MT5_BRIDGE_URL", "http://b:5555")
+    monkeypatch.setenv("MT5_BRIDGE_TOKEN", "t")
+
+    import utils.instrument_profile as ip
+    async def fake_profile(symbol):
+        return {"venue": "MARGIN"}
+    monkeypatch.setattr(ip, "get_instrument_profile", fake_profile)
+
+    r = asyncio.run(rx.close_venue_position("p1", "EUR/USD"))
+    assert r["closed"] is True
+    assert calls == ["EUR/USD"]

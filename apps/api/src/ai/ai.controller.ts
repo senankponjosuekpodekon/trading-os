@@ -447,4 +447,64 @@ export class AiController {
   agentsPerformance(@Body() body: any) {
     return this.ai.agentsPerformance(body);
   }
+
+  // ─── Copilot : conversations persistées (scope utilisateur via RLS) ───
+
+  @Get('copilot/conversations')
+  listCopilotConversations() {
+    return this.prisma.copilotConversation.findMany({
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+      select: { id: true, title: true, updatedAt: true },
+    });
+  }
+
+  @Get('copilot/conversations/:id')
+  async getCopilotConversation(@Param('id') id: string) {
+    const conv = await this.prisma.copilotConversation.findUnique({
+      where: { id },
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' },
+          select: { role: true, content: true, createdAt: true },
+        },
+      },
+    });
+    if (!conv) {
+      throw new HttpException('conversation introuvable', HttpStatus.NOT_FOUND);
+    }
+    return conv;
+  }
+
+  @Post('copilot/conversations')
+  createCopilotConversation(@Request() req: any, @Body() body: any) {
+    const title = typeof body?.title === 'string' ? body.title.slice(0, 80) : null;
+    return this.prisma.copilotConversation.create({
+      data: { userId: req.user.id, title },
+    });
+  }
+
+  @Post('copilot/conversations/:id/messages')
+  async appendCopilotMessages(@Param('id') id: string, @Body() body: any) {
+    const raw = Array.isArray(body?.messages) ? body.messages.slice(0, 10) : [];
+    const messages = raw
+      .filter((m: any) => (m?.role === 'user' || m?.role === 'assistant')
+        && typeof m?.content === 'string' && m.content.length > 0)
+      .map((m: any) => ({ conversationId: id, role: m.role, content: m.content.slice(0, 8000) }));
+    if (!messages.length) {
+      throw new HttpException('messages requis', HttpStatus.BAD_REQUEST);
+    }
+    const conv = await this.prisma.copilotConversation.findUnique({ where: { id } });
+    if (!conv) {
+      throw new HttpException('conversation introuvable', HttpStatus.NOT_FOUND);
+    }
+    await this.prisma.copilotMessage.createMany({ data: messages });
+    // Titre auto sur le premier message utilisateur ; bump updatedAt pour le tri.
+    const update: any = { updatedAt: new Date() };
+    if (!conv.title && messages[0]?.role === 'user') {
+      update.title = messages[0].content.slice(0, 80);
+    }
+    await this.prisma.copilotConversation.update({ where: { id }, data: update });
+    return { ok: true, count: messages.length };
+  }
 }

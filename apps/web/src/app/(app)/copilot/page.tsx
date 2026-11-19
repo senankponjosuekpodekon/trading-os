@@ -19,6 +19,7 @@ export default function CopilotPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [useContext, setUseContext] = useState(true);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: latestSignal } = useQuery({
@@ -36,6 +37,37 @@ export default function CopilotPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Hydrate la dernière conversation persistée (silencieux en cas d'échec —
+  // la persistance ne doit jamais bloquer le chat).
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: convs } = await api.get('/ai/copilot/conversations');
+        const latest = convs?.[0];
+        if (!latest) return;
+        const { data: conv } = await api.get(`/ai/copilot/conversations/${latest.id}`);
+        const msgs: Message[] = (conv.messages ?? []).map((m: any) => ({ role: m.role, content: m.content }));
+        if (msgs.length) {
+          setConversationId(latest.id);
+          setMessages(msgs);
+        }
+      } catch { /* pas d'historique — on garde l'accueil par défaut */ }
+    })();
+  }, []);
+
+  // Sauvegarde silencieuse : crée la conversation au 1er envoi, append ensuite.
+  const persist = async (msgs: { role: string; content: string }[]) => {
+    try {
+      let convId = conversationId;
+      if (!convId) {
+        const { data: conv } = await api.post('/ai/copilot/conversations', { title: msgs[0]?.content });
+        convId = conv.id;
+        setConversationId(convId);
+      }
+      await api.post(`/ai/copilot/conversations/${convId}/messages`, { messages: msgs });
+    } catch { /* persistance best-effort */ }
+  };
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -56,6 +88,7 @@ export default function CopilotPage() {
       }
       const { data } = await api.post('/ai/chat', payload);
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply, model: data.model, provider: data.provider }]);
+      persist([{ role: 'user', content: text }, { role: 'assistant', content: data.reply }]);
       refetchQuota();
     } catch (e: any) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Erreur : ${e?.response?.data?.message || e.message}` }]);

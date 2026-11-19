@@ -151,14 +151,50 @@ async def execute_signal(portfolio_id: str, signal_id: str | None,
         return {"status": "FAILED", "reason": str(e)}
 
 
+# Venues dont la clôture passe par le bridge MT5 d'exécution (le bridge est
+# la passerelle unique MT5 — l'API l'utilise pour ouvrir, l'engine pour
+# fermer; même endpoint /close filtré par magic dans les deux cas).
+_MT5_VENUES = {"MARGIN", "SYNTHETIC"}
+_MT5_MAGIC = 20261118
+
+
+def _mt5_symbol(symbol: str) -> str:
+    """'EUR/USD' → 'EURUSD' ; 'V75'/'EURUSD' inchangés."""
+    return symbol.replace("/", "").upper()
+
+
+async def _close_via_mt5_bridge(symbol: str) -> dict:
+    """POST /close {symbol, magic} sur le bridge d'exécution — ferme
+    uniquement les positions portant notre magic (jamais les manuelles)."""
+    import httpx
+    base = os.getenv("MT5_BRIDGE_URL", "").rstrip("/")
+    token = os.getenv("MT5_BRIDGE_TOKEN", "")
+    if not base or not token:
+        return {"closed": False, "reason": "MT5 bridge non configuré"}
+    r = await httpx.AsyncClient(timeout=10).post(
+        f"{base}/close",
+        json={"symbol": _mt5_symbol(symbol), "magic": _MT5_MAGIC},
+        headers={"Authorization": f"Bearer {token}"})
+    if r.status_code != 200:
+        return {"closed": False, "reason": f"bridge_http_{r.status_code}"}
+    data = r.json()
+    if data.get("error"):
+        return {"closed": False, "reason": str(data["error"])}
+    closed = data.get("closed") or []
+    return {"closed": bool(closed), "venue": "MT5", "result": data}
+
+
 async def close_venue_position(portfolio_id: str, symbol: str) -> dict:
     """Clôture côté broker d'une position live : résout le venue du symbole
-    puis appelle adapter.close_position(). Jamais d'exception vers le caller —
-    retourne {"closed": bool, "reason"?: str}."""
+    puis appelle adapter.close_position() — ou le bridge MT5 d'exécution
+    pour MARGIN/SYNTHETIC (chemin unique : le bridge). Jamais d'exception
+    vers le caller — retourne {"closed": bool, "reason"?: str}."""
     try:
         from utils.instrument_profile import get_instrument_profile
         profile = await get_instrument_profile(symbol)
         venue = profile.get("venue")
+        if venue in _MT5_VENUES:
+            return await _close_via_mt5_bridge(symbol)
         adapter = _LIVE_ADAPTERS.get(venue or "")
         if adapter is None:
             return {"closed": False,
