@@ -89,6 +89,9 @@ async def funding_rate(symbol: str):
         _set(cache_key, result)
         return result
     except Exception as e:
+        stale = _get_stale(cache_key)
+        if stale:
+            return stale
         raise HTTPException(status_code=503, detail=f"Funding rate unavailable: {e}") from e
 
 
@@ -110,6 +113,9 @@ async def open_interest(symbol: str):
         _set(cache_key, result)
         return result
     except Exception as e:
+        stale = _get_stale(cache_key)
+        if stale:
+            return stale
         raise HTTPException(status_code=503, detail=f"Open interest unavailable: {e}") from e
 
 
@@ -140,6 +146,9 @@ async def spot_perp_basis(symbol: str):
         _set(cache_key, result)
         return result
     except Exception as e:
+        stale = _get_stale(cache_key)
+        if stale:
+            return stale
         raise HTTPException(status_code=503, detail=f"Basis unavailable: {e}") from e
 
 

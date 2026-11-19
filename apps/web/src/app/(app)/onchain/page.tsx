@@ -163,10 +163,10 @@ export default function OnChainPage() {
           </h3>
           {btc ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <Metric label="Prix" value={`$${btc.price.toLocaleString('en-US')}`} icon={TrendingUp} color="text-orange-400" />
-              <Metric label="Transactions 24h" value={btc.transactions24h.toLocaleString('en-US')} icon={Database} color="text-orange-400" />
-              <Metric label="Mempool" value={btc.mempoolSize.toLocaleString('en-US')} sub="transactions en attente" icon={Wallet} color="text-orange-400" />
-              <Metric label="Fee recommandée" value={`${btc.suggestedFee} sat/vB`} icon={Gauge} color="text-orange-400" />
+              <Metric label="Prix" value={`$${(btc.price ?? 0).toLocaleString('en-US')}`} icon={TrendingUp} color="text-orange-400" />
+              <Metric label="Transactions 24h" value={(btc.transactions24h ?? 0).toLocaleString('en-US')} icon={Database} color="text-orange-400" />
+              <Metric label="Mempool" value={(btc.mempoolSize ?? 0).toLocaleString('en-US')} sub="transactions en attente" icon={Wallet} color="text-orange-400" />
+              <Metric label="Fee recommandée" value={`${btc.suggestedFee ?? '—'} sat/vB`} icon={Gauge} color="text-orange-400" />
             </div>
           ) : (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">Données BTC indisponibles</div>
@@ -180,10 +180,10 @@ export default function OnChainPage() {
           </h3>
           {eth ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <Metric label="Prix" value={`$${eth.price.toLocaleString('en-US')}`} icon={TrendingUp} color="text-indigo-400" />
-              <Metric label="Transactions 24h" value={eth.transactions24h.toLocaleString('en-US')} icon={Database} color="text-indigo-400" />
-              <Metric label="Gas median" value={`${eth.gasPriceMedian} gwei`} icon={Gauge} color="text-indigo-400" />
-              <Metric label="Market cap" value={`$${(eth.marketCap / 1e9).toFixed(1)}B`} icon={Wallet} color="text-indigo-400" />
+              <Metric label="Prix" value={`$${(eth.price ?? 0).toLocaleString('en-US')}`} icon={TrendingUp} color="text-indigo-400" />
+              <Metric label="Transactions 24h" value={(eth.transactions24h ?? 0).toLocaleString('en-US')} icon={Database} color="text-indigo-400" />
+              <Metric label="Gas median" value={`${eth.gasPriceMedian ?? '—'} gwei`} icon={Gauge} color="text-indigo-400" />
+              <Metric label="Market cap" value={`$${((eth.marketCap ?? 0) / 1e9).toFixed(1)}B`} icon={Wallet} color="text-indigo-400" />
             </div>
           ) : (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">Données ETH indisponibles</div>
