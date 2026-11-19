@@ -214,13 +214,16 @@ def _register_adapters():
     # Pas d'adapter MT5 engine : la soumission MT5 est unique côté API
     # (Mt5Connector — sizing contrat réel, stops_level, marge, réconciliation
     # des fills ambigus). MARGIN sans adapter Oanda = fail closed.
-    try:
-        from risk.adapters.jupiter import JupiterAdapter
-        j = JupiterAdapter.from_env()
-        if j:
-            _LIVE_ADAPTERS["GEM"] = j
-    except Exception as e:
-        logger.info("adapter_jupiter_unavailable", error=str(e))
+    # L'adapter GEM (swaps on-chain signés) n'est enregistré que si la venue
+    # est explicitement whiteliste : la keypair n'est pas chargée sinon.
+    if "GEM" in _LIVE_VENUES:
+        try:
+            from risk.adapters.jupiter import JupiterAdapter
+            j = JupiterAdapter.from_env()
+            if j:
+                _LIVE_ADAPTERS["GEM"] = j
+        except Exception as e:
+            logger.info("adapter_jupiter_unavailable", error=str(e))
 
 
 _register_adapters()

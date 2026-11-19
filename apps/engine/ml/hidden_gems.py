@@ -1264,6 +1264,19 @@ async def _fetch_dex_search(query: str = "trending") -> List[Dict[str, Any]]:
         return []
 
 
+def _paper_entry_ok(c: "GemCandidate") -> bool:
+    """Filtre d'entrée paper : score ≥60, pas de honeypot GoPlus, et pour
+    Solana la vendabilité Jupiter doit être VÉRIFIÉE (checked + sellable) —
+    DEFERRED/UNAVAILABLE/sellable=False bloquent l'entrée : pas de position
+    paper sur une revente non prouvée."""
+    if c.gem_score < 60 or (c.onchain or {}).get("honeypot"):
+        return False
+    if (c.chain or "").lower() == "solana":
+        chk = c.exec_check or {}
+        return chk.get("checked") is True and chk.get("sellable") is True
+    return True
+
+
 async def discover_hidden_gems(
     *,
     min_liquidity: float = 50_000,
@@ -1623,17 +1636,20 @@ async def discover_hidden_gems(
         if isinstance(c_llm, dict) and c_llm.get("conviction") is not None and c.token_address
     ), return_exceptions=True)
 
-    # Paper trading : positions virtuelles sur les gems qualifiés (score ≥60,
-    # pas de honeypot) — la stratégie TP/SL est mesurée en conditions réelles.
+    # Paper trading : positions virtuelles sur les gems qualifiés — le filtre
+    # _paper_entry_ok (module level, testable) exige la vendabilité vérifiée
+    # pour Solana.
+
     from ml.gem_paper_trader import maybe_open_position
     await _asyncio.gather(*(
         maybe_open_position({
             "chain": c.chain, "token_address": c.token_address, "symbol": c.symbol,
             "name": c.name, "price": c.price, "gem_score": c.gem_score,
             "liquidity": c.liquidity, "volume_24h": c.volume_24h,
+            "exec_check": c.exec_check,
         })
         for c in top_gems
-        if c.gem_score >= 60 and not (c.onchain or {}).get("honeypot")
+        if _paper_entry_ok(c)
     ), return_exceptions=True)
 
     return {

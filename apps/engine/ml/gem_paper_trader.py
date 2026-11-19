@@ -162,6 +162,8 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
             "size_usd": (gate.get("notional") or VIRTUAL_SIZE_USD),
             "remaining_pct": 100.0,
             "gate": gate.get("state_summary"),
+            "exec_check": gem.get("exec_check"),
+            "mark_source": "dexscreener_spot",
             "max_price": float(gem["price"]),
             "status": "OPEN",
             "tp1_hit": False,
@@ -399,6 +401,9 @@ async def paper_stats() -> Dict[str, Any]:
     wins = [p for p in perfs if p > 0]
     return {
         "status": "ok" if closed else "collecting",
+        # Marques = prix spot Dexscreener (mid), pas une quote de vente
+        # exécutable : le P&L latent surestime légèrement la sortie réelle.
+        "mark_source": "dexscreener_spot",
         "open_count": len(open_pos),
         "closed_count": len(closed),
         "win_rate_pct": round(len(wins) / len(perfs) * 100, 1) if perfs else None,

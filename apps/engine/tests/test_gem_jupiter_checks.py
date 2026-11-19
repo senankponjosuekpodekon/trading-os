@@ -79,3 +79,108 @@ async def test_missing_result_is_not_silently_skipped(monkeypatch):
     await hidden_gems._apply_jupiter_checks([gem])
     assert gem.exec_check['checked'] is False
     assert gem.warnings
+
+
+def _c(chain='solana', score=80, exec_check=None, honeypot=False):
+    return SimpleNamespace(chain=chain, gem_score=score,
+                           exec_check=exec_check, onchain={'honeypot': honeypot})
+
+
+class TestPaperEntryGate:
+    def test_solana_requires_verified_sellability(self):
+        ok = {'checked': True, 'sellable': True}
+        assert hidden_gems._paper_entry_ok(_c(exec_check=ok)) is True
+
+    @pytest.mark.parametrize('chk', [
+        None,
+        {},
+        {'checked': False, 'sellable': True},
+        {'checked': True, 'sellable': False},
+        {'checked': True, 'sellable': None},
+        {'checked': False, 'status': 'DEFERRED'},
+        {'checked': False, 'status': 'UNAVAILABLE'},
+    ])
+    def test_solana_unverified_or_unsellable_is_blocked(self, chk):
+        assert hidden_gems._paper_entry_ok(_c(exec_check=chk)) is False
+
+    def test_non_solana_uses_honeypot_flag_only(self):
+        assert hidden_gems._paper_entry_ok(_c(chain='ethereum')) is True
+        assert hidden_gems._paper_entry_ok(_c(chain='ethereum', honeypot=True)) is False
+
+    def test_score_floor_and_honeypot_apply_everywhere(self):
+        assert hidden_gems._paper_entry_ok(_c(score=59)) is False
+        assert hidden_gems._paper_entry_ok(_c(honeypot=True)) is False
+
+
+class TestJupiterAdapterGuards:
+    def _adapter(self, monkeypatch):
+        from risk.adapters import jupiter as ja
+        monkeypatch.setattr(ja, "_LIVE_CHECK", None, raising=False)
+        a = ja.JupiterAdapter.__new__(ja.JupiterAdapter)
+        a._key_b58, a._rpc = "k", "rpc"
+        a._keypair = None
+        return a, ja
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_blocks_swap(self, monkeypatch):
+        a, _ = self._adapter(monkeypatch)
+        monkeypatch.setenv("GEM_TRADING_DISABLED", "1")
+        with pytest.raises(RuntimeError, match="kill switch|disabled"):
+            await a.place_order("mintaddr12345678901234567890", "BUY", 10, 1.0)
+
+    @pytest.mark.asyncio
+    async def test_notional_cap_blocks_oversized_swap(self, monkeypatch):
+        a, _ = self._adapter(monkeypatch)
+        monkeypatch.delenv("GEM_TRADING_DISABLED", raising=False)
+        monkeypatch.setenv("GEM_MAX_TRADE_USD", "25")
+        with pytest.raises(ValueError, match="GEM_MAX_TRADE_USD"):
+            await a.place_order("mintaddr12345678901234567890", "BUY", 30, 1.0)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('chk', [
+        {'checked': False, 'sellable': None, 'status': 'DEFERRED'},
+        {'checked': True, 'sellable': False, 'status': 'NO_EXIT_ROUTE'},
+        {'checked': True, 'sellable': None, 'status': 'STALE'},
+    ])
+    async def test_unverified_sellability_blocks_swap(self, monkeypatch, chk):
+        a, _ = self._adapter(monkeypatch)
+        monkeypatch.delenv("GEM_TRADING_DISABLED", raising=False)
+        from ml import jupiter_check
+        monkeypatch.setattr(jupiter_check, "check_exit_liquidity",
+                            AsyncMock(return_value=chk))
+        with pytest.raises(RuntimeError, match="sellability refused"):
+            await a.place_order("mintaddr12345678901234567890", "BUY", 10, 1.0)
+
+    @pytest.mark.asyncio
+    async def test_sellability_check_failure_blocks_swap(self, monkeypatch):
+        a, _ = self._adapter(monkeypatch)
+        monkeypatch.delenv("GEM_TRADING_DISABLED", raising=False)
+        from ml import jupiter_check
+        monkeypatch.setattr(jupiter_check, "check_exit_liquidity",
+                            AsyncMock(side_effect=RuntimeError("boom")))
+        with pytest.raises(RuntimeError, match="check failed"):
+            await a.place_order("mintaddr12345678901234567890", "BUY", 10, 1.0)
+
+
+class TestGemAdapterRegistration:
+    def test_jupiter_adapter_not_registered_without_venue_whitelist(self):
+        import importlib
+        import risk.execution as ex
+        importlib.reload(ex)
+        assert "GEM" not in ex._LIVE_ADAPTERS
+
+    def test_jupiter_adapter_registered_when_gem_whitelisted(self, monkeypatch):
+        import importlib
+        import risk.execution as ex
+        monkeypatch.setenv("EXECUTION_LIVE_VENUES", "GEM")
+        monkeypatch.setenv("SOLANA_PRIVATE_KEY", "x" * 87)
+        importlib.reload(ex)
+        try:
+            import risk.adapters.jupiter as ja
+            monkeypatch.setattr(ja.JupiterAdapter, "from_env",
+                                classmethod(lambda cls: object()))
+            ex._register_adapters()
+            assert "GEM" in ex._LIVE_ADAPTERS
+        finally:
+            monkeypatch.delenv("EXECUTION_LIVE_VENUES", raising=False)
+            importlib.reload(ex)

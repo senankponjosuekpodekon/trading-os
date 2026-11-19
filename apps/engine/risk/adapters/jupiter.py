@@ -49,13 +49,35 @@ class JupiterAdapter(VenueAdapter):
                           stop_loss: float | None = None,
                           take_profit: float | None = None) -> dict:
         _ = (stop_loss, take_profit)  # swap AMM : pas d'ordre conditionnel
+
+        # Gardes — la venue la plus risquée reste doublement verrouillée.
+        if os.getenv("GEM_TRADING_DISABLED") == "1":
+            raise RuntimeError("GEM trading disabled (kill switch)")
+        max_trade = float(os.getenv("GEM_MAX_TRADE_USD", "25"))
+        if qty > max_trade:
+            raise ValueError(f"qty {qty} USD > GEM_MAX_TRADE_USD {max_trade}")
+
         # symbol = mint address pour les gems
         mint = symbol if len(symbol) > 20 else symbol
+
+        # Re-check sellability JUSTE avant de signer : une route aller-retour
+        # cotée il y a 30 min ne garantit rien. Un honeypot révélé entre le
+        # scan et l'ordre bloque le swap.
+        try:
+            from ml.jupiter_check import check_exit_liquidity
+            chk = await check_exit_liquidity(mint)
+        except Exception as e:
+            raise RuntimeError(f"pre-swap sellability check failed: {e}") from e
+        if not (chk.get("checked") is True and chk.get("sellable") is True):
+            raise RuntimeError(
+                f"pre-swap sellability refused: {chk.get('status')}")
+
+        slippage = min(int(os.getenv("GEM_MAX_SLIPPAGE_BPS", "300")), 500)
         lamports = int(qty * 1_000_000)  # qty en USD → USDC 6 décimales
         async with httpx.AsyncClient(timeout=15) as c:
             q = (await c.get(f"{_QUOTE}/quote", params={
                 "inputMint": _USDC, "outputMint": mint,
-                "amount": lamports, "slippageBps": 300})).json()
+                "amount": lamports, "slippageBps": slippage})).json()
             if "outAmount" not in q:
                 raise RuntimeError(f"jupiter quote failed: {q}")
             s = (await c.post(f"{_QUOTE}/swap", json={
@@ -90,7 +112,8 @@ class JupiterAdapter(VenueAdapter):
         async with httpx.AsyncClient(timeout=15) as c:
             q = (await c.get(f"{_QUOTE}/quote", params={
                 "inputMint": symbol, "outputMint": _USDC,
-                "amount": amount, "slippageBps": 300})).json()
+                "amount": amount,
+                "slippageBps": min(int(os.getenv("GEM_MAX_SLIPPAGE_BPS", "300")), 500)})).json()
             if "outAmount" not in q:
                 raise RuntimeError(f"jupiter quote failed: {q}")
             s = (await c.post(f"{_QUOTE}/swap", json={
