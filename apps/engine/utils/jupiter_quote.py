@@ -1,4 +1,5 @@
 import asyncio
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from time import monotonic
@@ -38,6 +39,7 @@ class JupiterQuote:
     _deadline_monotonic: float = field(repr=False)
     source: Literal["JUPITER_SWAP_V2"] = "JUPITER_SWAP_V2"
     execution_enabled: Literal[False] = False
+    price_impact_pct: float | None = None
 
     @property
     def is_fresh(self) -> bool:
@@ -98,6 +100,9 @@ def _parse_quote(data: object, input_mint: str, output_mint: str, amount: int,
         router = data["router"]
         if router not in ("metis", "jupiterz", "dflow", "okx"):
             raise ValueError("UNSUPPORTED_ROUTER")
+        impact = data.get('priceImpact')
+        if impact is not None and (isinstance(impact, bool) or not isinstance(impact, (int, float)) or not math.isfinite(impact)):
+            raise ValueError('INVALID_IMPACT')
         checked_at = datetime.now(timezone.utc)
         age = received - started
         if not 0 <= age < _MAX_AGE_SECONDS:
@@ -114,6 +119,7 @@ def _parse_quote(data: object, input_mint: str, output_mint: str, amount: int,
             fee_bps=fee_bps, fee_mint=data["feeMint"], router=router,
             checked_at=checked_at, expires_at=expires_at, _issued_monotonic=started,
             _deadline_monotonic=received + (expires_at - checked_at).total_seconds(),
+            price_impact_pct=float(impact) if impact is not None else None,
         )
         quote.require_fresh()
         return quote
@@ -154,6 +160,15 @@ class JupiterQuoteReader:
                     response.raise_for_status()
                     data = response.json()
             except httpx.HTTPStatusError as error:
+                if error.response.status_code == 400:
+                    try:
+                        body = error.response.json()
+                    except ValueError:
+                        body = None
+                    if isinstance(body, dict) and body.get('transaction') in (None, '') and body.get('taker') is None:
+                        codes = ('NO_ROUTES_FOUND', 'COULD_NOT_FIND_ANY_ROUTE')
+                        if body.get('error') in codes or body.get('errorCode') in codes:
+                            raise JupiterQuoteError('NO_ROUTE', http_status=400) from None
                 raise JupiterQuoteError("HTTP_ERROR", http_status=error.response.status_code) from None
             except (httpx.HTTPError, TimeoutError):
                 raise JupiterQuoteError("UNAVAILABLE") from None

@@ -209,6 +209,44 @@ async def test_timeout_does_not_trigger_an_automatic_retry():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('code', ['NO_ROUTES_FOUND', 'COULD_NOT_FIND_ANY_ROUTE'])
+async def test_only_explicit_machine_errors_identify_missing_routes(code):
+    reader, requests = reader_for({'error': code}, status=400)
+    with pytest.raises(JupiterQuoteError, match='NO_ROUTE') as error:
+        await reader.get_quote(USDC, SOL, 1000000)
+    assert error.value.http_status == 400
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('data', [
+    {'error': 'No route available right now'}, {'errorCode': 1, 'router': 'metis'},
+    {'errorMessage': 'NO_ROUTES_FOUND'}, {'error': 'NO_ROUTES_FOUND', 'transaction': 'unexpected'},
+])
+async def test_ambiguous_http_errors_are_not_classified_as_missing_liquidity(data):
+    reader, _ = reader_for(data, status=400)
+    with pytest.raises(JupiterQuoteError) as error:
+        await reader.get_quote(USDC, SOL, 1000000)
+    assert error.value.code == 'HTTP_ERROR'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('impact', [-0.25, 0, 0.5, 25])
+async def test_v2_price_impact_uses_percentage_points_without_magnitude_guessing(impact):
+    reader, _ = reader_for(response(priceImpact=impact, priceImpactPct='ignored-legacy-field'))
+    quote = await reader.get_quote(USDC, SOL, 1000000)
+    assert quote.price_impact_pct == impact
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('impact', [float('nan'), float('inf'), '0.25', True])
+async def test_invalid_price_impacts_fail_closed(impact):
+    reader, _ = reader_for(response(priceImpact=impact))
+    with pytest.raises(JupiterQuoteError, match='INVALID_RESPONSE'):
+        await reader.get_quote(USDC, SOL, 1000000)
+
+
+@pytest.mark.asyncio
 async def test_total_request_deadline_is_enforced(monkeypatch):
     monkeypatch.setattr(module, '_HTTP_TIMEOUT_SECONDS', 0.01)
 

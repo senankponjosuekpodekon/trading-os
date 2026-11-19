@@ -54,6 +54,54 @@ class GemCandidate:
     flow: Dict[str, Any] | None = None
 
 
+async def _apply_jupiter_checks(candidates: List[GemCandidate]) -> None:
+    from ml.jupiter_check import check_exit_liquidity_batch
+    import math
+
+    solana = [c for c in candidates if (c.chain or '').lower() == 'solana' and c.token_address]
+    if not solana:
+        return
+    try:
+        results = await check_exit_liquidity_batch([c.token_address for c in solana])
+    except Exception:
+        logger.warning('jupiter_quote_checks_unavailable')
+        results = []
+    for index, candidate in enumerate(solana):
+        result = results[index] if isinstance(results, list) and index < len(results) else None
+        if not isinstance(result, dict):
+            result = {'checked': False, 'sellable': None, 'status': 'UNAVAILABLE',
+                      'source': 'JUPITER_SWAP_V2', 'quote_only': True, 'execution_enabled': False}
+        candidate.exec_check = result
+        status = result.get('status')
+        if result.get('checked') is not True or status not in ('QUOTED', 'NO_EXIT_ROUTE'):
+            messages = {
+                'DEFERRED': 'Contrôle Jupiter différé — budget de lecture atteint, revente non vérifiée',
+                'NO_ENTRY_ROUTE': "Aucune route d'achat pour le montant testé — revente non vérifiée",
+                'REJECTED': 'Cotation Jupiter rejetée par les validations — revente non vérifiée',
+                'INVALID_INPUT': 'Adresse mint ou montant invalide — revente non vérifiée',
+                'STALE': 'Cotation Jupiter périmée — revente non vérifiée',
+            }
+            candidate.warnings.append(messages.get(status, 'Jupiter indisponible — revente non vérifiée'))
+            continue
+        loss = result.get('round_trip_loss_pct')
+        valid_loss = type(loss) in (int, float) and math.isfinite(loss)
+        if result.get('sellable') is False:
+            candidate.gem_score = max(0, candidate.gem_score - 40)
+            candidate.warnings.append('Revente non cotée pour le montant testé — aucune route disponible'
+                                      if status == 'NO_EXIT_ROUTE' else 'Cotations aller-retour extrêmement coûteuses (≥90%)')
+        elif result.get('sellable') is True and valid_loss:
+            if loss > 30:
+                candidate.gem_score = max(0, candidate.gem_score - 30)
+                candidate.warnings.append(f'Cotations aller-retour coûteuses (~{loss:.0f}%)')
+            elif loss > 15:
+                candidate.gem_score = max(0, candidate.gem_score - 12)
+                candidate.warnings.append(f'Sortie cotée coûteuse (~{loss:.0f}% aller-retour)')
+            elif loss < 5:
+                candidate.reasons.append(f'Aller-retour coté (~{loss:.1f}%) — exécution non garantie')
+        else:
+            candidate.warnings.append('Contrôle Jupiter incomplet — revente non vérifiée')
+
+
 # Narratives — taxonomie des thèmes de marché crypto.
 # Un token est rattaché à une narrative par keywords sur nom/symbole/description.
 _NARRATIVES: Dict[str, List[str]] = {
@@ -1435,34 +1483,12 @@ async def discover_hidden_gems(
         if c.token_address and isinstance(c.smart_money, dict)
     ), return_exceptions=True)
 
-    # Test d'exécutabilité réelle Jupiter (solana) : aller-retour SOL→token→SOL
-    # ~$100. Les AMM n'ont pas de carnet d'ordres — le quote Jupiter est le prix
-    # réellement exécutable ; une revente non cotée = honeypot/pool piégé.
-    from ml.jupiter_check import check_exit_liquidity
-    _solana_gems = [c for c in top_gems
-                    if (c.chain or "").lower() == "solana" and c.token_address]
-    jup_results = await _asyncio.gather(*(
-        _asyncio.wait_for(check_exit_liquidity(c.token_address), timeout=8.0)
-        for c in _solana_gems
-    ), return_exceptions=True)
-    for c, res in zip(_solana_gems, jup_results):
-        if not isinstance(res, dict) or not res.get("checked"):
-            continue
-        c.exec_check = res
-        loss = res.get("round_trip_loss_pct")
-        if res.get("sellable") is False:
-            c.gem_score = max(0, c.gem_score - 40)
-            c.warnings.append("Sortie impossible — revente non cotée (honeypot probable)")
-        elif loss is not None and loss > 30:
-            c.gem_score = max(0, c.gem_score - 30)
-            c.warnings.append(f"Aller-retour coûte ~{loss:.0f}% — pool piégé")
-        elif loss is not None and loss > 15:
-            c.gem_score = max(0, c.gem_score - 12)
-            c.warnings.append(f"Sortie coûteuse (~{loss:.0f}% aller-retour)")
-        elif loss is not None and loss < 5:
-            c.reasons.append(f"Sortie saine (aller-retour ~{loss:.1f}%)")
+    # Contrôle de cotations Jupiter (solana) : aller-retour SOL→token→SOL
+    # pour 0.7 SOL. Le budget court limite la couverture de l'API publique ;
+    # une route non cotée ne prouve ni une panne globale ni un honeypot.
+    await _apply_jupiter_checks(top_gems)
 
-    # Re-tri après les ajustements Jupiter — un pool piégé redescend
+    # Re-tri après les ajustements de coûts cotés et de routes indisponibles
     top_gems.sort(key=lambda c: c.gem_score, reverse=True)
 
     # Score dans le snapshot le plus récent → calibration future (backtest)
