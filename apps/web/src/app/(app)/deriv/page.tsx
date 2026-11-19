@@ -154,7 +154,7 @@ export default function DerivPage() {
             <span className="font-medium">{health?.api_live ? '⬤ API Deriv connectée' : '◎ Mode démo (API inaccessible)'}</span>
           )}
           {!health?.token_configured && (
-            <span className="ml-auto text-xs opacity-70">DERIV_API_TOKEN manquant — paper trade uniquement</span>
+            <span className="ml-auto text-xs opacity-70">Analyse seule — l&apos;exécution synthétiques passe par CFD MT5</span>
           )}
         </div>
 
@@ -310,12 +310,10 @@ export default function DerivPage() {
               {scalp.isPending ? <><RefreshCw className="w-4 h-4 animate-spin" />Analyse…</> : <><Zap className="w-4 h-4" />Analyser & Scalper</>}
             </button>
 
-            {!health?.token_configured && (
-              <div className="flex items-start gap-2 mt-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                <AlertCircle className="w-3.5 h-3.5 text-yellow-400 shrink-0 mt-0.5" />
-                <p className="text-xs text-yellow-400">Mode paper — ajoutez DERIV_API_TOKEN pour des trades réels.</p>
-              </div>
-            )}
+            <div className="flex items-start gap-2 mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+              <AlertCircle className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-400">Analyse paper uniquement — les contrats digitaux sont désactivés par design ; la voie d&apos;exécution synthétiques est le CFD MT5. Vue régime : <a href="/synthetic" className="underline">Synthetic Markets</a></p>
+            </div>
 
             {result && (
               <div className={`mt-4 p-4 rounded-xl border ${

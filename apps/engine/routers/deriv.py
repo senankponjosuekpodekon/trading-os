@@ -8,7 +8,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from typing import List, Literal
 import asyncio
-import json
 import os
 import time
 import pandas as pd
@@ -22,9 +21,6 @@ from utils.deriv_client import deriv_client
 router = APIRouter()
 
 DERIV_TOKEN   = os.getenv("DERIV_API_TOKEN", "")
-# Kill-switch explicite pour le trading réel : sans DERIV_TRADING_ENABLED=1
-# l'endpoint scalp reste en mode paper même si un token est configuré.
-DERIV_TRADING_ENABLED = os.getenv("DERIV_TRADING_ENABLED", "").strip().lower() in ("1", "true", "yes")
 DERIV_MAX_STAKE = float(os.getenv("DERIV_MAX_STAKE", "25"))
 V75_SYMBOL    = "R_75"   # Volatility 75 Index
 V75_GRANULARITY = 60     # 1 minute en secondes
@@ -196,69 +192,6 @@ def _to_wire_symbol(symbol: str) -> str:
     return _DERIV_WIRE_ALIASES.get(symbol, symbol)
 
 
-async def _deriv_trade_buy(buy_params: dict, price: float) -> dict:
-    """
-    Place un trade via le nouveau flux Deriv Options :
-      POST /trading/v1/options/accounts/{accountId}/otp  →  wss .../ws/real?otp=…
-      puis envoi du buy sur la session scopée compte (pas d'authorize requis).
-
-    Requis dans l'env :
-      DERIV_APP_ID      — ID d'app enregistrée (dashboard developers.deriv.com)
-      DERIV_ACCOUNT_ID  — ID du compte Options (ex. DOT90004580, ou VRTC…/CR…)
-      DERIV_API_TOKEN   — Bearer token (PAT/OAuth avec scope trade)
-    """
-    import httpx
-    import websockets
-
-    account = os.getenv("DERIV_ACCOUNT_ID", "")
-    app_id  = os.getenv("DERIV_APP_ID", "")
-    if not account or not app_id:
-        return {"error": {"message": "DERIV_ACCOUNT_ID / DERIV_APP_ID non configurés"}}
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(
-                f"https://api.derivws.com/trading/v1/options/accounts/{account}/otp",
-                headers={
-                    "Deriv-App-ID": app_id,
-                    "Authorization": f"Bearer {DERIV_TOKEN}",
-                },
-            )
-            r.raise_for_status()
-            ws_url = (r.json().get("data") or {}).get("url")
-        if not ws_url:
-            return {"error": {"message": "OTP Deriv: aucune URL WS retournée"}}
-    except Exception as e:
-        return {"error": {"message": f"OTP Deriv: {e}"}}
-
-    try:
-        async with websockets.connect(ws_url, ping_interval=None, open_timeout=10) as ws:
-            async def _roundtrip(payload: dict, timeout: float = 15.0) -> dict:
-                await ws.send(json.dumps(payload))
-                return json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
-
-            # 1) proposal — le nouveau schéma utilise `underlying_symbol`
-            prop = await _roundtrip({
-                "proposal":          1,
-                "amount":            price,
-                "basis":             buy_params["basis"],
-                "contract_type":     buy_params["contract_type"],
-                "currency":          buy_params["currency"],
-                "duration":          buy_params["duration"],
-                "duration_unit":     buy_params["duration_unit"],
-                "underlying_symbol": buy_params["symbol"],
-            })
-            if "error" in prop:
-                return prop
-            proposal_id = prop.get("proposal", {}).get("id")
-            if not proposal_id:
-                return {"error": {"message": "Proposal sans id"}}
-
-            # 2) buy par proposal id
-            return await _roundtrip({"buy": proposal_id, "price": price})
-    except Exception as e:
-        return {"error": {"message": str(e)}}
-
 
 async def _fetch_v75_candles(symbol: str = V75_SYMBOL, count: int = 100) -> list:
     """Récupère les bougies 1min du V75 depuis l'API Deriv."""
@@ -350,9 +283,9 @@ async def analyze_v75(req: DerivTickRequest):
 @router.post("/deriv/scalp")
 async def scalp_v75(req: DerivScalpRequest):
     """
-    Analyse + suggestion de trade scalp V75.
-    En mode paper : retourne le trade suggéré sans l'exécuter.
-    En mode live (DERIV_TOKEN configuré) : place le contrat via API Deriv.
+    Analyse + suggestion de trade scalp (paper only).
+    Les contrats digitaux CALL/PUT ne sont plus exécutables : la voie
+    d'exécution des synthétiques Deriv est le CFD via MT5 (SL/TP broker).
     """
     candles = await _fetch_v75_candles(req.symbol, 100)
     source  = "live"
@@ -437,52 +370,10 @@ async def scalp_v75(req: DerivScalpRequest):
 
     risk_engine.register_position(req.symbol, direction)
 
-    # Mode live : place le trade via API Deriv (avec risk gate)
-    # authorize + buy sur la MÊME session WS — l'auth Deriv est par connexion.
-    # DERIV_TRADING_ENABLED=1 requis : garde-fou contre tout ordre réel
-    # déclenché par accident (endpoint, cron, ou clé moteur compromise).
-    if DERIV_TOKEN and DERIV_TRADING_ENABLED and source == "live":
-        buy_params = {
-            "amount":        adjusted_stake,
-            "basis":         "stake",
-            "contract_type": signal,
-            "currency":      "USD",
-            "duration":      req.duration,
-            "duration_unit": "m",
-            "symbol":        _to_wire_symbol(req.symbol),
-        }
-        if os.getenv("DERIV_ACCOUNT_ID") and os.getenv("DERIV_APP_ID"):
-            # Nouvelle API Options : OTP REST → session WS scopée compte → buy
-            buy_resp = await _deriv_trade_buy(buy_params, adjusted_stake)
-        else:
-            # Flux legacy (ancien token) — authorize + buy sur la connexion partagée
-            auth_resp = await _deriv_request({"authorize": DERIV_TOKEN})
-            if "error" in auth_resp:
-                risk_engine.unregister_position(req.symbol)
-                return {"action": "AUTH_FAILED", "error": auth_resp["error"]["message"]}
-            buy_resp = await _deriv_request(
-                {"buy": 1, "price": adjusted_stake, "parameters": buy_params},
-                timeout=15,
-            )
-        if "error" in buy_resp:
-            risk_engine.unregister_position(req.symbol)
-            return {"action": "BUY_FAILED", "error": buy_resp["error"]["message"], "analysis": analysis}
-
-        return {
-            "action":      "PLACED",
-            "contract_id": buy_resp.get("buy", {}).get("contract_id"),
-            "buy_price":   buy_resp.get("buy", {}).get("buy_price"),
-            "trade":       trade_suggestion,
-            "analysis":    analysis,
-            "source":      "live",
-            "risk":        {
-                "decision":       assessment.decision.value,
-                "size_multiplier": assessment.size_multiplier,
-                "risk_pct":        assessment.risk_pct,
-                "reasons":         assessment.reasons,
-            },
-        }
-
+    # Analyse seule — l'exécution digitale (CALL/PUT) est supprimée par design :
+    # la bonne voie Deriv est le CFD MT5 (positions directionnelles + SL/TP
+    # broker), pas les paris à échéance. Ce endpoint reste un signal de scalp
+    # paper, jamais un chemin d'ordre.
     return {
         "action":     "PAPER",
         "trade":      trade_suggestion,
@@ -494,7 +385,7 @@ async def scalp_v75(req: DerivScalpRequest):
             "risk_pct":        assessment.risk_pct,
             "reasons":         assessment.reasons,
         },
-        "note":       "Paper trade — configurez DERIV_API_TOKEN pour placer des trades réels",
+        "note":       "Analyse paper — l'exécution synthétiques se fait via CFD MT5, pas via contrats digitaux",
     }
 
 

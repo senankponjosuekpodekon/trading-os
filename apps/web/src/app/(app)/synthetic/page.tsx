@@ -63,7 +63,7 @@ export default function SyntheticPage() {
           <h2 className="text-xl font-semibold text-white flex items-center gap-2">
             <Activity className="w-5 h-5 text-emerald-400" />Synthetic Markets
           </h2>
-          <p className="text-gray-500 text-sm mt-0.5">Statistiques Deriv — pas de SMC / on-chain ici</p>
+          <p className="text-gray-500 text-sm mt-0.5">Statistiques Deriv — pas de SMC / on-chain ici. Vue scalp temps réel : <a href="/deriv" className="underline text-blue-400">Deriv Scalping</a> (R_75 = V75)</p>
         </div>
 
         {isLoading && (
