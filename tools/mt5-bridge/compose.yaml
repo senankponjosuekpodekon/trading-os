@@ -14,7 +14,10 @@ services:
     environment:
       VNC_PW: ${MT5_SANDBOX_DESKTOP_PASSWORD:?Set a dedicated desktop password}
       MT5_BRIDGE_TOKEN: ${MT5_SANDBOX_BRIDGE_TOKEN:?Set a dedicated bridge token}
-      MT5_READ_ONLY: "1"
+      MT5_READ_ONLY: ${MT5_SANDBOX_READ_ONLY:-1}
+      MT5_ALLOWED_SYMBOLS: ${MT5_SANDBOX_ALLOWED_SYMBOLS:-}
+      MT5_MAX_VOLUME: ${MT5_SANDBOX_MAX_VOLUME:-0.05}
+      MT5_MAX_ORDERS_MIN: ${MT5_SANDBOX_MAX_ORDERS_MIN:-4}
       MT5_LOGIN: ""
       MT5_PASSWORD: ""
       MT5_SERVER: ""

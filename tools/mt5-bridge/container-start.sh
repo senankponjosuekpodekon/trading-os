@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export MT5_READ_ONLY=1
+: "${MT5_READ_ONLY:=1}"
 export MT5_BIND_HOST=0.0.0.0
 export MT5_BRIDGE_PORT=5555
 : "${MT5_BRIDGE_TOKEN:?MT5_BRIDGE_TOKEN is required}"
@@ -26,5 +26,5 @@ if [ ! -f "$TERMINAL" ]; then
 else
     wine "$TERMINAL" &
 fi
-echo 'Starting read-only bridge; API availability does not imply broker connectivity.'
+echo "Starting bridge MT5_READ_ONLY=$MT5_READ_ONLY; API availability does not imply broker connectivity."
 exec wine "$PYDIR/python.exe" -c 'from waitress import serve; from server import app; serve(app, host="0.0.0.0", port=5555, threads=2)'
