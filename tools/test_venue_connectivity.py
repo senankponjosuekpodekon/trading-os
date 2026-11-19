@@ -21,22 +21,45 @@ class ConnectivityTests(unittest.TestCase):
                 self.assertIsNone(result.get("account"))
 
     def test_authenticated_reads_never_place_orders_or_return_credentials(self):
-        responses = [{"serverTime": 1700000000000}, {"canTrade": True, "balances": [{"asset": "USDT", "free": "100", "locked": "0"}]}]
+        responses = [{"serverTime": 1700000000000},
+                     {"canTrade": True, "balances": [{"asset": "USDT", "free": "100", "locked": "0"},
+                                                     {"asset": "BTC", "free": "0", "locked": "0"}]},
+                     [{"symbol": "ETHUSDT", "side": "BUY", "type": "LIMIT", "status": "NEW",
+                       "price": "3000", "origQty": "0.1"}]]
         with patch.object(venue_check, "read_json", side_effect=responses) as read:
             result = venue_check.check_binance("spot", ("test-api-key", "test-secret"))
-            url = read.call_args.args[0]
+            url = read.call_args_list[1].args[0]
             self.assertIn("/api/v3/account?", url)
             self.assertIn("signature=", url)
             self.assertFalse(result["executionEnabled"])
             self.assertEqual(result["status"], "AUTHENTICATED_READ_ONLY")
+            self.assertEqual(result["balances"], [{"asset": "USDT", "free": "100", "locked": "0"}])
+            self.assertEqual(len(result["openOrders"]), 1)
+            self.assertIn("/api/v3/openOrders?", read.call_args_list[2].args[0])
             self.assertNotIn("test-api-key", json.dumps(result))
             self.assertNotIn("test-secret", json.dumps(result))
             self.assertNotIn("signature", json.dumps(result))
 
     def test_futures_uses_the_futures_account_endpoint(self):
-        with patch.object(venue_check, "read_json", side_effect=[{"serverTime": 1700000000000}, {"assets": [], "positions": []}]) as read:
-            venue_check.check_binance("futures", ("key", "secret"))
-            self.assertIn("demo-fapi.binance.com/fapi/v3/account?", read.call_args.args[0])
+        account = {"assets": [{"asset": "USDT", "walletBalance": "500", "unrealizedProfit": "0"}],
+                   "positions": [{"symbol": "BTCUSDT", "positionAmt": "0.01", "entryPrice": "90000",
+                                  "unrealizedProfit": "-1"},
+                                 {"symbol": "ETHUSDT", "positionAmt": "0", "entryPrice": "0",
+                                  "unrealizedProfit": "0"}]}
+        with patch.object(venue_check, "read_json", side_effect=[{"serverTime": 1700000000000}, account, []]) as read:
+            result = venue_check.check_binance("futures", ("key", "secret"))
+            self.assertIn("demo-fapi.binance.com/fapi/v3/account?", read.call_args_list[1].args[0])
+            self.assertIn("demo-fapi.binance.com/fapi/v1/openOrders?", read.call_args_list[2].args[0])
+            self.assertEqual(len(result["balances"]), 1)
+            self.assertEqual(len(result["positions"]), 1)
+            self.assertEqual(result["positions"][0]["symbol"], "BTCUSDT")
+            self.assertEqual(result["openOrders"], [])
+
+    def test_open_orders_endpoint_is_the_only_order_path_allowed(self):
+        for url in ["https://demo-api.binance.com/api/v3/openOrders",
+                    "https://demo-fapi.binance.com/fapi/v1/openOrders"]:
+            with self.assertRaises(ValueError):
+                venue_check.read_json(url + "?timestamp=1", data={"order": "x"})
 
     def test_read_transport_refuses_execution_hosts_and_order_paths(self):
         for url in ["https://api.binance.com/api/v3/account", "https://demo-api.binance.com/api/v3/order", "http://demo-api.binance.com/api/v3/time"]:

@@ -14,8 +14,8 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 BINANCE = {
-    "spot": ("https://demo-api.binance.com", "/api/v3/time", "/api/v3/account"),
-    "futures": ("https://demo-fapi.binance.com", "/fapi/v1/time", "/fapi/v3/account"),
+    "spot": ("https://demo-api.binance.com", "/api/v3/time", "/api/v3/account", "/api/v3/openOrders"),
+    "futures": ("https://demo-fapi.binance.com", "/fapi/v1/time", "/fapi/v3/account", "/fapi/v1/openOrders"),
 }
 SOLANA = {"mainnet": "https://api.mainnet-beta.solana.com", "devnet": "https://api.devnet.solana.com"}
 RPC_READ_METHODS = {"getHealth", "getGenesisHash", "getBalance"}
@@ -28,7 +28,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 def read_json(url, *, headers=None, data=None):
     parsed = urlsplit(url)
-    allowed = {(urlsplit(base).netloc, path) for base, clock, account in BINANCE.values() for path in (clock, account)}
+    allowed = {(urlsplit(base).netloc, path) for base, *paths in BINANCE.values() for path in paths}
     is_rpc = parsed.netloc in {urlsplit(base).netloc for base in SOLANA.values()} and parsed.path in ("", "/")
     if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
         raise ValueError("invalid_read_target")
@@ -47,7 +47,7 @@ def read_json(url, *, headers=None, data=None):
 
 
 def check_binance(market, credentials=None):
-    base, clock, account = BINANCE[market]
+    base, clock, account, open_orders = BINANCE[market]
     started = time.time() * 1000
     server_time = read_json(base + clock).get("serverTime")
     if not isinstance(server_time, int) or server_time <= 0:
@@ -60,9 +60,13 @@ def check_binance(market, credentials=None):
     key, secret = credentials
     if not key or not secret:
         raise ValueError("missing_demo_credentials")
-    query = urlencode({"timestamp": server_time, "recvWindow": 5000})
-    signature = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
-    response = read_json(f"{base}{account}?{query}&signature={signature}", headers={"X-MBX-APIKEY": key})
+
+    def signed_get(path, params=None):
+        query = urlencode({"timestamp": server_time, "recvWindow": 5000, **(params or {})})
+        signature = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+        return read_json(f"{base}{path}?{query}&signature={signature}", headers={"X-MBX-APIKEY": key})
+
+    response = signed_get(account)
     if not isinstance(response, dict) or "code" in response:
         raise ValueError("invalid_account_response")
     field = "balances" if market == "spot" else "assets"
@@ -71,6 +75,33 @@ def check_binance(market, credentials=None):
         raise TypeError("invalid_account_response")
     can_trade = response.get("canTrade")
     result.update(status="AUTHENTICATED_READ_ONLY", assetCount=len(rows), canTrade=can_trade if isinstance(can_trade, bool) else None)
+
+    def non_zero(value):
+        try:
+            return float(value) != 0
+        except (TypeError, ValueError):
+            return False
+
+    if market == "spot":
+        result["balances"] = [{"asset": r.get("asset"), "free": r.get("free"), "locked": r.get("locked")}
+                              for r in rows[:500] if isinstance(r, dict) and (non_zero(r.get("free")) or non_zero(r.get("locked")))]
+    else:
+        result["balances"] = [{"asset": r.get("asset"), "walletBalance": r.get("walletBalance"),
+                               "unrealizedProfit": r.get("unrealizedProfit")}
+                              for r in rows[:500] if isinstance(r, dict) and (non_zero(r.get("walletBalance")) or non_zero(r.get("unrealizedProfit")))]
+        positions = response.get("positions")
+        if not isinstance(positions, list):
+            raise TypeError("invalid_account_response")
+        result["positions"] = [{"symbol": p.get("symbol"), "positionAmt": p.get("positionAmt"),
+                                "entryPrice": p.get("entryPrice"), "unrealizedProfit": p.get("unrealizedProfit")}
+                               for p in positions[:500] if isinstance(p, dict) and non_zero(p.get("positionAmt"))]
+
+    orders = signed_get(open_orders)
+    if not isinstance(orders, list):
+        raise TypeError("invalid_open_orders_response")
+    result["openOrders"] = [{"symbol": o.get("symbol"), "side": o.get("side"), "type": o.get("type"),
+                             "status": o.get("status"), "price": o.get("price"), "origQty": o.get("origQty")}
+                            for o in orders[:200] if isinstance(o, dict)]
     return result
 
 
