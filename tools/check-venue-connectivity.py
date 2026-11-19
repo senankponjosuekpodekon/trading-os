@@ -3,6 +3,7 @@ import getpass
 import hashlib
 import hmac
 import json
+import os
 import re
 import sys
 import time
@@ -19,6 +20,8 @@ BINANCE = {
 }
 SOLANA = {"mainnet": "https://api.mainnet-beta.solana.com", "devnet": "https://api.devnet.solana.com"}
 RPC_READ_METHODS = {"getHealth", "getGenesisHash", "getBalance"}
+DERIV_HOSTS = {"api.derivws.com", "staging-api.derivws.com"}
+DERIV_READ_PATH = "/trading/v1/options/accounts"
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -29,6 +32,7 @@ class NoRedirect(HTTPRedirectHandler):
 def read_json(url, *, headers=None, data=None):
     parsed = urlsplit(url)
     allowed = {(urlsplit(base).netloc, path) for base, *paths in BINANCE.values() for path in paths}
+    allowed |= {(host, DERIV_READ_PATH) for host in DERIV_HOSTS}
     is_rpc = parsed.netloc in {urlsplit(base).netloc for base in SOLANA.values()} and parsed.path in ("", "/")
     if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
         raise ValueError("invalid_read_target")
@@ -131,15 +135,82 @@ def check_solana(network, address=None):
     return result
 
 
+def check_deriv(app_id, token, expected_account=None, base_url="https://api.derivws.com"):
+    """Read-only Deriv preflight on the Options REST API.
+
+    A single GET /trading/v1/options/accounts authenticates the PAT and the
+    registered Deriv-App-ID and returns account types and balances. The URL
+    allowlist admits only this path on Deriv hosts, in GET, so no order or
+    write call can leave this process. Credentials come from the environment
+    and are never echoed back.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", app_id or ""):
+        raise ValueError("invalid_app_id")
+    if not token:
+        raise ValueError("missing_api_token")
+
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "https" or parsed.netloc not in DERIV_HOSTS or parsed.username or parsed.password or parsed.path not in ("", "/"):
+        raise ValueError("invalid_read_target")
+
+    response = read_json(
+        f"https://{parsed.netloc}{DERIV_READ_PATH}",
+        headers={"Authorization": f"Bearer {token}", "Deriv-App-ID": app_id},
+    )
+    accounts = response.get("data") if isinstance(response, dict) else None
+    if not isinstance(accounts, list):
+        raise TypeError("invalid_accounts_response")
+
+    def mask(account_id):
+        return f"***{str(account_id)[-4:]}" if account_id else None
+
+    rows = []
+    for account in accounts[:50]:
+        if not isinstance(account, dict):
+            raise TypeError("invalid_accounts_response")
+        rows.append({
+            "accountIdSuffix": mask(account.get("account_id")),
+            "accountType": account.get("account_type"),
+            "status": account.get("status"),
+            "balance": account.get("balance"),
+            "currency": account.get("currency"),
+        })
+
+    ids = {str(a.get("account_id")) for a in accounts if isinstance(a, dict)}
+    result = {
+        "venue": "deriv-options-api",
+        "host": parsed.netloc,
+        "status": "AUTHENTICATED_READ_ONLY",
+        "executionEnabled": False,
+        "accountCount": len(rows),
+        "accounts": rows,
+    }
+    demo = [a for a in accounts if isinstance(a, dict) and a.get("account_type") == "demo"]
+    if not demo:
+        result["warning"] = "no demo account returned by the token"
+    if expected_account:
+        result["expectedAccountPresent"] = str(expected_account) in ids
+        if not result["expectedAccountPresent"]:
+            result["warning"] = "configured DERIV_ACCOUNT_ID not visible under this token"
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Read-only connectivity checks: Binance Demo and Solana. No execution adapters or private wallet keys are loaded.")
     parser.add_argument("--binance", choices=["spot", "futures", "both", "none"], default="both")
     parser.add_argument("--authenticate", action="store_true", help="Prompt for newly rotated Binance Demo credentials without saving them (interactive terminal only).")
     parser.add_argument("--solana", choices=["none", "mainnet", "devnet"], default="none")
     parser.add_argument("--solana-address", help="Public address only. Never supply a private key.")
+    parser.add_argument("--deriv", action="store_true", help="Read-only Deriv WebSocket preflight using DERIV_APP_ID/DERIV_API_TOKEN/DERIV_ACCOUNT_ID from the environment only.")
     args = parser.parse_args(argv)
     if args.solana_address and args.solana == "none":
         parser.error("--solana is required with a public address")
+    if args.deriv:
+        app_id = os.environ.get("DERIV_APP_ID", "")
+        token = os.environ.get("DERIV_API_TOKEN", "")
+        expected = os.environ.get("DERIV_ACCOUNT_ID") or None
+        if not app_id or not token:
+            parser.error("--deriv requires DERIV_APP_ID and DERIV_API_TOKEN in the environment")
     if args.authenticate and (not sys.stdin.isatty() or args.binance == "none"):
         parser.error("Authentication requires Binance Demo selection and an interactive terminal")
     checks = []
@@ -169,6 +240,8 @@ def main(argv=None):
         credentials = None
     if args.solana != "none":
         check(f"solana-{args.solana}", lambda: check_solana(args.solana, args.solana_address))
+    if args.deriv:
+        check("deriv-options-api", lambda: check_deriv(app_id, token, expected))
     print(json.dumps({"checkedAt": datetime.now(timezone.utc).isoformat(), "mode": "READ_ONLY", "checks": checks}, indent=2))
     return int(failed)
 

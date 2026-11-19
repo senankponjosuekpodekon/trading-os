@@ -113,5 +113,60 @@ class ConnectivityTests(unittest.TestCase):
             self.assertIn("HTTP_401", output.getvalue())
 
 
+DERIV_ACCOUNTS = {"data": [
+    {"account_id": "DOT94629444", "balance": "10003.37", "currency": "USD",
+     "group": "row", "status": "active", "account_type": "demo"},
+    {"account_id": "ROT92679819", "balance": "0.00", "currency": "USD",
+     "group": "row", "status": "active", "account_type": "real"},
+]}
+
+
+class DerivPreflightTests(unittest.TestCase):
+    def run_check(self, response=None, **kwargs):
+        with patch.object(venue_check, "read_json", return_value=response if response is not None else DERIV_ACCOUNTS) as read:
+            result = venue_check.check_deriv(kwargs.pop("app_id", "1089"), kwargs.pop("token", "SECRET-TOKEN-xyz"), **kwargs)
+            return result, read
+
+    def test_deriv_accounts_are_read_only_and_sanitized(self):
+        result, read = self.run_check()
+        url, headers = read.call_args.args[0], read.call_args.kwargs["headers"]
+        self.assertEqual(url, "https://api.derivws.com/trading/v1/options/accounts")
+        self.assertEqual(headers["Deriv-App-ID"], "1089")
+        self.assertEqual(headers["Authorization"], "Bearer SECRET-TOKEN-xyz")
+        self.assertEqual(result["status"], "AUTHENTICATED_READ_ONLY")
+        self.assertEqual(result["accountCount"], 2)
+        self.assertFalse(result["executionEnabled"])
+        body = json.dumps(result)
+        self.assertNotIn("SECRET-TOKEN-xyz", body)
+        self.assertNotIn("DOT94629444", body)
+        self.assertIn("***9444", body)
+        self.assertIn("demo", body)
+
+    def test_deriv_warns_without_demo_account(self):
+        only_real = {"data": [DERIV_ACCOUNTS["data"][1]]}
+        result, _ = self.run_check(only_real)
+        self.assertIn("warning", result)
+
+    def test_deriv_expected_account_check(self):
+        result, _ = self.run_check(expected_account="DOT94629444")
+        self.assertTrue(result["expectedAccountPresent"])
+        result, _ = self.run_check(expected_account="DOT999")
+        self.assertFalse(result["expectedAccountPresent"])
+        self.assertIn("warning", result)
+
+    def test_deriv_refuses_bad_inputs_and_bad_hosts(self):
+        with self.assertRaisesRegex(ValueError, "invalid_app_id"):
+            self.run_check(app_id="bad id!")
+        with self.assertRaisesRegex(ValueError, "missing_api_token"):
+            self.run_check(token="")
+        for bad in ["https://evil.example.com", "wss://api.derivws.com", "https://api.derivws.com/other/path", "https://api.derivws.com/x?y=1"]:
+            with self.assertRaisesRegex(ValueError, "invalid_read_target"):
+                self.run_check(base_url=bad)
+
+    def test_deriv_invalid_response_fails(self):
+        with self.assertRaises(TypeError):
+            self.run_check({"unexpected": True})
+
+
 if __name__ == "__main__":
     unittest.main()
