@@ -328,10 +328,8 @@ async def _fetch_coingecko_upcoming() -> List[Dict[str, Any]]:
 async def _fetch_coingecko_trending() -> List[Dict[str, Any]]:
     """Fetch trending coins from CoinGecko -- often includes pre-listing buzz."""
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{COINGECKO_BASE}/search/trending")
-            r.raise_for_status()
-            data = r.json()
+        from utils.coingecko import cg_get
+        data = await cg_get("/search/trending")
 
         projects = []
         for coin in data.get("coins", [])[:15]:

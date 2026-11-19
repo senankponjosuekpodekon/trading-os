@@ -158,19 +158,15 @@ _LEADER_MCACHE: Dict[str, Any] = {"ts": 0.0, "caps": {}}
 async def _fetch_leader_mcaps() -> Dict[str, float]:
     """Mcap des leaders de catégorie — 1 requête CoinGecko, cache 24h."""
     import time
-    import httpx
     now = time.time()
     if now - _LEADER_MCACHE["ts"] < 86_400 and _LEADER_MCACHE["caps"]:
         return _LEADER_MCACHE["caps"]
     ids = ",".join(sorted(set(_CATEGORY_LEADER_IDS.values())))
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(
-                "https://api.coingecko.com/api/v3/coins/markets",
-                params={"vs_currency": "usd", "ids": ids},
-            )
-            r.raise_for_status()
-            caps = {c["id"]: float(c.get("market_cap") or 0) for c in r.json()}
+        from utils.coingecko import cg_get
+        coins = await cg_get("/coins/markets",
+                             params={"vs_currency": "usd", "ids": ids})
+        caps = {c["id"]: float(c.get("market_cap") or 0) for c in coins}
     except Exception as exc:
         logger.warning("leader_mcaps_failed", error=str(exc))
         return _LEADER_MCACHE["caps"]
@@ -224,12 +220,9 @@ async def _fetch_narrative_momentum() -> Dict[str, float]:
     Momentum des narratives = variation mcap 24h des catégories CoinGecko.
     Une seule requête pour toutes les catégories. Retourne {narrative: pct}.
     """
-    import httpx
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get("https://api.coingecko.com/api/v3/coins/categories")
-            r.raise_for_status()
-            cats = r.json()
+        from utils.coingecko import cg_get
+        cats = await cg_get("/coins/categories")
         out: Dict[str, float] = {}
         for narrative, kws in _NARRATIVE_CG_KEYWORDS.items():
             vals = [

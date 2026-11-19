@@ -80,6 +80,12 @@ export default function MacroRotationPage() {
           <div className="text-gray-400 text-sm">Chargement...</div>
         ) : data ? (
           <>
+            {(data as any).stale && (
+              <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-400">Donnée en cache — source indisponible{(data as any).stale_age_min != null ? ` (${(data as any).stale_age_min} min)` : ''}</p>
+              </div>
+            )}
             {/* Phase indicator */}
             <div className={`rounded-2xl border p-6 ${phaseColor(data.phase)}`}>
               <div className="flex items-center gap-4">
@@ -132,16 +138,16 @@ export default function MacroRotationPage() {
             <div>
               <h3 className="text-sm font-medium text-gray-400 mb-3">Métriques</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <MetricCard label="BTC Dominance" value={data.data.btc_dominance} suffix="%" color="text-white" />
-                <MetricCard label="BTC 24h" value={data.data.btc_change_24h} suffix="%" />
-                <MetricCard label="ETH/BTC 24h" value={data.data.eth_btc_change_24h} suffix="%" />
-                <MetricCard label="Altcoins avg 24h" value={data.data.altcoins_avg_24h} suffix="%" />
-                <MetricCard label="Altcoins max 24h" value={data.data.altcoins_max_24h} suffix="%" />
-                <MetricCard label="Total MCap 24h" value={data.data.total_mcap_change_24h} suffix="%" />
-                <MetricCard label="Fear & Greed" value={data.data.fear_greed} color={
-                  data.data.fear_greed >= 75 ? 'text-red-400' :
-                  data.data.fear_greed >= 55 ? 'text-amber-400' :
-                  data.data.fear_greed <= 25 ? 'text-emerald-400' : 'text-white'
+                <MetricCard label="BTC Dominance" value={(data.data.btc_dominance ?? 0)} suffix="%" color="text-white" />
+                <MetricCard label="BTC 24h" value={(data.data.btc_change_24h ?? 0)} suffix="%" />
+                <MetricCard label="ETH/BTC 24h" value={(data.data.eth_btc_change_24h ?? 0)} suffix="%" />
+                <MetricCard label="Altcoins avg 24h" value={(data.data.altcoins_avg_24h ?? 0)} suffix="%" />
+                <MetricCard label="Altcoins max 24h" value={(data.data.altcoins_max_24h ?? 0)} suffix="%" />
+                <MetricCard label="Total MCap 24h" value={(data.data.total_mcap_change_24h ?? 0)} suffix="%" />
+                <MetricCard label="Fear & Greed" value={(data.data.fear_greed ?? 0)} color={
+                  (data.data.fear_greed ?? 0) >= 75 ? 'text-red-400' :
+                  (data.data.fear_greed ?? 0) >= 55 ? 'text-amber-400' :
+                  (data.data.fear_greed ?? 0) <= 25 ? 'text-emerald-400' : 'text-white'
                 } />
               </div>
             </div>

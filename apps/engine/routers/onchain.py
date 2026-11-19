@@ -161,18 +161,16 @@ async def btc_dominance():
         return cached
     try:
         async def _do():
-            async with httpx.AsyncClient(timeout=8) as client:
-                r = await client.get(COINGECKO_GLOBAL)
-                r.raise_for_status()
-                glob = r.json()
-                # Variation BTC vs marché total → proxy de la variation de dominance
-                r2 = await client.get(
-                    "https://api.coingecko.com/api/v3/simple/price",
-                    params={"ids": "bitcoin", "vs_currencies": "usd",
-                            "include_24hr_change": "true"},
-                )
-                btc_chg = r2.json().get("bitcoin", {}).get("usd_24h_change", 0) if r2.status_code == 200 else 0
-                return glob, float(btc_chg or 0)
+            from utils.coingecko import cg_get
+            glob = await cg_get("/global")
+            try:
+                d = await cg_get("/simple/price",
+                                 params={"ids": "bitcoin", "vs_currencies": "usd",
+                                         "include_24hr_change": "true"})
+                btc_chg = float(d.get("bitcoin", {}).get("usd_24h_change", 0) or 0)
+            except Exception:
+                btc_chg = 0.0
+            return glob, btc_chg
         (data, btc_chg) = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
         gdata = data.get("data", {})
         btc = float(gdata.get("market_cap_percentage", {}).get("btc", 0))
@@ -444,17 +442,13 @@ async def _coingecko_markets(gecko_ids: list) -> dict:
     if not gecko_ids:
         return {}
     try:
-        async with httpx.AsyncClient(timeout=12) as client:
-            r = await client.get(
-                "https://api.coingecko.com/api/v3/coins/markets",
-                params={
-                    "vs_currency": "usd",
-                    "ids": ",".join(gecko_ids[:200]),
-                    "price_change_percentage": "7d",
-                },
-            )
-            r.raise_for_status()
-            return {c["id"]: c for c in r.json()}
+        from utils.coingecko import cg_get
+        coins = await cg_get("/coins/markets", params={
+            "vs_currency": "usd",
+            "ids": ",".join(gecko_ids[:200]),
+            "price_change_percentage": "7d",
+        })
+        return {c["id"]: c for c in coins}
     except Exception:
         return {}
 

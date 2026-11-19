@@ -41,10 +41,8 @@ async def _fetch_btc_dominance() -> dict | None:
         return cached
     try:
         async def _do():
-            async with httpx.AsyncClient(timeout=8) as client:
-                r = await client.get("https://api.coingecko.com/api/v3/global")
-                r.raise_for_status()
-                return r.json()
+            from utils.coingecko import cg_get
+            return await cg_get("/global")
 
         data = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
         mcp = data.get("data", {}).get("market_cap_percentage", {})

@@ -31,6 +31,18 @@ def _set_cached(key: str, val: any):
     _cache[key] = (time.monotonic(), val)
 
 
+def _get_stale_cached(key: str):
+    """Dernière valeur même expirée, marquée stale — dégradé honnête."""
+    import time
+    if key in _cache:
+        ts, val = _cache[key]
+        out = dict(val) if isinstance(val, dict) else {"value": val}
+        out["stale"] = True
+        out["stale_age_min"] = int((time.monotonic() - ts) / 60)
+        return out
+    return None
+
+
 async def _fetch_yahoo_ticker(ticker: str) -> Optional[float]:
     """Fetch le dernier prix d'un ticker Yahoo via yfinance (thread)."""
     try:
@@ -105,10 +117,8 @@ async def btc_dominance():
         return cached
     try:
         async def _do():
-            async with httpx.AsyncClient(timeout=8) as client:
-                r = await client.get("https://api.coingecko.com/api/v3/global")
-                r.raise_for_status()
-                return r.json()
+            from utils.coingecko import cg_get
+            return await cg_get("/global")
         data = await retry_async(_do, max_retries=1, base_delay=0.5, source="coingecko")
         market_cap_percentage = data.get("data", {}).get("market_cap_percentage", {})
         btc = market_cap_percentage.get("btc", 0)
@@ -144,6 +154,13 @@ async def macro_rotation():
     cached = _get_cached("macro_rotation")
     if cached:
         return cached
-    result = await compute_macro_rotation()
-    _set_cached("macro_rotation", result)
-    return result
+    try:
+        result = await compute_macro_rotation()
+        _set_cached("macro_rotation", result)
+        return result
+    except Exception as e:
+        stale = _get_stale_cached("macro_rotation")
+        if stale:
+            return stale
+        raise HTTPException(status_code=503,
+                            detail=f"Macro rotation unavailable: {e}") from e

@@ -30,20 +30,14 @@ def _major_key(gecko_id: str) -> str:
 
 async def snapshot_majors(top_n: int = 30) -> int:
     """Snapshot price/mcap/volume des top coins CoinGecko → Redis."""
-    import httpx
     try:
-        async with httpx.AsyncClient(timeout=12) as client:
-            r = await client.get(
-                "https://api.coingecko.com/api/v3/coins/markets",
-                params={
-                    "vs_currency": "usd",
-                    "order": "market_cap_desc",
-                    "per_page": top_n,
-                    "price_change_percentage": "7d",
-                },
-            )
-            r.raise_for_status()
-            coins = r.json()
+        from utils.coingecko import cg_get
+        coins = await cg_get("/coins/markets", params={
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": top_n,
+            "price_change_percentage": "7d",
+        })
     except Exception as exc:
         logger.debug("majors_snapshot_fetch_failed", error=str(exc))
         return 0
