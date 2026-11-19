@@ -108,9 +108,9 @@ export default function DashboardPage() {
   const { data: predictorStatus, isLoading: predictorStatusLoading } = useQuery<{
     trained: boolean;
     accuracy?: number;
+    val_accuracy?: number;
     samples?: number;
     featureCount?: number;
-    updatedAt?: string;
   }>({
     queryKey: ['signal-predictor-status'],
     queryFn: async () => (await api.get('/signals/predictor/status')).data,
@@ -149,11 +149,11 @@ export default function DashboardPage() {
   const greeting = hour < 12 ? 'Bonjour' : hour < 18 ? 'Bon après-midi' : 'Bonsoir';
 
   const predictorAccuracy = predictorStatus?.accuracy != null ? (predictorStatus.accuracy * 100).toFixed(1) : null;
+  const predictorValAccuracy = predictorStatus?.val_accuracy != null ? (predictorStatus.val_accuracy * 100).toFixed(1) : null;
   const predictorSamples = predictorStatus?.samples ?? null;
-  const predictorUpdated = predictorStatus?.updatedAt ? new Date(predictorStatus.updatedAt) : null;
   const predictorSubParts: string[] = [];
   if (predictorSamples != null) predictorSubParts.push(`${predictorSamples} échantillons`);
-  if (predictorUpdated) predictorSubParts.push(`MAJ ${predictorUpdated.toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`);
+  if (predictorValAccuracy != null) predictorSubParts.push(`val ${predictorValAccuracy}%`);
   const predictorSub = predictorSubParts.length > 0 ? predictorSubParts.join(' · ') : predictorStatus?.trained ? 'Entraîné via Feature Store' : 'Jamais entraîné';
 
   return (
@@ -425,18 +425,25 @@ export default function DashboardPage() {
               <p className="text-xs text-gray-500">Calendrier économique (impact élevé/moyen)</p>
             </div>
             <div className="space-y-2 max-h-48 overflow-y-auto">
-              {economicCalendar.slice(0, 10).map((ev, i) => (
+              {economicCalendar.slice(0, 10).map((ev, i) => {
+                // ev.date = ISO complet ; ev.time souvent vide → heure lue dans l'ISO
+                const dt = new Date(ev.date);
+                const invalid = isNaN(dt.getTime());
+                const when = ev.time || (invalid ? '—' : dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
+                const day = invalid ? '' : dt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+                return (
                 <div key={i} className="flex items-center justify-between text-sm border-b border-gray-800 last:border-0 pb-2 last:pb-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${ev.impact === 'High' ? 'bg-red-400/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{ev.currency}</span>
                     <span className="text-gray-300 truncate">{ev.title}</span>
                   </div>
                   <div className="text-xs text-gray-500 text-right shrink-0">
-                    <p>{ev.time}</p>
+                    <p>{day} {when}</p>
                     <p className="text-gray-600">F:{ev.forecast} P:{ev.previous}</p>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
