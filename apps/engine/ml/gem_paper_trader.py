@@ -44,6 +44,15 @@ def _key(chain: str, addr: str) -> str:
     return f"{(chain or '').lower()}:{addr}"
 
 
+async def _select_profile() -> str:
+    """Profil de gestion choisi par le track record réel (C)."""
+    try:
+        from ml.management_profiles import select_profile
+        return await select_profile()
+    except Exception:
+        return "balanced"
+
+
 async def _client():
     from utils.cache import cache
     return await cache.client()
@@ -164,6 +173,7 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
             "gate": gate.get("state_summary"),
             "exec_check": gem.get("exec_check"),
             "mark_source": "dexscreener_spot",
+            "profile": await _select_profile(),
             "max_price": float(gem["price"]),
             "status": "OPEN",
             "tp1_hit": False,
@@ -333,28 +343,32 @@ async def check_positions() -> Dict[str, int]:
             dd_from_peak = (price - max_px) / max_px * 100
             age_h = (now - pos["entry_ts"]) / 3600
 
+            # Profil de gestion de CETTE position (défaut = règles historiques)
+            from ml.management_profiles import profile_params
+            prof = profile_params(pos.get("profile"))
+
             # Sorties
-            if dd_from_peak <= -TRAIL_DD_PCT and pos["tp1_hit"]:
+            if dd_from_peak <= -prof["trail_dd_pct"] and pos["tp1_hit"]:
                 await _notify(pid, pos, price, "TRAIL")
                 await _close(r, pid, pos, price, "CLOSED_TRAIL")
                 stats["closed"] += 1
                 continue
-            if perf <= STOP_LOSS_PCT:
+            if perf <= prof["sl_pct"]:
                 await _notify(pid, pos, price, "SL")
                 await _close(r, pid, pos, price, "CLOSED_SL")
                 stats["closed"] += 1
                 continue
-            if age_h >= TIME_STOP_H and not pos["tp1_hit"]:
+            if age_h >= prof["time_stop_h"] and not pos["tp1_hit"]:
                 await _notify(pid, pos, price, "TIME")
                 await _close(r, pid, pos, price, "CLOSED_TIME")
                 stats["closed"] += 1
                 continue
 
             # Prises de profit
-            if not pos["tp1_hit"] and perf >= TP1_PCT:
+            if not pos["tp1_hit"] and perf >= prof["tp1_pct"]:
                 pos["tp1_hit"] = True
-                pos["remaining_pct"] -= TP1_SELL
-                pos["realized_pct"] += TP1_PCT * TP1_SELL / 100
+                pos["remaining_pct"] -= prof["tp1_sell"]
+                pos["realized_pct"] += prof["tp1_pct"] * prof["tp1_sell"] / 100
                 await _notify(pid, pos, price, "TP1")
                 stats["tp"] += 1
             if pos["tp1_hit"] and not pos["tp2_hit"] and perf >= TP2_PCT:

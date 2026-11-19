@@ -48,12 +48,18 @@ async def can_open_position(portfolio_id: str, symbol: str,
         return {"allow": False, "rejections": [
             {"layer": "state", "reason": state["error"]}]}
 
+    adapt = {"multiplier": 1.0, "reason": "explicit_qty"}
     if qty is None:
         # σ absente des signaux actuels → proxy : distance au stop.
-        # Taille = budget_risque_restant / |entry − SL|
+        # Taille = budget_risque_restant × multiplicateur adaptatif / |entry − SL|
         remaining = max(0.0, state["risk_budget"] - state["risk_to_stop_total"])
+        try:
+            from risk.adaptive import risk_multiplier
+            adapt = await risk_multiplier(symbol, direction)
+        except Exception:
+            adapt = {"multiplier": 1.0, "reason": "adaptive_error"}
         if stop_loss and entry and abs(entry - stop_loss) > 0:
-            qty = remaining / abs(entry - stop_loss)
+            qty = (remaining * adapt["multiplier"]) / abs(entry - stop_loss)
         else:
             qty = 0.0
 
@@ -93,6 +99,8 @@ async def can_open_position(portfolio_id: str, symbol: str,
             "margin_needed": round(margin_needed, 2),
             "new_risk": round(new_risk, 2),
             "cluster": cluster, "venue": profile.get("venue"),
+            "adaptive_multiplier": adapt.get("multiplier"),
+            "adaptive_reason": adapt.get("reason"),
             "state_summary": _summary(state)}
 
 

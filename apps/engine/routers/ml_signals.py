@@ -17,6 +17,7 @@ class TrainRequest(BaseModel):
 
 class PredictRequest(BaseModel):
     features: Dict[str, Any]
+    signal_id: Optional[str] = None
 
 
 @router.post("/ml/train")
@@ -36,7 +37,16 @@ async def signal_scorer_status():
 
 @router.post("/ml/predict")
 async def signal_scorer_predict(body: PredictRequest):
+    """Prédit avec le modèle ACTIF : logistique par défaut, XGBoost si
+    l'auto-promotion l'a couronné (flag data/model_promotion.json)."""
     try:
+        from ml.model_promotion import active_model
+        if active_model() == "xgboost":
+            from ml.xgboost_scorer import xgboost_scorer
+            await xgboost_scorer._ensure_state()
+            result = await xgboost_scorer.predict(body.features)
+            result["model"] = "xgboost"
+            return result
         return await signal_scorer.predict(body.features)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -49,7 +59,7 @@ async def shadow_predict(body: PredictRequest):
     """POST /ml/predict-shadow — Run both logistic + XGBoost, return comparison."""
     from ml.xgboost_shadow import shadow_predict as _shadow
     try:
-        return await _shadow(body.features)
+        return await _shadow(body.features, signal_id=body.signal_id)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -83,6 +93,14 @@ async def train_xgboost(body: TrainRequest):
         return result
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/ml/promotion-status")
+async def promotion_status():
+    """GET /ml/promotion-status — modèle actif + précisions comparées sur
+    outcomes réels (auto-promotion)."""
+    from ml.model_promotion import promotion_status as _status
+    return _status()
 
 
 @router.get("/ml/xgboost-status")

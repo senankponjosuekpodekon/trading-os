@@ -38,10 +38,13 @@ class ShadowComparison:
     timestamp: str
 
 
-async def shadow_predict(features: Dict[str, Any]) -> Dict[str, Any]:
+async def shadow_predict(features: Dict[str, Any],
+                         signal_id: str | None = None) -> Dict[str, Any]:
     """
     Run both logistic and XGBoost scorers in parallel.
     Returns the logistic result (production) + shadow XGBoost result for logging.
+    signal_id optionnel : enregistre la paire de probas pour l'auto-promotion
+    (record_outcome à la résolution du signal).
     """
     from ml.signal_scorer import signal_scorer
     from ml.xgboost_scorer import xgboost_scorer as _xgb_singleton
@@ -82,6 +85,13 @@ async def shadow_predict(features: Dict[str, Any]) -> Dict[str, Any]:
         _shadow_stats["disagreements"] += 1
 
     _shadow_stats["total_predictions"] += 1
+
+    # Lien outcome : la résolution du signal dira quel modèle avait raison.
+    try:
+        from ml.model_promotion import register_prediction
+        register_prediction(signal_id, log_prob, xgb_prob)
+    except Exception:
+        pass
 
     comparison = ShadowComparison(
         logistic_prob=round(log_prob, 4),

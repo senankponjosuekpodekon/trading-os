@@ -67,6 +67,16 @@ async def register_signal_for_tracking(
         "registered_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # Prédiction shadow liée au signal : à la résolution, record_outcome
+    # saura quel modèle avait raison (auto-promotion A).
+    feats = metadata.get("features")
+    if isinstance(feats, dict):
+        try:
+            from ml.xgboost_shadow import shadow_predict
+            await shadow_predict(feats, signal_id=signal_id)
+        except Exception:
+            pass
+
     logger.info("signal_registered_for_tracking", signal_id=signal_id, pattern_id=pattern_id)
 
 
@@ -113,6 +123,13 @@ async def check_and_resolve_signals(live_prices: Dict[str, float]) -> List[Dict[
 
         if outcome:
             await resolve_pattern(info["pattern_id"], outcome, pnl_pct)
+
+            # Alimente l'auto-promotion XGBoost : quel modèle avait raison.
+            try:
+                from ml.model_promotion import record_outcome
+                record_outcome(signal_id, outcome)
+            except Exception:
+                pass
 
             resolved.append({
                 "signal_id": signal_id,
@@ -166,6 +183,12 @@ async def auto_retrain_if_needed(min_new_outcomes: int = 20) -> Optional[Dict[st
         _feedback_stats["last_retrain_evaluated_count"] = new_outcomes
 
         logger.info("auto_retrain_complete", result=result)
+        # Promotion auto : swap XGBoost↔logistique si delta ≥ seuil.
+        try:
+            from ml.model_promotion import evaluate_promotion
+            evaluate_promotion()
+        except Exception as exc:
+            logger.debug("promotion_eval_failed", error=str(exc))
         return result
     except Exception as exc:
         logger.warning("auto_retrain_failed", error=str(exc))
