@@ -14,6 +14,7 @@ import { SystemHealthService } from '../system-health/system-health.service';
 import { CrossPositionRiskService } from './cross-position-risk.service';
 import { CronConfigService } from '../admin/cron-config.service';
 import { AUTOPILOT_EMAIL } from '../signals/auto-trader.service';
+import { liquidationPrice } from './liquidation';
 
 const BINANCE_TICKER = 'https://api.binance.com/api/v3/ticker/price';
 const SYM_MAP: Record<string, string> = {
@@ -708,7 +709,7 @@ export class PositionsService {
         where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { user: { email: { not: AUTOPILOT_EMAIL } } } },
         include: {
           asset: { select: { symbol: true } },
-          portfolio: { select: { userId: true } },
+          portfolio: { select: { userId: true, currentCapital: true } },
           signal: { select: { indicators: true, timeframe: true } },
         },
       });
@@ -735,6 +736,20 @@ export class PositionsService {
         let trailingStop = pos.trailingStop
           ? parseFloat(pos.trailingStop.toString())
           : (sl ?? (pos.direction === 'BUY' ? entry * 0.99 : entry * 1.01));
+
+        // Liquidation avant tout : sur venue levée, si le prix a franchi
+        // le seuil de liquidation, la position est déjà morte — le SL ne
+        // peut plus la sauver.
+        const capital = parseFloat(pos.portfolio.currentCapital?.toString() ?? '0');
+        const qtyNow = parseFloat(pos.quantity.toString());
+        const liqPx = liquidationPrice(entry, qtyNow, capital, pos.direction);
+        if (liqPx != null) {
+          const liquidated = pos.direction === 'BUY' ? price <= liqPx : price >= liqPx;
+          if (liquidated) {
+            await this.closeByWatcher(pos.id, liqPx, 'LIQ');
+            return;
+          }
+        }
 
         // Handle 3-tier TP lifecycle: OPEN → PARTIAL (50%@TP1) → PARTIAL_2 (30%@TP2) → CLOSED (20%@TP3 or trailing)
         if (pos.direction === 'BUY') {
@@ -959,7 +974,7 @@ export class PositionsService {
   async closeByWatcher(
     positionId: string,
     exitPrice: number,
-    reason: 'SL' | 'TP' | 'TRAILING',
+    reason: 'SL' | 'TP' | 'TRAILING' | 'LIQ',
     opts?: { skipJournal?: boolean },
   ) {
     const pos = await this.prisma.position.findFirst({
@@ -978,7 +993,19 @@ export class PositionsService {
     const pnlOnRemaining = pos.direction === 'BUY'
       ? (exitPrice - entry) * qty
       : (entry - exitPrice) * qty;
-    const pnl   = realizedPartial + realizedSecondPartial + pnlOnRemaining;
+    // Funding/swap accumulé sur la position (cron carry accrual, events
+    // CARRY dans account_ledger) — nettoyé dans le PnL réalisé comme un
+    // vrai coût de portage futures/marge.
+    let carryPaid = 0;
+    try {
+      const rows = await this.prisma.$queryRawUnsafe<{ s: number | null }[]>(
+        `SELECT COALESCE(SUM(amount),0)::float AS s FROM account_ledger
+         WHERE "positionId" = $1 AND event = 'CARRY'`, positionId);
+      carryPaid = rows[0]?.s ?? 0;
+    } catch {
+      carryPaid = 0;
+    }
+    const pnl   = realizedPartial + realizedSecondPartial + pnlOnRemaining + carryPaid;
     const pnlPct = originalQty > 0 ? (pnl / (entry * originalQty)) * 100 : 0;
 
     let closedAtomically = false;

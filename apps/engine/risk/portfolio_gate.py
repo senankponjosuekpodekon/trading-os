@@ -66,7 +66,12 @@ async def can_open_position(portfolio_id: str, symbol: str,
             qty = 0.0
 
     notional = abs(qty) * entry if entry else 0.0
-    margin_needed = notional / (profile.get("max_leverage") or 1.0)
+    # Cap de levier : les profils sans max_leverage explicite utilisent le
+    # plafond de politique par venue — FUTURES x5 (jamais x125), le reste
+    # sans levier. La liquidation paper modélise le risque du levier >1.
+    _LEV_CAP = {"FUTURES": 5.0}
+    max_lev = profile.get("max_leverage") or _LEV_CAP.get(profile.get("venue"), 1.0)
+    margin_needed = notional / max_lev
     new_risk = (abs(entry - stop_loss) * abs(qty)
                 if stop_loss else notional * 0.02)
     gap_add = notional * (0.30 if profile.get("venue") == "FUTURES" else 0.16)

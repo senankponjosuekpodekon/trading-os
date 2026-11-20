@@ -485,6 +485,7 @@ export class SignalPersistenceService {
         macro_phase:         r.metadata?.macro_rotation?.phase ?? null,
         fear_greed:          (r.context?.fear_greed as any)?.value
                              ?? r.metadata?.macro_rotation?.data?.fear_greed ?? null,
+        funding_rate:        (r.context?.funding as any)?.funding_rate ?? null,
       };
       await this.featureStore.upsertSnapshot({
         signalId: signal.id,

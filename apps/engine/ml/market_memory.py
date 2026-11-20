@@ -77,6 +77,7 @@ def _extract_features(metadata: Dict[str, Any]) -> Dict[str, Any]:
     # phase refuge ≠ BUY altcoin en altseason).
     ctx = metadata.get("context") or {}
     btc_dom = ctx.get("btc_dominance") or {}
+    funding = ctx.get("funding") or {}
     macro_rot = metadata.get("macro_rotation") or {}
     return {
         "regime": regime.get("regime", "UNKNOWN"),
@@ -89,6 +90,7 @@ def _extract_features(metadata: Dict[str, Any]) -> Dict[str, Any]:
         "has_tokenomics": bool(metadata.get("tokenomics_context")),
         "btc_dominance": btc_dom.get("btc_dominance") if isinstance(btc_dom, dict) else None,
         "btc_dom_change_24h": btc_dom.get("change_24h_pct") if isinstance(btc_dom, dict) else None,
+        "funding_rate": funding.get("funding_rate") if isinstance(funding, dict) else None,
         "macro_phase": macro_rot.get("phase") or None,
     }
 

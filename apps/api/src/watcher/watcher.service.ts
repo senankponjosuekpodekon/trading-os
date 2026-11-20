@@ -11,6 +11,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PriceAlertsService } from '../price-alerts/price-alerts.service';
 import { retryWithBackoff } from '../utils/retry';
 import { engineHeaders } from '../utils/engine-headers.util';
+import { liquidationPrice } from '../positions/liquidation';
 import { SystemHealthService } from '../system-health/system-health.service';
 import { CronConfigService } from '../admin/cron-config.service';
 import { AUTOPILOT_EMAIL } from '../signals/auto-trader.service';
@@ -127,6 +128,31 @@ export class WatcherService {
       Object.assign(internalPrices, enginePrices);
     }
 
+    // 3. Mark price pour les symboles futures crypto : les SL/TP/liquidations
+    //    réels se déclenchent sur le mark (moyenne multi-exchanges), pas le
+    //    last price — un wick de chasse aux stops ne doit pas sortir une
+    //    position que le mark n'a jamais touché.
+    if (binanceSymbols.length > 0) {
+      try {
+        const { data: marks } = await firstValueFrom(
+          this.http.get<{ symbol: string; markPrice: string }[]>(
+            'https://fapi.binance.com/fapi/v1/premiumIndex', { timeout: 5000 }),
+        );
+        const binanceToInternal = Object.fromEntries(
+          Object.entries(SYM_MAP).map(([internal, binance]) => [binance, internal]),
+        );
+        for (const m of marks) {
+          const internal = binanceToInternal[m.symbol];
+          const mark = parseFloat(m.markPrice);
+          if (internal && binanceSymbols.includes(m.symbol) && mark > 0) {
+            internalPrices[internal] = mark;
+          }
+        }
+      } catch {
+        this.logger.debug('Watcher: mark price Binance Futures indisponible — last price conservé');
+      }
+    }
+
     return internalPrices;
   }
 
@@ -137,7 +163,7 @@ export class WatcherService {
         where: { status: 'OPEN', portfolio: { user: { email: { not: AUTOPILOT_EMAIL } } } },
         include: {
           asset:     { select: { symbol: true } },
-          portfolio: { select: { userId: true, type: true } },
+          portfolio: { select: { userId: true, type: true, currentCapital: true } },
         },
       });
 
@@ -180,7 +206,17 @@ export class WatcherService {
     const sl    = pos.stopLoss   ? parseFloat(pos.stopLoss.toString())   : null;
     const tp    = pos.takeProfit ? parseFloat(pos.takeProfit.toString()) : null;
 
-    let triggered: 'SL' | 'TP' | null = null;
+    let triggered: 'SL' | 'TP' | 'LIQ' | null = null;
+
+    // Liquidation avant SL/TP : sur venue levée, un prix qui franchit le
+    // seuil de liquidation a déjà tué la position — le SL n'existe plus.
+    const capital = parseFloat(pos.portfolio.currentCapital?.toString() ?? '0');
+    const qtyNow = parseFloat(pos.quantity.toString());
+    const liqPx = liquidationPrice(entry, qtyNow, capital, pos.direction);
+    if (liqPx != null) {
+      const liquidated = pos.direction === 'BUY' ? livePrice <= liqPx : livePrice >= liqPx;
+      if (liquidated) triggered = 'LIQ';
+    }
 
     if (pos.direction === 'BUY') {
       if (sl && livePrice <= sl) triggered = 'SL';
