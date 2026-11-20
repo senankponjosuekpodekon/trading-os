@@ -94,7 +94,11 @@ export class PhaseBDataService {
       .filter((r): r is SocialSentiment => r !== null);
 
     if (live.length === 0) this.logger.warn('Engine social sentiment unavailable, falling back to mock data');
-    return live.length > 0 ? live : MOCK_SENTIMENT;
+    const data = live.length > 0 ? live : MOCK_SENTIMENT;
+    // trending = Galaxy Score LunarCrush ≥ 60 (score combiné santé
+    // social+marché élevé = actif en tendance)
+    if (trending === 'true') return data.filter(s => (s.galaxyScore ?? 0) >= 60);
+    return data;
   }
 
   private mapSocial(symbol: string, r: Record<string, unknown>): SocialSentiment | null {
