@@ -242,6 +242,53 @@ export class AdminOpsController {
     return { api: apiInfo, engine: engineInfo, containers: dockerStats, hostCpu, topProcesses };
   }
 
+  @Get('learning/macro-phase')
+  async macroPhaseLearning() {
+    // Win rates par phase de rotation macro — mesure si le couplage
+    // dominance/phase (features persistées par signal) améliore les
+    // outcomes réels. Vide tant que les nouveaux signaux n'ont pas
+    // accumulé d'outcomes résolus.
+    const rows = await this.prisma.$queryRawUnsafe<any[]>(`
+      SELECT features_json->>'macro_phase' AS phase,
+             signal_type::text AS direction,
+             outcome::text AS outcome,
+             COUNT(*)::int AS n,
+             ROUND(AVG(pnl)::numeric, 3) AS avg_pnl
+      FROM signal_features
+      WHERE outcome IS NOT NULL
+      GROUP BY 1, 2, 3
+      ORDER BY 1 NULLS LAST, 2, 3
+    `);
+    const phases: Record<string, any> = {};
+    for (const r of rows) {
+      const phase = r.phase ?? 'NO_PHASE_DATA';
+      const dir = r.direction ?? '?';
+      phases[phase] = phases[phase] ?? {};
+      const d = phases[phase][dir] = phases[phase][dir] ?? {
+        wins: 0, losses: 0, expired: 0, open: 0, total: 0,
+        avgPnlSum: 0,
+      };
+      const isWin = r.outcome === 'WIN_TP1' || r.outcome === 'WIN_TP2';
+      const isLoss = r.outcome === 'LOSS_SL';
+      if (isWin) d.wins += r.n;
+      else if (isLoss) d.losses += r.n;
+      else if (r.outcome === 'EXPIRED') d.expired += r.n;
+      else d.open += r.n;
+      d.total += r.n;
+      if (r.avg_pnl != null) d.avgPnlSum += Number(r.avg_pnl) * r.n;
+    }
+    const resolved = (d: any) => d.wins + d.losses;
+    return Object.entries(phases).map(([phase, dirs]) => ({
+      phase,
+      directions: Object.entries(dirs as Record<string, any>).map(([dir, d]) => ({
+        direction: dir,
+        ...d,
+        avgPnl: resolved(d) > 0 ? Math.round((d.avgPnlSum / resolved(d)) * 1000) / 1000 : null,
+        winRate: resolved(d) > 0 ? Math.round((d.wins / resolved(d)) * 1000) / 10 : null,
+      })),
+    }));
+  }
+
   @Get('crons')
   async getCrons() {
     return this.cronConfig.getAll();
