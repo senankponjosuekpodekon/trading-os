@@ -192,7 +192,7 @@ async def btc_dominance():
         raise HTTPException(status_code=503, detail=f"BTC dominance unavailable: {e}") from e
 
 
-CRYPTO_BASES = {"BTC", "ETH", "SOL", "BNB", "AVAX", "XRP", "LINK", "ADA", "DOT", "MATIC"}
+CRYPTO_BASES = {"BTC", "ETH", "SOL", "BNB", "AVAX", "XRP", "LINK", "ADA", "DOT", "MATIC", "DOGE"}
 
 
 def is_crypto_symbol(symbol: str) -> bool:

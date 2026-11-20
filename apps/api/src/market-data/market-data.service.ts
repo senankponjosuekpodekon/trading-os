@@ -65,7 +65,7 @@ export interface CotSnapshot {
   openInterest: number;
 }
 
-const FUT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+const FUT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
 const COT_API_URL = 'https://publicreporting.cftc.gov/resource/6dca-aqww.json';
 const COT_ASSET_MAP: Record<string, string> = {
   BTC: 'BITCOIN - CHICAGO MERCANTILE EXCHANGE',

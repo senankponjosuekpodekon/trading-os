@@ -39,8 +39,8 @@ def multiplier_from_stats(stats: Dict[str, Any]) -> Dict[str, Any]:
 
 # ── Couplage phase macro → sizing (niveau 3) ──────────────────────────
 # La phase de rotation BTC→ETH→alts→memecoins module le risque des
-# ouvertures crypto. BUY seulement : un SELL est une sortie, pas un
-# short spéculatif à moduler.
+# ouvertures crypto. BUY sur tous les venues ; SELL modulé uniquement
+# sur les venues shortables (un SELL spot = sortie de position, neutre).
 PHASE_MULT = {
     "BTC":       {"BTC": 1.10, "ETH": 0.95, "alt": 0.80},
     "ETH":       {"BTC": 1.00, "ETH": 1.10, "alt": 0.90},
@@ -50,19 +50,55 @@ PHASE_MULT = {
     "TRANSITION": {"BTC": 1.00, "ETH": 1.00, "alt": 1.00},
 }
 
+# Shorts spéculatifs (SELL sur venue shortable) — miroir borné de la
+# phase. Conservateur : le short en crypto est structurellement plus
+# risqué (funding, squeezes haussiers), donc plafond 1.15 < max BUY.
+SHORT_PHASE_MULT = {
+    "RISK_OFF":  {"BTC": 1.00, "ETH": 1.05, "alt": 1.15},
+    "BTC":       {"BTC": 0.90, "ETH": 0.95, "alt": 1.10},  # alts saignent 1ers
+    "ETH":       {"BTC": 1.00, "ETH": 0.85, "alt": 1.00},
+    "ALTCOINS":  {"BTC": 1.00, "ETH": 0.95, "alt": 0.60},  # shorter en altseason
+    "MEMECOINS": {"BTC": 1.00, "ETH": 1.00, "alt": 0.50},  # squeeze euphorie
+    "TRANSITION": {"BTC": 1.00, "ETH": 1.00, "alt": 1.00},
+}
+
+
+def _crypto_bucket(symbol: str) -> str:
+    base = symbol.split("/")[0]
+    return "BTC" if base == "BTC" else ("ETH" if base == "ETH" else "alt")
+
 
 def phase_multiplier(signal_type: str, symbol: str,
-                     phase: str | None) -> Dict[str, Any]:
-    """Règle pure — testable. SELL = sortie → ×1.0 toujours."""
-    if signal_type != "BUY" or not phase or phase in ("UNKNOWN", ""):
+                     phase: str | None,
+                     shortable: bool = False) -> Dict[str, Any]:
+    """Règle pure — testable.
+
+    BUY : modulé par PHASE_MULT sur tous les venues.
+    SELL : neutre sur spot (sortie de position) ; sur venue shortable,
+    un SELL est un vrai short spéculatif → modulé par SHORT_PHASE_MULT.
+    """
+    if not phase or phase in ("UNKNOWN", ""):
         return {"multiplier": MULT_MID, "reason": "phase_neutral"}
     if not symbol.endswith("/USDT"):
         return {"multiplier": MULT_MID, "reason": "not_crypto"}
+
+    if signal_type == "SELL":
+        if not shortable:
+            return {"multiplier": MULT_MID, "reason": "sell_exit_neutral"}
+        table = SHORT_PHASE_MULT.get(phase)
+        if not table:
+            return {"multiplier": MULT_MID, "reason": "phase_neutral"}
+        mult = table[_crypto_bucket(symbol)]
+        return {"multiplier": mult,
+                "reason": f"short macro_phase {phase} ×{mult}"}
+
+    if signal_type != "BUY":
+        return {"multiplier": MULT_MID, "reason": "phase_neutral"}
+
     table = PHASE_MULT.get(phase)
     if not table:
         return {"multiplier": MULT_MID, "reason": "phase_neutral"}
-    base = symbol.split("/")[0]
-    bucket = "BTC" if base == "BTC" else ("ETH" if base == "ETH" else "alt")
+    bucket = _crypto_bucket(symbol)
     mult = table[bucket]
     return {"multiplier": mult,
             "reason": f"macro_phase {phase} → {bucket} ×{mult}"}
@@ -70,10 +106,12 @@ def phase_multiplier(signal_type: str, symbol: str,
 
 async def risk_multiplier(symbol: str, signal_type: str,
                           metadata: Dict[str, Any] | None = None,
-                          timeframe: str = "1h") -> Dict[str, Any]:
+                          timeframe: str = "1h",
+                          shortable: bool = False) -> Dict[str, Any]:
     """Multiplicateur de risque pour une ouverture, issu du track record
     ET de la phase macro. Échec de lecture → ×1.0 (jamais bloquant).
-    Combiné borné dans [0.5, 1.2]."""
+    Combiné borné dans [0.5, 1.2].
+    shortable=True → les SELL sont de vrais shorts, modulés par phase."""
     try:
         from ml.market_memory import get_pattern_stats
         stats = await get_pattern_stats(symbol, timeframe, signal_type,
@@ -92,7 +130,8 @@ async def risk_multiplier(symbol: str, signal_type: str,
         macro = await mem_cached("macro:rotation",
                                  lambda: compute_macro_rotation(), ttl=600)
         phase_adj = phase_multiplier(signal_type, symbol,
-                                     (macro or {}).get("phase"))
+                                     (macro or {}).get("phase"),
+                                     shortable=shortable)
     except Exception as exc:
         logger.debug("phase_sizing_fallback", error=str(exc))
 

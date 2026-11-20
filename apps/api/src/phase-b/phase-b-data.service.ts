@@ -93,9 +93,8 @@ export class PhaseBDataService {
       .map((r, i) => this.mapSocial(DEFAULT_SYMBOLS[i], r))
       .filter((r): r is SocialSentiment => r !== null);
 
-    let data = live.length > 0 ? live : MOCK_SENTIMENT;
     if (live.length === 0) this.logger.warn('Engine social sentiment unavailable, falling back to mock data');
-    return data;
+    return live.length > 0 ? live : MOCK_SENTIMENT;
   }
 
   private mapSocial(symbol: string, r: Record<string, unknown>): SocialSentiment | null {

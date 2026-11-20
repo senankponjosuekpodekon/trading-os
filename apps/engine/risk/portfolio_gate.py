@@ -55,7 +55,9 @@ async def can_open_position(portfolio_id: str, symbol: str,
         remaining = max(0.0, state["risk_budget"] - state["risk_to_stop_total"])
         try:
             from risk.adaptive import risk_multiplier
-            adapt = await risk_multiplier(symbol, direction)
+            adapt = await risk_multiplier(
+                symbol, direction,
+                shortable=bool(profile.get("shortable")))
         except Exception:
             adapt = {"multiplier": 1.0, "reason": "adaptive_error"}
         if stop_loss and entry and abs(entry - stop_loss) > 0:

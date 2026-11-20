@@ -37,6 +37,33 @@ class TestPhaseMultiplier:
     def test_transition_neutral(self):
         assert phase_multiplier("BUY", "SOL/USDT", "TRANSITION")["multiplier"] == 1.0
 
+    # ── Shorts sur venue shortable ───────────────────────────────────
+
+    def test_sell_spot_neutral(self):
+        out = phase_multiplier("SELL", "SOL/USDT", "RISK_OFF", shortable=False)
+        assert out["multiplier"] == 1.0 and "exit" in out["reason"]
+
+    def test_short_risk_off_boosted(self):
+        out = phase_multiplier("SELL", "SOL/USDT", "RISK_OFF", shortable=True)
+        assert out["multiplier"] == 1.15
+
+    def test_short_altseason_crushed(self):
+        out = phase_multiplier("SELL", "SOL/USDT", "ALTCOINS", shortable=True)
+        assert out["multiplier"] == 0.60
+
+    def test_short_memecoins_euphoria(self):
+        out = phase_multiplier("SELL", "DOGE/USDT", "MEMECOINS", shortable=True)
+        assert out["multiplier"] == 0.50
+
+    def test_short_btc_phase_alts_bleed_first(self):
+        alt = phase_multiplier("SELL", "LINK/USDT", "BTC", shortable=True)
+        btc = phase_multiplier("SELL", "BTC/USDT", "BTC", shortable=True)
+        assert alt["multiplier"] > btc["multiplier"]
+
+    def test_short_unknown_phase_neutral(self):
+        out = phase_multiplier("SELL", "SOL/USDT", "UNKNOWN", shortable=True)
+        assert out["multiplier"] == 1.0
+
 
 # ── Feature extraction (market_memory) ───────────────────────────────
 
