@@ -126,3 +126,42 @@ class TestGemPhaseGate:
     def test_unknown_phase_fail_open(self):
         assert gem_phase_gate(None)["allow"] is True
         assert gem_phase_gate("UNKNOWN")["allow"] is True
+
+
+# ── Gate événementiel (NFP/CPI/FOMC) ─────────────────────────────────
+
+class TestEventRisk:
+    def _ev(self, minutes: float, impact="High", title="NFP"):
+        from datetime import datetime, timezone, timedelta
+        ts = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+        return {"title": title, "impact": impact, "country": "USD", "date": ts}
+
+    def test_event_in_window_blocks(self):
+        from utils.event_risk import assess_event_risk
+        import time
+        out = assess_event_risk([self._ev(-30)], time.time())  # dans 30min
+        assert out["level"] == "high" and out["events"][0]["title"] == "NFP"
+
+    def test_event_far_future_safe(self):
+        from utils.event_risk import assess_event_risk
+        import time
+        out = assess_event_risk([self._ev(60 * 24)], time.time())  # demain
+        assert out["level"] == "none"
+
+    def test_medium_impact_ignored(self):
+        from utils.event_risk import assess_event_risk
+        import time
+        out = assess_event_risk([self._ev(-10, impact="Medium")], time.time())
+        assert out["level"] == "none"
+
+    def test_past_event_still_risky_1h(self):
+        from utils.event_risk import assess_event_risk
+        import time
+        out = assess_event_risk([self._ev(-30)], time.time())  # passé il y a 30min
+        assert out["level"] == "high"  # digestion encore active
+
+    def test_past_event_expired(self):
+        from utils.event_risk import assess_event_risk
+        import time
+        out = assess_event_risk([self._ev(-120)], time.time())  # passé il y a 2h
+        assert out["level"] == "none"

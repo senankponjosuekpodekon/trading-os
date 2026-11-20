@@ -162,10 +162,24 @@ async def risk_multiplier(symbol: str, signal_type: str,
     except Exception as exc:
         logger.debug("phase_sizing_fallback", error=str(exc))
 
-    combined = out["multiplier"] * phase_adj["multiplier"]
+    # Risque événementiel : event High impact (NFP/CPI/FOMC) dans la
+    # fenêtre [-1h,+2h] → risque neuf divisé par 2, toutes directions.
+    event_adj = {"multiplier": MULT_MID, "reason": "no_event"}
+    try:
+        from utils.event_risk import event_risk, EVENT_RISK_MULT
+        ev = await event_risk()
+        if ev.get("level") == "high":
+            titles = ",".join(e["title"] for e in ev.get("events", [])[:2])
+            event_adj = {"multiplier": EVENT_RISK_MULT,
+                         "reason": f"event_risk: {titles}"}
+    except Exception as exc:
+        logger.debug("event_sizing_fallback", error=str(exc))
+
+    combined = out["multiplier"] * phase_adj["multiplier"] * event_adj["multiplier"]
     combined = max(MULT_LOW, min(MULT_HIGH, combined))
     out["multiplier"] = round(combined, 3)
     out["phase_multiplier"] = phase_adj["multiplier"]
     out["phase_reason"] = phase_adj["reason"]
-    out["reason"] = f"{out['reason']} | {phase_adj['reason']}"
+    out["event_multiplier"] = event_adj["multiplier"]
+    out["reason"] = f"{out['reason']} | {phase_adj['reason']} | {event_adj['reason']}"
     return out

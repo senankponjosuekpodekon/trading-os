@@ -1729,6 +1729,26 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
         except Exception as exc:
             logger.debug("macro_rotation_failed", symbol=symbol, error=str(exc))
 
+    # ── Event risk : événement High impact (NFP/CPI/FOMC) ±fenêtre ──
+    # Le fondamental ne génère pas de signal mais filtre le timing —
+    # un stop serré meurt dans le spike initial quel que soit le setup.
+    if result and isinstance(result, dict) and result.get("signal") in ("BUY", "SELL"):
+        try:
+            from utils.event_risk import event_risk, EVENT_CONF_MALUS
+            _risk = await asyncio.wait_for(event_risk(), timeout=3.0)
+            if _risk.get("level") == "high" and "confidence" in result:
+                result["confidence"] = max(0, min(100,
+                    result["confidence"] + EVENT_CONF_MALUS))
+                if "metadata" not in result:
+                    result["metadata"] = {}
+                result["metadata"]["event_risk"] = {
+                    "level": "high",
+                    "malus": EVENT_CONF_MALUS,
+                    "events": _risk.get("events", [])[:3],
+                }
+        except Exception as exc:
+            logger.debug("event_risk_failed", symbol=symbol, error=str(exc))
+
     # ── Phase M: Attach X sentiment to result metadata ──
     if result and isinstance(result, dict) and x_sentiment_context:
         if "metadata" not in result:
