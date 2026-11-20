@@ -1,6 +1,7 @@
 """Dominance BTC / phase macro — règles pures (feature + sizing)."""
 
-from risk.adaptive import phase_multiplier, multiplier_from_stats, MULT_LOW, MULT_HIGH
+from risk.adaptive import (phase_multiplier, multiplier_from_stats,
+                           gem_phase_gate, MULT_LOW, MULT_HIGH)
 from ml.market_memory import _extract_features
 
 
@@ -102,3 +103,26 @@ class TestBounds:
         combined = max(MULT_LOW, min(MULT_HIGH, stats["multiplier"] * phase["multiplier"]))
         assert combined >= 0.5
         assert combined <= 1.2
+
+
+# ── Gate Hidden Gems × phase ─────────────────────────────────────────
+
+class TestGemPhaseGate:
+    def test_risk_off_blocks_entries(self):
+        out = gem_phase_gate("RISK_OFF")
+        assert out["allow"] is False and out["mult"] == 0.0
+
+    def test_btc_phase_reduces_size(self):
+        out = gem_phase_gate("BTC")
+        assert out["allow"] and out["mult"] == 0.6
+
+    def test_altseason_full_size(self):
+        assert gem_phase_gate("ALTCOINS")["mult"] == 1.0
+
+    def test_memecoins_phase_is_theirs(self):
+        out = gem_phase_gate("MEMECOINS")
+        assert out["allow"] and out["mult"] == 1.0
+
+    def test_unknown_phase_fail_open(self):
+        assert gem_phase_gate(None)["allow"] is True
+        assert gem_phase_gate("UNKNOWN")["allow"] is True

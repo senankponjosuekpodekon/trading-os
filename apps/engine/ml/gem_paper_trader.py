@@ -112,6 +112,23 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
         if await r.sismember(POSITIONS_SET, pid):
             return
 
+        # Gate phase macro — les gems s'effondrent en premier en risk-off.
+        # RISK_OFF bloque les entrées ; phase BTC réduit la taille.
+        phase_gate = {"allow": True, "mult": 1.0, "reason": "phase_unavailable"}
+        try:
+            from utils.cache import mem_cached
+            from risk.macro_rotation import compute_macro_rotation
+            from risk.adaptive import gem_phase_gate
+            _macro = await mem_cached(
+                "macro:rotation", lambda: compute_macro_rotation(), ttl=600)
+            phase_gate = gem_phase_gate((_macro or {}).get("phase"))
+            if not phase_gate["allow"]:
+                logger.info("gem_skip_macro_phase", symbol=gem.get("symbol"),
+                            phase=(_macro or {}).get("phase"))
+                return
+        except Exception as e:
+            logger.debug("gem_phase_gate_fallback", error=str(e))
+
         # Cap dédié gems : exposition totale ≤ GEM_MAX_TOTAL_USD
         keys = [f"{POSITION_PREFIX}{k}"
                 for k in await r.smembers(POSITIONS_SET)]
@@ -168,9 +185,11 @@ async def maybe_open_position(gem: Dict[str, Any]) -> None:
             "entry_score": gem.get("gem_score"),
             "entry_liq": gem.get("liquidity"),
             "entry_vol": gem.get("volume_24h"),
-            "size_usd": (gate.get("notional") or VIRTUAL_SIZE_USD),
+            "size_usd": round((gate.get("notional") or VIRTUAL_SIZE_USD)
+                              * phase_gate["mult"], 2),
             "remaining_pct": 100.0,
             "gate": gate.get("state_summary"),
+            "macro_phase_gate": phase_gate.get("reason"),
             "exec_check": gem.get("exec_check"),
             "mark_source": "dexscreener_spot",
             "profile": await _select_profile(),

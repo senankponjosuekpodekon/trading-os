@@ -68,6 +68,33 @@ def _crypto_bucket(symbol: str) -> str:
     return "BTC" if base == "BTC" else ("ETH" if base == "ETH" else "alt")
 
 
+# ── Gate Hidden Gems × phase macro ────────────────────────────────────
+# Les gems sont les actifs les plus sensibles à la phase : microcaps qui
+# s'effondrent en premier en risk-off, vivent de l'euphorie altseason.
+# RISK_OFF → blocage total des entrées (paper-first, vérifiable).
+GEM_PHASE_GATE = {
+    "RISK_OFF":  {"allow": False, "mult": 0.0},
+    "BTC":       {"allow": True,  "mult": 0.6},   # le capital fuit vers BTC
+    "ETH":       {"allow": True,  "mult": 0.9},
+    "ALTCOINS":  {"allow": True,  "mult": 1.0},
+    "MEMECOINS": {"allow": True,  "mult": 1.0},   # leur phase — sélection normale
+    "TRANSITION": {"allow": True, "mult": 1.0},
+}
+
+
+def gem_phase_gate(phase: str | None) -> Dict[str, Any]:
+    """Règle pure — testable. Phase inconnue → fail-open (le paper
+    continue de produire de la donnée d'apprentissage)."""
+    if not phase or phase == "UNKNOWN":
+        return {"allow": True, "mult": 1.0, "reason": "phase_unknown"}
+    g = GEM_PHASE_GATE.get(phase)
+    if not g:
+        return {"allow": True, "mult": 1.0, "reason": "phase_neutral"}
+    effect = "bloqué" if not g["allow"] else f"×{g['mult']}"
+    return {"allow": g["allow"], "mult": g["mult"],
+            "reason": f"macro_phase {phase} → {effect}"}
+
+
 def phase_multiplier(signal_type: str, symbol: str,
                      phase: str | None,
                      shortable: bool = False) -> Dict[str, Any]:
