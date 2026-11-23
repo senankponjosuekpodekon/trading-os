@@ -3,6 +3,17 @@ import * as webPush from 'web-push';
 import { NotificationsService } from './notifications.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 
+// Correspondance entre le type transporté dans data (engine) et la clé
+// de préférence utilisateur. Type inconnu → tout le monde reçoit.
+const TYPE_PREF_KEY: Record<string, string> = {
+  price_move: 'movement',
+  synthetic_edge: 'synthetic_edge',
+  moonshot: 'hidden_gems',
+  gem_paper: 'gem_paper',
+  regime_change: 'onchain',
+  early_alpha: 'early_alpha',
+};
+
 export interface SignalAlertInput {
   symbol: string;
   signal: 'BUY' | 'SELL' | string;
@@ -133,6 +144,7 @@ export class AlertService {
 
     const pref = await this.prefService.getOrCreate(userId);
     if (!pref.pushEnabled || !pref.pushSubscription) return;
+    if (!NotificationPreferenceService.typeAllowed((pref as any).typePrefs, 'signals')) return;
     await this._deliverPush(userId, pref.pushSubscription, this._signalPayload(input));
   }
 
@@ -144,10 +156,14 @@ export class AlertService {
    */
   async broadcastPush(title: string, body: string, data?: Record<string, unknown>) {
     const sent = { push: 0, inApp: 0 };
+    const typeKey = TYPE_PREF_KEY[(data?.['kind'] ?? data?.['type']) as string];
 
     // Notification in-app persistée pour chaque user ; fallback global si DB indisponible
     try {
-      const allUsers = await this.prefService.findAllUserIds();
+      const prefs = await this.prefService.findAllWithTypePrefs();
+      const allUsers = prefs
+        .filter(p => !typeKey || NotificationPreferenceService.typeAllowed(p.typePrefs, typeKey))
+        .map(p => p.userId);
       for (const uid of allUsers) {
         this.notifications.push({
           userId: uid,
@@ -168,7 +184,9 @@ export class AlertService {
       subs = await this.prefService.findPushSubscribed();
     } catch {}
     await Promise.allSettled(
-      subs.map(p =>
+      subs
+        .filter(p => !typeKey || NotificationPreferenceService.typeAllowed((p as any).typePrefs, typeKey))
+        .map(p =>
         this._deliverPush(p.userId, p.pushSubscription, { title, body, data })
           .then(() => { sent.push += 1; }),
       ),

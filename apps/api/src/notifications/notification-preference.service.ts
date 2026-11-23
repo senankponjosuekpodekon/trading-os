@@ -41,7 +41,7 @@ export class NotificationPreferenceService {
         // côté Google même sans login possible.
         user: { isActive: true },
       },
-      select: { userId: true, pushSubscription: true, minConfidence: true },
+      select: { userId: true, pushSubscription: true, minConfidence: true, typePrefs: true },
     });
   }
 
@@ -51,6 +51,22 @@ export class NotificationPreferenceService {
       select: { id: true },
     });
     return users.map((u) => u.id);
+  }
+
+  // Préférences de tous les users actifs (filtrage par type dans broadcastPush).
+  async findAllWithTypePrefs() {
+    return this.systemDb.notificationPreference.findMany({
+      where: { user: { isActive: true } },
+      select: { userId: true, typePrefs: true },
+    });
+  }
+
+  // Un type est autorisé sauf si explicitement désactivé (fail-open :
+  // typePrefs absent / clé inconnue / valeur non-booléenne → autorisé).
+  static typeAllowed(typePrefs: unknown, key: string): boolean {
+    if (!typePrefs || typeof typePrefs !== 'object') return true;
+    const v = (typePrefs as Record<string, unknown>)[key];
+    return v !== false;
   }
 
   async update(userId: string, dto: UpdateNotificationPreferenceDto) {
@@ -88,6 +104,7 @@ export class NotificationPreferenceService {
         pushEnabled: dto.pushEnabled ?? false,
         pushSubscription: (dto.pushSubscription as any) ?? undefined,
         minConfidence: dto.minConfidence ?? 60,
+        typePrefs: (dto.typePrefs as any) ?? undefined,
       },
       update: {
         ...(dto.telegramChatId !== undefined && { telegramChatId: dto.telegramChatId }),
@@ -98,6 +115,7 @@ export class NotificationPreferenceService {
         ...(dto.pushEnabled !== undefined && { pushEnabled: dto.pushEnabled }),
         ...(dto.pushSubscription !== undefined && { pushSubscription: dto.pushSubscription as any }),
         ...(dto.minConfidence !== undefined && { minConfidence: dto.minConfidence }),
+        ...(dto.typePrefs !== undefined && { typePrefs: dto.typePrefs as any }),
       },
     });
 

@@ -13,7 +13,18 @@ interface NotificationPreference {
   discordEnabled: boolean;
   emailEnabled: boolean;
   minConfidence: number;
+  typePrefs?: Record<string, boolean>;
 }
+
+const NOTIF_TYPES: { key: string; label: string; desc: string }[] = [
+  { key: 'signals', label: 'Signaux BUY/SELL', desc: 'Signaux de trading ≥ seuil de confiance' },
+  { key: 'movement', label: 'Mouvements forts', desc: 'Variations de prix anormales (×ATR)' },
+  { key: 'synthetic_edge', label: 'Edge synthétique', desc: 'Bascule de verdict BOOM/CRASH/JUMP' },
+  { key: 'hidden_gems', label: 'Hidden Gems / Moonshot', desc: 'Nouvelles gems qualifiées' },
+  { key: 'gem_paper', label: 'Paper trades gems', desc: 'Ouvertures/clôtures des positions virtuelles' },
+  { key: 'onchain', label: 'Régime onchain', desc: 'Changements de régime de marché onchain' },
+  { key: 'early_alpha', label: 'Early Alpha', desc: 'Candidats pre-listing' },
+];
 
 export default function DistributionSettingsPage() {
   const [form, setForm] = useState<Partial<NotificationPreference>>({});
@@ -61,6 +72,7 @@ export default function DistributionSettingsPage() {
     if (form.discordEnabled !== undefined) payload.discordEnabled = form.discordEnabled;
     if (form.emailEnabled !== undefined) payload.emailEnabled = form.emailEnabled;
     if (form.minConfidence !== undefined) payload.minConfidence = form.minConfidence;
+    if (form.typePrefs !== undefined) payload.typePrefs = { ...(pref?.typePrefs ?? {}), ...form.typePrefs };
     save.mutate(payload);
   };
 
@@ -217,6 +229,31 @@ export default function DistributionSettingsPage() {
             <p className="text-xs text-gray-500">
               Les signaux importants (confidence ≥ seuil) sont envoyés par email à votre adresse enregistrée.
             </p>
+          </div>
+        )}
+
+        {/* Per-type toggles */}
+        {pref && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-3">
+            <h3 className="text-white font-semibold">Types de notifications</h3>
+            <p className="text-xs text-gray-500">Choisissez les catégories que vous recevez (push + in-app).</p>
+            <div className="divide-y divide-gray-800">
+              {NOTIF_TYPES.map(t => {
+                const enabled = (current.typePrefs?.[t.key]) !== false;
+                return (
+                  <div key={t.key} className="flex items-center justify-between py-3">
+                    <div>
+                      <p className="text-sm text-gray-200">{t.label}</p>
+                      <p className="text-xs text-gray-500">{t.desc}</p>
+                    </div>
+                    <Toggle
+                      checked={enabled}
+                      onChange={(v) => setForm(f => ({ ...f, typePrefs: { ...(f.typePrefs ?? {}), [t.key]: v } }))}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

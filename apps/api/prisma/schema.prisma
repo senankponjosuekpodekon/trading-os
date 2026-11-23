@@ -793,6 +793,7 @@ model NotificationPreference {
   minConfidence   Int      @default(60) @map("min_confidence")
   pushEnabled     Boolean  @default(false) @map("push_enabled")
   pushSubscription Json?   @map("push_subscription")
+  typePrefs       Json?    @map("type_prefs")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
