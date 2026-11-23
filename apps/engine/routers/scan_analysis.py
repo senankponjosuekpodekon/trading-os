@@ -1721,21 +1721,35 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
             _btc_dom = ((_macro.get("data") or {}).get("btc_dominance") or 0)
             if _btc_dom >= 60 and _base not in ("BTC", "ETH") and result.get("signal") == "BUY":
                 _macro_bonus -= 5
+            # La phase est persistée même quand le bonus est neutre —
+            # sinon l'apprentissage ne peut pas distinguer "phase neutre"
+            # de "donnée macro indisponible" (les deux donnaient metadata vide).
+            if "metadata" not in result:
+                result["metadata"] = {}
+            result["metadata"]["macro_rotation"] = {
+                "phase": _phase,
+                "phase_label": _macro.get("phase_label"),
+                "bonus": _macro_bonus,
+                "implication": _macro.get("implication"),
+                "warning": _macro.get("warning"),
+                "confidence": _macro.get("confidence"),
+                "data": _macro.get("data"),
+            }
             if _macro_bonus != 0 and "confidence" in result:
                 result["confidence"] = max(0, min(100, result["confidence"] + _macro_bonus))
-                if "metadata" not in result:
-                    result["metadata"] = {}
-                result["metadata"]["macro_rotation"] = {
-                    "phase": _phase,
-                    "phase_label": _macro.get("phase_label"),
-                    "bonus": _macro_bonus,
-                    "implication": _macro.get("implication"),
-                    "warning": _macro.get("warning"),
-                    "confidence": _macro.get("confidence"),
-                    "data": _macro.get("data"),
-                }
         except Exception as exc:
             logger.debug("macro_rotation_failed", symbol=symbol, error=str(exc))
+
+        # Contexte crypto (fear&greed, dominance, funding) attaché au résultat
+        # pour que l'API le persiste dans le feature vector — y compris sur le
+        # chemin warmup/ingest (le context n'était attaché que par scan_routes).
+        try:
+            from utils.market_context import get_signal_context
+            result["context"] = await asyncio.wait_for(
+                get_signal_context(symbol), timeout=6.0,
+            )
+        except Exception as exc:
+            logger.debug("signal_context_failed", symbol=symbol, error=str(exc))
 
     # ── Event risk : événement High impact (NFP/CPI/FOMC) ±fenêtre ──
     # Le fondamental ne génère pas de signal mais filtre le timing —
