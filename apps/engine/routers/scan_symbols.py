@@ -3,13 +3,14 @@
 # Actifs Binance prioritaires → scan rapide (Binance = gratuit, sans limite)
 BINANCE_PRIORITY_SYMBOLS = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
-    "XRP/USDT",  # 5 symbols (was 10) to reduce CPU load
+    "XRP/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOGE/USDT",
+    # 9 symbols — univers crypto actif (DB + instrument_profile alignés)
 ]
 
 # Actifs Deriv (synthétiques) → scan medium (2 min)
 DERIV_SYMBOLS = [
     "V75", "V25", "V10", "V50", "V100",
-    "BOOM1000", "CRASH1000",  # 7 symbols (was 13) to reduce CPU load
+    "BOOM1000", "CRASH1000", "JUMP75",  # JUMP75 actif en DB (map → JD75)
 ]
 
 # Actifs BRVM → scan pendant heures de marché uniquement

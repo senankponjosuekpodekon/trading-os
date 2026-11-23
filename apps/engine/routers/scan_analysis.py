@@ -1488,6 +1488,14 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     if df is None or len(df) < 50:
         return {"symbol": symbol, "signal": "NEUTRAL", "confidence": 0, "reason": "no data"}
 
+    # Alerte de mouvement anormal — indépendante du signal (V75 & co montent
+    # sans jamais produire de BUY/SELL). Fire-and-forget, dédupliquée 4h.
+    try:
+        from utils.movement_alert import check_price_move
+        asyncio.create_task(check_price_move(symbol, df, timeframe))
+    except Exception:
+        pass
+
     # Fetch D1/Weekly bias regimes if not provided
     if bias_regimes is None:
         bias_regimes = {}

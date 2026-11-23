@@ -308,7 +308,7 @@ async def cron_portfolio_snapshots():
                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb)""",
                         p["id"], st["equity"], st["cash"], st["cash_free"],
                         st["margin_locked"], st["unrealized_pnl"],
-                        st["n_positions"], st["risk_to_stop"],
+                        st["n_positions"], st["risk_to_stop_total"],
                         st["risk_budget"], st["gap_loss_total"],
                         json.dumps(st["clusters"]), json.dumps(st["venues"]))
             logger.info("cron_portfolio_snapshots_done", n=len(pids))

@@ -27,14 +27,32 @@ logger = get_logger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=4)
 
-# ── Shared HTTP client ──
-_http_client: Optional[httpx.AsyncClient] = None
+# ── Per-provider HTTP clients ──
+# Separate pools: a poisoned pool (cancelled in-flight requests holding
+# connections) must not starve the other providers. Binance gets the
+# largest pool — it is the primary crypto source and serves the most
+# concurrent klines requests.
+_clients: dict[str, httpx.AsyncClient] = {}
 
-def _get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=20))
-    return _http_client
+def _get_http_client(pool: int = 20, name: str = "shared") -> httpx.AsyncClient:
+    client = _clients.get(name)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            timeout=10,
+            limits=httpx.Limits(
+                max_connections=pool,
+                max_keepalive_connections=min(pool, 10),
+                keepalive_expiry=30,
+            ),
+        )
+        _clients[name] = client
+    return client
+
+def _binance_client() -> httpx.AsyncClient:
+    return _get_http_client(pool=20, name="binance")
+
+def _td_client() -> httpx.AsyncClient:
+    return _get_http_client(pool=5, name="twelvedata")
 
 # ── Klines cache ──
 _klines_cache: BoundedTTLDict = BoundedTTLDict(maxsize=512)
@@ -89,7 +107,7 @@ async def fetch_twelvedata_klines(symbol: str, interval: str, limit: int = 300) 
             elapsed = time.monotonic() - _td_last_call
             if elapsed < _TD_MIN_DELAY:
                 await asyncio.sleep(_TD_MIN_DELAY - elapsed)
-            client = _get_http_client()
+            client = _td_client()
             r = await client.get(url, params=params)
             _td_last_call = time.monotonic()
             r.raise_for_status()
@@ -314,7 +332,7 @@ async def _do_binance_klines(symbol: str, interval: str, limit: int = 300) -> Op
     url = f"https://api.binance.com/api/v3/klines?symbol={binance_sym}&interval={interval}&limit={limit}"
 
     async def _do_fetch():
-        client = _get_http_client()
+        client = _binance_client()
         r = await client.get(url)
         r.raise_for_status()
         return r.json()
@@ -373,6 +391,23 @@ _PROVIDER_FUNCS = {
 DEFAULT_PROVIDER_ORDER = ["binance", "deriv", "twelvedata", "yfinance"]
 
 
+def _provider_can_serve(provider: str, symbol: str) -> bool:
+    """True si le provider a un mapping pour ce symbole. yfinance accepte
+    aussi les tickers 'bruts' (même règle que fetch_yfinance_klines)."""
+    if provider == "binance":
+        return symbol in SYMBOL_TO_BINANCE
+    if provider == "deriv":
+        return symbol in SYMBOL_TO_DERIV
+    if provider == "twelvedata":
+        return bool(TWELVE_DATA_API_KEY) and symbol in SYMBOL_TO_TWELVEDATA
+    if provider == "yfinance":
+        if symbol in SYMBOL_TO_YFINANCE:
+            return True
+        norm = symbol.upper().replace('.US', '').strip()
+        return all(c.isalpha() or c == '.' for c in norm) and '/' not in norm and 1 <= len(norm) <= 8
+    return True
+
+
 async def _notify_api_candle_closed(symbol: str, timeframe: str, retries: int = 2):
     """Notifie l'API qu'une nouvelle bougie a été fetchée pour le tracking. Retry en cas d'échec."""
     import os
@@ -404,8 +439,17 @@ async def fetch_klines_fallback(
 ) -> Optional[pd.DataFrame]:
     """Try several kline providers in parallel and return the first non-empty
     DataFrame according to the requested priority order.
+
+    Only providers that can actually serve the symbol are spawned — launching
+    all four providers for every symbol then cancelling the losers was the
+    mechanism that exhausted the shared connection pool (48h crypto outage).
     """
     order = providers if providers is not None else DEFAULT_PROVIDER_ORDER
+    capable = [p for p in order if _provider_can_serve(p, symbol)]
+    # Symbole inconnu de tous les mappings → on laisse tous les providers
+    # tenter (comportement historique, ex. ticker saisi manuellement).
+    if capable:
+        order = capable
     tasks = {
         name: asyncio.create_task(
             _PROVIDER_FUNCS[name](symbol, interval, limit),

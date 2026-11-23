@@ -258,19 +258,27 @@ async def _try_ingest_signal(result: dict, timeframe: str) -> None:
         return
 
     global _ingest_client
-    try:
-        if _ingest_client is None or _ingest_client.is_closed:
-            _ingest_client = httpx.AsyncClient(timeout=5.0)
-        await _ingest_client.post(
-            f"{api_url.rstrip('/')}/api/signals/ingest",
-            content=json.dumps(result, default=str),
-            headers={"X-Engine-Key": api_key, "Content-Type": "application/json"},
-        )
-    except Exception as e:
+    last_err: Exception | None = None
+    for attempt in range(3):
         try:
-            from utils.dlq import dlq_push
-            await dlq_push("ingest_signal", {"symbol": result.get("symbol"), "timeframe": timeframe,
-                                             "signal": result.get("signal"), "confidence": result.get("confidence")},
-                           error=str(e))
-        except Exception:
-            pass
+            if _ingest_client is None or _ingest_client.is_closed:
+                _ingest_client = httpx.AsyncClient(timeout=10.0)
+            resp = await _ingest_client.post(
+                f"{api_url.rstrip('/')}/api/signals/ingest",
+                content=json.dumps(result, default=str),
+                headers={"X-Engine-Key": api_key, "Content-Type": "application/json"},
+            )
+            if resp.status_code < 500:
+                return
+            last_err = RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            last_err = e
+        if attempt < 2:
+            await asyncio.sleep(2.0 * (attempt + 1))
+    try:
+        from utils.dlq import dlq_push
+        await dlq_push("ingest_signal", {"symbol": result.get("symbol"), "timeframe": timeframe,
+                                         "signal": result.get("signal"), "confidence": result.get("confidence")},
+                       error=f"{type(last_err).__name__}: {last_err}")
+    except Exception:
+        pass
