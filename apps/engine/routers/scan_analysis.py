@@ -696,6 +696,16 @@ def analyze_candles(
         confidence = 0
         reasons.append("Tokenomics: unlock >20% supply <30j — signal désactivé")
 
+    # EV gate synthétique (chemin legacy) — même règle que plus bas
+    if signal != "NEUTRAL" and asset_type == "SYNTHETIC":
+        from ml.synthetic_stats import ev_gate_sync
+        _evd = ev_gate_sync(symbol) or ev_gate_sync(SYNTHETIC_SYMBOLS.get(symbol, ""))
+        if _evd:
+            signal = "NEUTRAL"
+            confidence = 0
+            reasons.append(
+                f"EV gate: verdict {_evd['verdict']} mesuré — signal supprimé")
+
     # Price levels — multiplicateurs ATR adaptés au régime
     # Plafond R:R = tp1_mult / sl_mult. Objectif: R:R ≥ 1.5 après ajustement SL.
     # RANGING      : SL serré, TP modéré (range limité)
@@ -855,6 +865,22 @@ def analyze_candles(
             reasons.append("Macro risk: événement HIGH dans <2h — scan forex suspendu")
 
         # Phase F — News filter for COMMODITY and CRYPTO
+        # EV gate synthétique : verdict DANGEROUS mesuré (spikes plus
+        # fréquents que le contrat, espérance négative côté drift) →
+        # pas de signal directionnel sur un produit à espérance mesurée
+        # négative. Fail-open si les stats ne sont pas encore calculées.
+        if signal != "NEUTRAL" and asset_type == "SYNTHETIC":
+            from ml.synthetic_stats import ev_gate_sync
+            _evd = ev_gate_sync(symbol) or ev_gate_sync(SYNTHETIC_SYMBOLS.get(symbol, ""))
+            if _evd:
+                signal = "NEUTRAL"
+                confidence = 0
+                reasons.append(
+                    f"EV gate: verdict {_evd['verdict']} mesuré "
+                    f"(E={_evd.get('expectancy_net_per_1000c')}%/1000 bougies, "
+                    f"spikes {_evd.get('spikes_per_1000_candles')}/1000c vs "
+                    f"contrat {_evd.get('contract_expected_per_1000c')}) — signal supprimé")
+
         if signal != "NEUTRAL" and news_context and news_context.get("macro_risk"):
             signal = "NEUTRAL"
             confidence = 0

@@ -164,8 +164,10 @@ async def store_stats(stats: dict[str, dict]) -> None:
         r = await cache.client()
         import json
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        from utils.cache import mem_set
         for sym, st in stats.items():
             await r.set(f"synthetic:stats:{sym}", json.dumps(st, default=str), ex=_STATS_TTL)
+            mem_set(f"synthetic:verdict:{sym}", st, ttl=_STATS_TTL)
         await r.rpush("synthetic:stats_history",
                       json.dumps({"ts": ts, "stats": {s: v.get("verdict") for s, v in stats.items()}}, default=str))
         await r.ltrim("synthetic:stats_history", -_HISTORY_MAX, -1)
@@ -182,6 +184,30 @@ async def get_stored(symbol: str) -> Optional[dict]:
         return json.loads(raw) if raw else None
     except Exception:
         return None
+
+
+def ev_gate_sync(symbol: str) -> Optional[dict]:
+    """Version sync du gate pour les chemins d'analyse non-async (cache
+    mémoire alimenté par store_stats)."""
+    from utils.cache import mem_get
+    st = mem_get(f"synthetic:verdict:{symbol}")
+    if st and st.get("verdict") in ("DANGEROUS",):
+        return st
+    return None
+
+
+async def ev_gate(symbol: str) -> Optional[dict]:
+    """Gate EV pour les signaux directionnels sur indices a spikes.
+
+    Retourne les stats stockees si le verdict mesure est DANGEROUS
+    (esperance negative cote drift, spikes plus frequents que le contrat)
+    — l'appelant doit alors supprimer le signal BUY/SELL. None = OK ou
+    pas encore mesure (fail-open : absence de donnee ne bloque pas).
+    """
+    st = await get_stored(symbol)
+    if st and st.get("verdict") in ("DANGEROUS",):
+        return st
+    return None
 
 
 async def get_history(limit: int = 168) -> list:

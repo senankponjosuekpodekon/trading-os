@@ -48,6 +48,18 @@ def _analyze_synthetic_candles(symbol: str, timeframe: str, df: pd.DataFrame, st
 
     signal = ev["signal"]
     confidence = ev["confidence"]
+
+    # EV gate : verdict DANGEROUS mesuré (espérance négative, spikes plus
+    # fréquents que le contrat) → pas de signal directionnel. Fail-open.
+    if signal != "NEUTRAL":
+        from ml.synthetic_stats import ev_gate_sync
+        _evd = ev_gate_sync(symbol) or ev_gate_sync(deriv_sym or "")
+        if _evd:
+            signal = "NEUTRAL"
+            confidence = 0
+            ev["reasons"].append(
+                f"EV gate: verdict {_evd['verdict']} mesuré "
+                f"(E={_evd.get('expectancy_net_per_1000c')}%/1000c) — signal supprimé")
     entry_price = ev["entry_price"] or entry
     stop_loss = ev["stop_loss"]
     take_profit_1 = ev["take_profit_1"]
