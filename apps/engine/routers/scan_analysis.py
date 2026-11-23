@@ -1833,6 +1833,22 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
     except Exception:
         pass
 
+    # ── Cône de mouvement ±σ (tất cả actifs) + TP feasibility ──
+    if result and isinstance(result, dict):
+        try:
+            from utils.movement_cone import movement_cone, tp_feasibility
+            _cone = movement_cone(df)
+            if _cone:
+                result["movement_cone"] = _cone
+                if result.get("signal") in ("BUY", "SELL"):
+                    _entry = result.get("entry_price") or result.get("entry")
+                    _tp = result.get("take_profit") or result.get("take_profit1")
+                    if _entry and _tp and _entry > 0:
+                        _tp_pct = abs((_tp - _entry) / _entry * 100.0)
+                        result["tp_feasibility"] = tp_feasibility(_tp_pct, _cone, "4x")
+        except Exception:
+            pass
+
     return result
 
 

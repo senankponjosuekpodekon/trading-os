@@ -72,3 +72,26 @@ async def test_broadcast_exception_swallowed():
     df = _df(closes)
     with patch("utils.movement_alert.broadcast_once", new=AsyncMock(side_effect=RuntimeError("redis down"))):
         await check_price_move("V75", df, "1h")  # ne doit pas lever
+
+
+class TestMovementCone:
+    def test_cone_bands(self):
+        from utils.movement_cone import movement_cone
+        closes = [100.0 + i * 0.1 for i in range(60)]
+        cone = movement_cone(_df(closes))
+        assert cone is not None
+        assert cone["1x"]["p68"] > 0
+        assert cone["4x"]["p68"] > cone["1x"]["p68"]
+        assert cone["24x"]["p95"] > cone["1x"]["p95"]
+
+    def test_cone_none_on_short_df(self):
+        from utils.movement_cone import movement_cone
+        assert movement_cone(_df([1.0] * 10)) is None
+
+    def test_tp_feasibility_bands(self):
+        from utils.movement_cone import tp_feasibility
+        cone = {"4x": {"p68": 1.0, "p95": 2.0}}
+        assert tp_feasibility(0.5, cone) == "HIGH"
+        assert tp_feasibility(1.5, cone) == "MEDIUM"
+        assert tp_feasibility(5.0, cone) == "LOW"
+        assert tp_feasibility(None, cone) is None
