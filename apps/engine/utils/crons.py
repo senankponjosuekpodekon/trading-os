@@ -368,6 +368,45 @@ async def cron_carry_accrual():
         await asyncio.sleep(INTERVAL)
 
 
+async def cron_synthetic_stats():
+    """Mesure horaire de l'asymétrie BOOM/CRASH (spikes vs contrat Deriv).
+    Persiste les snapshots pour le suivi et alerte si le verdict d'un
+    symbole bascule (edge qui disparaît ou qui apparaît)."""
+    INTERVAL = 3600
+    await asyncio.sleep(300)  # premier run 5min après boot
+    while True:
+        try:
+            from ml.synthetic_stats import measure_all, store_stats, get_stored
+            prev_verdicts = {sym: (await get_stored(sym) or {}).get("verdict")
+                             for sym in ("BOOM1000", "CRASH1000", "BOOM500", "CRASH500", "BOOM300", "CRASH300")}
+            stats = await measure_all()
+            await store_stats(stats)
+            for sym, st in stats.items():
+                verdict = st.get("verdict")
+                if verdict in ("EXPLOITABLE", "DANGEROUS"):
+                    # Bascule détectée → on notifie (dédup 12h par symbole+verdict)
+                    if verdict != prev_verdicts.get(sym):
+                        from utils.push_notify import broadcast_once
+                        e = st.get("expectancy_net_per_1000c", 0)
+                        await broadcast_once(
+                            dedup_key=f"synth_edge:{sym}:{verdict}",
+                            title=f"{'🟢' if verdict == 'EXPLOITABLE' else '🔴'} Edge synthétique — {sym}",
+                            message=(
+                                f"{sym}: verdict {verdict} (espérance nette {e:+.2f}%/1000 bougies, "
+                                f"spikes {st.get('spikes_per_1000_candles')}/1000c, "
+                                f"drift {st.get('drift_pct_per_candle')}%/boug.)."
+                            ),
+                            data={"kind": "synthetic_edge", "symbol": sym,
+                                  "verdict": verdict, "stats": st},
+                            cooldown_seconds=12 * 3600,
+                        )
+            logger.info("cron_synthetic_stats_done",
+                        verdicts={s: v.get("verdict") for s, v in stats.items()})
+        except Exception as exc:
+            logger.warning("cron_synthetic_stats_failed", error=str(exc))
+        await asyncio.sleep(INTERVAL)
+
+
 async def run_all_crons():
     """Launch all cron jobs in parallel. Each cron is individually resilient
     (try/except inside the while loop), but we also use return_exceptions=True
@@ -385,5 +424,6 @@ async def run_all_crons():
         cron_instrument_profile_refresh(),
         cron_portfolio_snapshots(),
         cron_carry_accrual(),
+        cron_synthetic_stats(),
         return_exceptions=True,
     )

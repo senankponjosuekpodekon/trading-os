@@ -527,3 +527,28 @@ async def analyze_synthetic_symbol(symbol: str):
         "source": source,
         **stats,
     }
+
+
+@router.get("/synthetic/drift-stats")
+async def synthetic_drift_stats(refresh: bool = False):
+    """Stats d'asymétrie BOOM/CRASH mesurées (drift vs spikes vs contrat).
+
+    refresh=true → remesure immédiate ; sinon lit le dernier snapshot
+    du cron horaire, ou mesure à la demande si rien en cache."""
+    from ml.synthetic_stats import measure_all, get_stored, store_stats
+
+    if not refresh:
+        cached = {sym: await get_stored(sym)
+                  for sym in ("BOOM1000", "CRASH1000", "BOOM500", "CRASH500", "BOOM300", "CRASH300")}
+        if any(v is not None for v in cached.values()):
+            return {"source": "cron_snapshot", "stats": {k: v for k, v in cached.items() if v}}
+    stats = await measure_all()
+    await store_stats(stats)
+    return {"source": "fresh_measure", "stats": stats}
+
+
+@router.get("/synthetic/drift-history")
+async def synthetic_drift_history(limit: int = 168):
+    """Historique horodaté des verdicts (suivi auto du cron horaire)."""
+    from ml.synthetic_stats import get_history
+    return {"history": await get_history(min(limit, 720))}
