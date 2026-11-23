@@ -53,27 +53,23 @@ def measure_spikes(df: pd.DataFrame, symbol: str) -> dict:
         return {"symbol": symbol, "verdict": "INSUFFICIENT_DATA", "n_candles": 0 if df is None else len(df)}
 
     close = df["close"].astype(float)
-    rng = (df["high"].astype(float) - df["low"].astype(float))
+    # Le spike d'un BOOM/CRASH saute puis la bougie dérive dans le sens
+    # opposé : close-to-close garde souvent le signe du DRIFT, pas du
+    # spike. La détection par signe de return les rate tous — on mesure
+    # donc par range % (distance contre la position = coût du spike).
+    rng_pct = ((df["high"].astype(float) - df["low"].astype(float)) / close * 100.0).values
     rets = close.pct_change().dropna() * 100.0  # %
 
-    med_range = float(rng.median())
+    med_range = float(np.median(rng_pct))
     if med_range <= 0:
         return {"symbol": symbol, "verdict": "UNKNOWN", "reason": "zero_range"}
 
-    # Direction attendue des spikes : BOOM/JUMP → spikes baissiers,
-    # CRASH → spikes haussiers (les indices Jump ont les deux sens,
-    # traités comme BOOM côté structure dominante).
-    is_crash = symbol.startswith("CRASH")
-    ret_signed = rets.values
-    spike_mask = (rng.iloc[1:].values > SPIKE_RANGE_MULT * med_range)
-    if is_crash:
-        spike_mask &= ret_signed > 0
-    else:
-        spike_mask &= ret_signed < 0
+    spike_mask = rng_pct[1:] > SPIKE_RANGE_MULT * med_range
 
     n_candles = len(rets)
     n_spikes = int(spike_mask.sum())
-    spike_sizes = np.abs(ret_signed[spike_mask]) if n_spikes else np.array([])
+    spike_sizes = rng_pct[1:][spike_mask] if n_spikes else np.array([])
+    ret_signed = rets.values
     drift_rets = ret_signed[~spike_mask]
 
     spikes_per_1000 = n_spikes / n_candles * 1000.0
@@ -84,9 +80,10 @@ def measure_spikes(df: pd.DataFrame, symbol: str) -> dict:
 
     drift_pct_per_candle = float(drift_rets.mean()) if len(drift_rets) else 0.0
     drift_direction = "DOWN" if drift_pct_per_candle < 0 else "UP"
-    # Le drift travaille pour un SELL sur CRASH, un BUY sur BOOM —
-    # l'espérance exprimée est celle de la position côté drift.
-    trade_side = "SELL" if is_crash else "BUY"
+    # Le drift est du côté mesuré (CRASH dérive vers le haut entre les
+    # crashes, BOOM vers le bas entre les booms) — le trade "récolte" le
+    # drift dans le sens mesuré et encaisse les spikes en sens inverse.
+    trade_side = "SELL" if drift_pct_per_candle < 0 else "BUY"
     drift_in_favor = abs(drift_pct_per_candle)
 
     # Espérance nette par 1000 bougies : drift capté − coût des spikes.
