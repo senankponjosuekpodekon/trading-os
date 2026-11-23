@@ -1846,6 +1846,14 @@ async def fetch_and_analyze(symbol: str, timeframe: str, htf_regime: Optional[di
                     if _entry and _tp and _entry > 0:
                         _tp_pct = abs((_tp - _entry) / _entry * 100.0)
                         result["tp_feasibility"] = tp_feasibility(_tp_pct, _cone, "4x")
+                    # SL dans le bruit : si le stop est à moins d'1σ de la
+                    # bougie courante, le bruit normal le touchera par hasard.
+                    _sl = result.get("stop_loss")
+                    if _entry and _sl and _entry > 0:
+                        _sl_pct = abs((_sl - _entry) / _entry * 100.0)
+                        _band1 = _cone.get("1x", {})
+                        if _band1.get("p68") and _sl_pct <= _band1["p68"]:
+                            result["sl_in_noise"] = True
         except Exception:
             pass
 

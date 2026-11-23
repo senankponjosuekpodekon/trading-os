@@ -223,6 +223,34 @@ export function SignalCard({ signal, prices, aiExplain, loadingAi, onExplain }: 
                 ⚠ {signal.metadata.red_flags.red_flag_count} red flags
               </span>
             )}
+            {(signal.metadata as any)?.tp_feasibility && (
+              <span
+                className={`text-xs px-2 py-0.5 rounded border font-medium ${
+                  (signal.metadata as any).tp_feasibility === 'HIGH'
+                    ? 'border-green-500/40 bg-green-500/10 text-green-400'
+                    : (signal.metadata as any).tp_feasibility === 'MEDIUM'
+                    ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400'
+                    : 'border-red-500/40 bg-red-500/10 text-red-400'
+                }`}
+                title={(() => {
+                  const c = (signal.metadata as any).movement_cone;
+                  const band = c?.['4x'];
+                  return band
+                    ? `Objectif TP vs cône ±σ (4 bougies : ±${band.p68}% à 68%, ±${band.p95}% à 95%) — ${(signal.metadata as any).tp_feasibility === 'LOW' ? 'objectif improbable dans cette fenêtre' : 'objectif réaliste'}`
+                    : 'Objectif TP vs cône de volatilité';
+                })()}
+              >
+                TP {(signal.metadata as any).tp_feasibility}
+              </span>
+            )}
+            {(signal.metadata as any)?.sl_in_noise && (
+              <span
+                className="text-xs px-2 py-0.5 rounded border border-orange-500/40 bg-orange-500/10 text-orange-400 font-medium"
+                title="Le stop est à moins d'1σ de la bougie — le bruit normal du marché peut le toucher par hasard"
+              >
+                SL dans le bruit
+              </span>
+            )}
             {signal.profileSuitability?.map(p => (
               <span key={p} title={`Profil adapté : ${p}`} className="text-xs px-2 py-0.5 rounded border border-indigo-400/30 bg-indigo-400/10 text-indigo-300 font-medium">{p}</span>
             ))}
