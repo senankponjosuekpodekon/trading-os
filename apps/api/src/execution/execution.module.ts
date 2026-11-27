@@ -7,6 +7,7 @@ import { DerivConnector } from './deriv.connector';
 import { BrvmConnector } from './brvm.connector';
 import { OandaConnector } from './oanda.connector';
 import { Mt5Connector } from './mt5.connector';
+import { AutoExecScheduler } from './auto-exec.scheduler';
 import { ExchangeConnectionsModule } from '../exchange-connections/exchange-connections.module';
 import { PositionsModule } from '../positions/positions.module';
 import { ConfigModule } from '@nestjs/config';
@@ -14,7 +15,7 @@ import { ConfigModule } from '@nestjs/config';
 @Module({
   imports: [ExchangeConnectionsModule, PositionsModule, ConfigModule],
   controllers: [ExecutionController],
-  providers: [ExecutionService, ExecutionGateService, BinanceConnector, DerivConnector, BrvmConnector, OandaConnector, Mt5Connector],
+  providers: [ExecutionService, ExecutionGateService, BinanceConnector, DerivConnector, BrvmConnector, OandaConnector, Mt5Connector, AutoExecScheduler],
   exports: [ExecutionService, ExecutionGateService],
 })
 export class ExecutionModule {}
