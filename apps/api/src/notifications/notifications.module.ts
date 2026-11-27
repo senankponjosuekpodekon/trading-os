@@ -4,11 +4,13 @@ import { NotificationsService } from './notifications.service';
 import { AlertService } from './alert.service';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { TrackRecordModule } from '../track-record/track-record.module';
+import { MailModule } from '../mail/mail.module';
+import { DailyReportScheduler } from './daily-report.scheduler';
 
 @Module({
-  imports:      [TrackRecordModule],
+  imports:      [TrackRecordModule, MailModule],
   controllers: [NotificationsController],
-  providers:   [NotificationsService, AlertService, NotificationPreferenceService],
+  providers:   [NotificationsService, AlertService, NotificationPreferenceService, DailyReportScheduler],
   exports:     [NotificationsService, AlertService, NotificationPreferenceService],
 })
 export class NotificationsModule {}
