@@ -210,6 +210,46 @@ export class Mt5Connector implements ExchangeConnector {
     }
   }
 
+  /**
+   * Gestion directe des positions MT5 (compte partagé du bridge).
+   * Le magic 20261118 est TOUJOURS transmis — /close et /modify refusent
+   * de toucher des positions qui ne viennent pas de trading-os.
+   */
+  async getPositions(): Promise<any[]> {
+    const res = await axios.get(`${this.bridgeUrl}/positions`, {
+      headers: this.headers, timeout: 15000,
+    }).catch(err => { this._rethrow(err, 'positions'); });
+    const d = (res as any).data;
+    return Array.isArray(d) ? d : (d?.positions ?? []);
+  }
+
+  async closeSymbol(appSymbol: string): Promise<{ closed: any[]; errors: any[] }> {
+    const res = await axios.post(`${this.bridgeUrl}/close`, {
+      symbol: this.mapSymbol(appSymbol), magic: 20261118,
+    }, { headers: this.headers, timeout: 20000 })
+      .catch(err => { this._rethrow(err, 'close'); });
+    return (res as any).data;
+  }
+
+  async closeAll(): Promise<any> {
+    const res = await axios.post(`${this.bridgeUrl}/close-all`, {}, {
+      headers: this.headers, timeout: 30000,
+    }).catch(err => { this._rethrow(err, 'close-all'); });
+    return (res as any).data;
+  }
+
+  async modifyStops(appSymbol: string, sl?: number, tp?: number): Promise<any> {
+    if (sl == null && tp == null) {
+      throw new BadRequestException('MT5: sl ou tp requis pour modify.');
+    }
+    const res = await axios.post(`${this.bridgeUrl}/modify`, {
+      symbol: this.mapSymbol(appSymbol), magic: 20261118,
+      ...(sl != null && { sl }), ...(tp != null && { tp }),
+    }, { headers: this.headers, timeout: 20000 })
+      .catch(err => { this._rethrow(err, 'modify'); });
+    return (res as any).data;
+  }
+
   async validateCredentials(_login: string, _password: string): Promise<boolean> {
     // Le "credential" réel est le compte configuré côté bridge : on valide
     // que le bridge répond ET que le terminal est connecté au broker.

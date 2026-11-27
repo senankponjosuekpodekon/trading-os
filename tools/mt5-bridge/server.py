@@ -568,6 +568,47 @@ def close_all():
     return {"results": out}
 
 
+@app.post("/modify")
+def modify():
+    """Modifie SL/TP des positions {symbol} filtrées par magic (obligatoire,
+    même règle que /close — jamais de modification hors de nos ordres).
+    Body : {symbol, magic, sl?, tp?} — au moins sl ou tp requis."""
+    b = request.get_json(force=True, silent=True) or {}
+    symbol = b.get("symbol")
+    magic = b.get("magic")
+    if not symbol or magic is None:
+        return jsonify({"error": "bad_request",
+                        "detail": "attendu {symbol, magic, sl?|tp?}"}), 400
+    if b.get("sl") is None and b.get("tp") is None:
+        return jsonify({"error": "bad_request",
+                        "detail": "sl ou tp requis"}), 400
+    modified, errors = [], []
+    try:
+        with _locked():
+            for p in mt5.positions_get(symbol=symbol) or []:
+                if p.magic != int(magic):
+                    continue
+                req = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": symbol,
+                    "position": p.ticket,
+                    "sl": float(b["sl"]) if b.get("sl") is not None else p.sl,
+                    "tp": float(b["tp"]) if b.get("tp") is not None else p.tp,
+                    "magic": 20261118,
+                }
+                res = mt5.order_send(req)
+                if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                    modified.append({"ticket": p.ticket,
+                                     "sl": req["sl"], "tp": req["tp"]})
+                else:
+                    errors.append({"ticket": p.ticket,
+                                   "retcode": res.retcode if res else None,
+                                   "comment": res.comment if res else "send_none"})
+    except _Mt5Busy:
+        return _busy()
+    return {"modified": modified, "errors": errors}
+
+
 if __name__ == "__main__":
     # Bind local UNIQUEMENT : 127.0.0.1 par défaut, ou l'IP gateway docker
     # (ex. 172.17.0.1) pour que les containers y accèdent sans exposition

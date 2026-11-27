@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, RefreshCw, AlertCircle, CheckCircle2, XCircle, Key, ShieldCheck, Zap } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
+import Mt5PositionsPanel from '@/components/exchanges/Mt5PositionsPanel';
 
 interface ExchangeConnection {
   id: string;
@@ -294,6 +295,8 @@ export default function ExchangeConnectionsPage() {
           </div>
         )}
       </div>
+
+      <Mt5PositionsPanel />
     </>
   );
 }

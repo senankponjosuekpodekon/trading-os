@@ -290,4 +290,45 @@ export class ExecutionService {
       `status=${position.status}`,
     );
   }
+
+  // ── Gestion directe MT5 — l'utilisateur doit posséder une connexion
+  // MT5 active (le compte du bridge est partagé ; le magic 20261118
+  // borne toutes les opérations aux ordres trading-os).
+
+  private async _requireMt5Connection(userId: string) {
+    const conn = await this.prisma.exchangeConnection.findFirst({
+      where: { userId, exchange: 'MT5' as any, isActive: true },
+      select: { id: true },
+    });
+    if (!conn) {
+      throw new BadRequestException('Aucune connexion MT5 active — configurez-la dans Settings → Exchanges.');
+    }
+    return conn;
+  }
+
+  async mt5Positions(userId: string) {
+    await this._requireMt5Connection(userId);
+    return this.mt5.getPositions();
+  }
+
+  async mt5CloseSymbol(userId: string, symbol: string) {
+    await this._requireMt5Connection(userId);
+    const res = await this.mt5.closeSymbol(symbol);
+    this.logger.log(`MT5 close ${symbol} by user ${userId}: ${JSON.stringify(res).slice(0, 300)}`);
+    return res;
+  }
+
+  async mt5CloseAll(userId: string) {
+    await this._requireMt5Connection(userId);
+    const res = await this.mt5.closeAll();
+    this.logger.log(`MT5 close-all by user ${userId}: ${JSON.stringify(res).slice(0, 300)}`);
+    return res;
+  }
+
+  async mt5ModifyStops(userId: string, symbol: string, sl?: number, tp?: number) {
+    await this._requireMt5Connection(userId);
+    const res = await this.mt5.modifyStops(symbol, sl, tp);
+    this.logger.log(`MT5 modify ${symbol} sl=${sl} tp=${tp} by user ${userId}: ${JSON.stringify(res).slice(0, 300)}`);
+    return res;
+  }
 }
