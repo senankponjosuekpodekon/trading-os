@@ -1,0 +1,54 @@
+name: trading-mt5-exec
+# Instance EXECUTION dédiée — DISTINCTE du sandbox read-only.
+# Cible : compte Deriv-Demo pour exécuter les ordres "Exécuter" de l'UI.
+# Le bridge écoute sur 172.17.0.1:5555 (docker0) : joignable par les
+# containers via host.docker.internal, jamais exposé sur le LAN.
+# Connexion Deriv : login manuel via le bureau VNC (127.0.0.1:26901,
+# mot de passe MT5_EXEC_DESKTOP_PASSWORD) OU identifiants dans
+# .env.exec.local (MT5_LOGIN / MT5_PASSWORD / MT5_SERVER=Deriv-Demo).
+services:
+  mt5-exec:
+    build:
+      context: .
+    image: trading-os-mt5-sandbox:local
+    container_name: trading-mt5-exec
+    restart: unless-stopped
+    env_file:
+      - path: .env.exec.local
+        required: false
+    ports:
+      - "172.17.0.1:5555:5555"
+      - "127.0.0.1:26901:6901"
+    environment:
+      VNC_PW: ${MT5_EXEC_DESKTOP_PASSWORD:?Set a dedicated desktop password}
+      MT5_BRIDGE_TOKEN: ${MT5_EXEC_BRIDGE_TOKEN:?Set a dedicated bridge token}
+      MT5_READ_ONLY: "0"
+      MT5_ALLOWED_SYMBOLS: ${MT5_EXEC_ALLOWED_SYMBOLS:-Volatility 75 Index,Volatility 10 Index,Volatility 25 Index,Volatility 50 Index,Volatility 100 Index,Boom 300 Index,Boom 500 Index,Boom 1000 Index,Crash 300 Index,Crash 500 Index,Crash 1000 Index,Jump 10 Index,Jump 25 Index,Jump 50 Index,Jump 75 Index,Jump 100 Index}
+      MT5_MAX_VOLUME: ${MT5_EXEC_MAX_VOLUME:-0.5}
+      MT5_MAX_ORDERS_MIN: ${MT5_EXEC_MAX_ORDERS_MIN:-4}
+      MT5_EXPECTED_LOGIN: ${MT5_EXPECTED_LOGIN:-41330108}
+      MT5_EXPECTED_SERVER: ${MT5_EXPECTED_SERVER:-Deriv-Demo}
+      MT5_LOGIN: ""
+      MT5_PASSWORD: ""
+      MT5_SERVER: ""
+    volumes:
+      - desktop-exec:/home/kasm-user
+    healthcheck:
+      test: ["CMD", "python3", "/opt/mt5-bridge/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5m
+      retries: 3
+    shm_size: "512mb"
+    mem_limit: 2g
+    cpus: 1.5
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  desktop-exec:

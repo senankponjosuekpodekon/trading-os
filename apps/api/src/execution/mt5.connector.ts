@@ -282,6 +282,23 @@ export class Mt5Connector implements ExchangeConnector {
       'US30': 'US30',
       'GER30': 'GER30',
       'UK100': 'UK100',
+      // Indices synthétiques Deriv (noms terminal Deriv-Demo)
+      'V10': 'Volatility 10 Index',
+      'V25': 'Volatility 25 Index',
+      'V50': 'Volatility 50 Index',
+      'V75': 'Volatility 75 Index',
+      'V100': 'Volatility 100 Index',
+      'BOOM300': 'Boom 300 Index',
+      'BOOM500': 'Boom 500 Index',
+      'BOOM1000': 'Boom 1000 Index',
+      'CRASH300': 'Crash 300 Index',
+      'CRASH500': 'Crash 500 Index',
+      'CRASH1000': 'Crash 1000 Index',
+      'JUMP10': 'Jump 10 Index',
+      'JUMP25': 'Jump 25 Index',
+      'JUMP50': 'Jump 50 Index',
+      'JUMP75': 'Jump 75 Index',
+      'JUMP100': 'Jump 100 Index',
       'JP225': 'JP225',
     };
 
