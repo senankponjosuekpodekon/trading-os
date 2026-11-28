@@ -21,6 +21,7 @@ describe('SignalTrackerService', () => {
     },
     signalExecutionEvent: {
       create: jest.fn(),
+      createMany: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
     },
     $transaction: jest.fn((callback) => callback(mockPrisma)),
@@ -118,13 +119,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          data: expect.arrayContaining([expect.objectContaining({
             signalId: '1',
             type: 'ENTRY_HIT',
             price: 100,
-          }),
+          })]),
         })
       );
     });
@@ -152,13 +153,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          data: expect.arrayContaining([expect.objectContaining({
             signalId: '1',
             type: 'SL_HIT',
             price: 90,
-          }),
+          })]),
         })
       );
     });
@@ -186,13 +187,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          data: expect.arrayContaining([expect.objectContaining({
             signalId: '1',
             type: 'TP1_HIT',
             price: 110,
-          }),
+          })]),
         })
       );
     });
@@ -220,13 +221,13 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          data: expect.arrayContaining([expect.objectContaining({
             signalId: '1',
             type: 'SL_HIT',
             resolvedBy: 'CONSERVATIVE_SL_FIRST',
-          }),
+          })]),
         })
       );
     });
@@ -254,12 +255,12 @@ describe('SignalTrackerService', () => {
 
       await service.processSignal('1');
 
-      expect(mockPrisma.signalExecutionEvent.create).toHaveBeenCalledWith(
+      expect(mockPrisma.signalExecutionEvent.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          data: expect.arrayContaining([expect.objectContaining({
             signalId: '1',
             type: 'EXPIRED',
-          }),
+          })]),
         })
       );
     });

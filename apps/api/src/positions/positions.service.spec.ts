@@ -90,7 +90,7 @@ describe('PositionsService', () => {
     mockPrisma.position.findMany.mockResolvedValue([]);
     await service.syncTrailingStops();
     expect(mockPrisma.position.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { user: { email: { not: 'autopilot@system.local' } } } },
+      where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { user: { email: { not: 'autopilot@system.local' } }, type: { not: 'LIVE' } } },
     }));
     expect(mockPrisma.position.update).not.toHaveBeenCalled();
   });
