@@ -8,6 +8,7 @@ describe('QuotaService', () => {
   let service: QuotaService;
 
   const mockPrisma = {
+    user: { findUnique: jest.fn().mockResolvedValue({ role: 'USER' }) },
     portfolio: { count: jest.fn() },
     userStrategy: { count: jest.fn() },
     signalDailyUsage: {
@@ -55,6 +56,12 @@ describe('QuotaService', () => {
     mockBilling.getActiveSubscription.mockResolvedValue({ plan: { name: 'Basic', maxPortfolios: 2 } });
     mockPrisma.portfolio.count.mockResolvedValue(2);
     await expect(service.assertCanCreatePortfolio('u1')).rejects.toThrow(ForbiddenException);
+  });
+
+  it.each(['ADMIN', 'SUPER_ADMIN'])('allows %s strategy activation above the plan limit', async (role) => {
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ role });
+    await expect(service.assertCanEnableStrategy('admin')).resolves.toBeUndefined();
+    expect(mockPrisma.userStrategy.count).not.toHaveBeenCalled();
   });
 
   it('blocks strategy activation at the plan limit', async () => {

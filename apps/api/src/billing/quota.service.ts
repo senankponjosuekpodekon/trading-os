@@ -50,6 +50,8 @@ export class QuotaService {
   }
 
   async assertCanEnableStrategy(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') return;
     const plan = await this.getPlanLimits(userId);
     if (plan.maxStrategies == null) return;
     const count = await this.prisma.userStrategy.count({ where: { userId, isEnabled: true } });
