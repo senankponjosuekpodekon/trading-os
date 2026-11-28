@@ -186,8 +186,9 @@ export class SignalTrackerService {
 
       await this.prisma.$transaction(async (tx) => {
         if (!entryAlreadyHit && signal.expiresAt && candle.openTime >= signal.expiresAt.getTime()) {
-          await tx.signalExecutionEvent.create({
-            data: { signalId, type: 'EXPIRED', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe },
+          await tx.signalExecutionEvent.createMany({
+            data: [{ signalId, type: 'EXPIRED', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe }],
+            skipDuplicates: true,
           });
           await tx.signal.update({ where: { id: signalId }, data: { executionStatus: 'EXPIRED', lastProcessedCandle: new Date(candle.openTime) } });
           await this.featureStore.attachOutcome(signalId, 'EXPIRED', null);
@@ -199,8 +200,9 @@ export class SignalTrackerService {
         if (!entryAlreadyHit) {
           const entryTouched = candle.low <= entryHigh && candle.high >= entryLow;
           if (entryTouched) {
-            await tx.signalExecutionEvent.create({
-              data: { signalId, type: 'ENTRY_HIT', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe },
+            await tx.signalExecutionEvent.createMany({
+              data: [{ signalId, type: 'ENTRY_HIT', price: candle.close, candleTime: new Date(candle.openTime), candleTimeframe: signal.timeframe }],
+              skipDuplicates: true,
             });
             entryAlreadyHit = true;
             worstPrice = candle.close;
@@ -222,8 +224,11 @@ export class SignalTrackerService {
         for (const touch of result.order) {
           const type = (touch === 'SL' ? 'SL_HIT' : `${touch}_HIT`) as 'SL_HIT' | 'TP1_HIT' | 'TP2_HIT' | 'TP3_HIT';
           const price = touch === 'SL' ? currentSL : takeProfits[Number(touch.replace('TP', '')) - 1];
-          await tx.signalExecutionEvent.create({
-            data: {
+          // Un doublon (même signal+type+candle) ne doit pas faire
+          // rollback la transaction : sinon lastProcessedCandle n'avance
+          // jamais et la bougie est re-traitée en boucle (spam d'erreurs).
+          await tx.signalExecutionEvent.createMany({
+            data: [{
               signalId,
               type,
               price,
@@ -231,7 +236,8 @@ export class SignalTrackerService {
               candleTime: new Date(candle.openTime),
               candleTimeframe: signal.timeframe,
               resolvedBy: result.method,
-            },
+            }],
+            skipDuplicates: true,
           });
           if (touch === 'SL') break;
         }
