@@ -514,8 +514,15 @@ def close():
     closed, errors = [], []
     try:
         with _locked():
+            pos = mt5.positions_get(symbol=symbol)
+            if pos is None:
+                # None = échec de lecture MT5, pas "aucune position" —
+                # un kill switch ne doit pas rapporter "rien fermé"
+                # alors que la lecture a échoué.
+                return jsonify({"error": "positions_unavailable",
+                                "detail": f"positions_get {symbol} -> None"}), 503
             info = mt5.symbol_info(symbol)
-            for p in mt5.positions_get(symbol=symbol) or []:
+            for p in pos:
                 if p.magic != int(magic):
                     continue
                 tick = mt5.symbol_info_tick(symbol)
@@ -546,7 +553,10 @@ def close_all():
     out = []
     try:
         with _locked():
-            for p in mt5.positions_get() or []:
+            pos = mt5.positions_get()
+            if pos is None:
+                return jsonify({"error": "positions_unavailable"}), 503
+            for p in pos:
                 symbol = p.symbol
                 info = mt5.symbol_info(symbol)
                 tick = mt5.symbol_info_tick(symbol)

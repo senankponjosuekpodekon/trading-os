@@ -215,6 +215,16 @@ export class Mt5Connector implements ExchangeConnector {
    * Le magic 20261118 est TOUJOURS transmis — /close et /modify refusent
    * de toucher des positions qui ne viennent pas de trading-os.
    */
+  async getTickerPrice(_login: string, _password: string, appSymbol: string): Promise<number | null> {
+    const res = await axios.get(
+      `${this.bridgeUrl}/quote/${encodeURIComponent(this.mapSymbol(appSymbol))}`,
+      { headers: this.headers, timeout: 15000 },
+    ).catch(() => null);
+    const d = (res as any)?.data;
+    if (d?.bid && d?.ask) return (d.bid + d.ask) / 2;
+    return null;
+  }
+
   async getPositions(): Promise<any[]> {
     const res = await axios.get(`${this.bridgeUrl}/positions`, {
       headers: this.headers, timeout: 15000,
@@ -294,7 +304,7 @@ export class Mt5Connector implements ExchangeConnector {
     throw new BadRequestException(`MT5 ${op} failed: ${msg}`);
   }
 
-  private mapSymbol(symbol: string): string {
+  mapSymbol(symbol: string): string {
     const mapping: Record<string, string> = {
       'EUR/USD': 'EURUSD',
       'GBP/USD': 'GBPUSD',

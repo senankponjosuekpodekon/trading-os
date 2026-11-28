@@ -12,6 +12,7 @@ const TYPE_PREF_KEY: Record<string, string> = {
   gem_paper: 'gem_paper',
   regime_change: 'onchain',
   early_alpha: 'early_alpha',
+  daily_report: 'daily_report',
 };
 
 export interface SignalAlertInput {

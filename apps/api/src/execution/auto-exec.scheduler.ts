@@ -1,30 +1,31 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaSystemService } from '../prisma/prisma.service';
 import { ExecutionService } from './execution.service';
+import { Mt5Connector } from './mt5.connector';
 import { OrderSide, OrderType } from './dto/execute-order.dto';
 
 /**
- * Auto-exec — exécution automatique des signaux qualifiés sur les
- * connexions MT5 actives (compte DéRIV-DEMO dans le setup actuel).
+ * Auto-exec — exécution automatique des signaux qualifiés sur le compte
+ * MT5 du bridge (Deriv-Demo dans le setup actuel).
  *
- * Emprunte le SEUL chemin d'exécution MT5 : ExecutionService →
- * Mt5Connector (sizing contrat réel, stops_level, marge, réconciliation).
- * Jamais de contournement direct vers le bridge.
+ * Architecture : le bridge porte UN compte broker partagé → la dédup se
+ * fait au niveau SIGNAL + POSITION BROKER, pas par utilisateur (sinon 2
+ * users exécuteraient le même signal deux fois sur le même compte).
+ * La première connexion MT5 active trouvée sert d'identité d'exécution.
  *
- * Filtres (fail-closed — un signal douteux est sauté, jamais exécuté) :
- *  - confidence ≥ AUTOEXEC_MIN_CONFIDENCE (défaut 80)
- *  - metadata.tp_feasibility !== 'LOW' (objectif au-delà du cône 95%)
- *  - metadata.sl_in_noise !== true (stop placé dans le bruit < 1σ)
- *  - signal récent (< AUTOEXEC_MAX_AGE_MIN, défaut 10 min)
- *  - une seule exécution par signal par utilisateur (position existante
- *    avec ce signalId dans le portfolio LIVE → skip)
- *  - cap journalier AUTOEXEC_MAX_DAILY (défaut 10)
- *
- * Env :
- *  AUTOEXEC_ENABLED=1     (requis — sinon le scheduler est inerte)
- *  AUTOEXEC_MIN_CONFIDENCE, AUTOEXEC_MAX_AGE_MIN, AUTOEXEC_MAX_DAILY,
- *  AUTOEXEC_NOTIONAL_USD  (notional de base pour qty = notional/entry)
+ * Protections (fail-closed) :
+ *  - advisory lock Postgres : un seul run à la fois, quelle que soit
+ *    la latence ou le nombre d'instances
+ *  - confidence ≥ AUTOEXEC_MIN_CONFIDENCE (défaut 80), signal <10 min,
+ *    isActive, pas de sentiment_pending
+ *  - tp_feasibility≠LOW, sl_in_noise≠true
+ *  - dédup : signalId déjà lié à une Position + position MT5 ouverte
+ *    sur le symbole (magic 20261118) → skip
+ *  - cap AUTOEXEC_MAX_DAILY/jour (compte, pas user)
+ *  - erreur transport (bridge down, timeout) → NON marquée attempted :
+ *    le signal est retenté au prochain run pendant sa fenêtre ; les
+ *    rejets métier (gate, sizing) sont définitifs
  */
 @Injectable()
 export class AutoExecScheduler {
@@ -40,14 +41,28 @@ export class AutoExecScheduler {
   private dailyDate = '';
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly prisma: PrismaSystemService,
     private readonly execution: ExecutionService,
+    private readonly mt5: Mt5Connector,
   ) {}
 
   @Cron('*/2 * * * *')
   async run() {
     if (!this.enabled) return;
 
+    // Un seul run concurrent, quel que soit le nombre d'instances.
+    const locked = await this.prisma.$queryRaw<{ got: boolean }[]>`
+      SELECT pg_try_advisory_lock(20261128) AS got`;
+    if (!locked[0]?.got) return;
+
+    try {
+      await this._run();
+    } finally {
+      await this.prisma.$queryRaw`SELECT pg_advisory_unlock(20261128)`;
+    }
+  }
+
+  private async _run() {
     const today = new Date().toISOString().slice(0, 10);
     if (today !== this.dailyDate) {
       this.dailyDate = today;
@@ -55,21 +70,43 @@ export class AutoExecScheduler {
     }
     if (this.dailyCount >= this.maxDaily) return;
 
-    const connections = await this.prisma.exchangeConnection.findMany({
+    // Compte broker unique → une seule connexion d'exécution.
+    const conn = await this.prisma.exchangeConnection.findFirst({
       where: { exchange: 'MT5', isActive: true },
       select: { id: true, userId: true },
+      orderBy: { createdAt: 'asc' },
     });
-    if (!connections.length) return;
+    if (!conn) return;
+
+    const portfolio = await this.prisma.portfolio.findFirst({
+      where: { userId: conn.userId, type: 'LIVE' },
+      select: { id: true },
+    });
+    if (!portfolio) {
+      this.logger.warn(`autoexec: pas de portfolio LIVE pour user ${conn.userId} — run ignoré`);
+      return;
+    }
+
+    // Positions broker actuelles (magic 20261118) → dédup au niveau compte.
+    let openSymbols = new Set<string>();
+    try {
+      const positions = await this.mt5.getPositions();
+      openSymbols = new Set(positions.map((p: any) => p.symbol));
+    } catch (e: any) {
+      this.logger.warn(`autoexec: positions MT5 illisibles (${e?.message?.slice(0, 80)}) — run ignoré`);
+      return;
+    }
 
     const cutoff = new Date(Date.now() - this.maxAgeMin * 60_000);
     const signals = await this.prisma.signal.findMany({
       where: {
         signal: { in: ['BUY', 'SELL'] },
         confidence: { gte: this.minConfidence },
+        isActive: true,
         createdAt: { gte: cutoff },
       },
       include: { asset: { select: { symbol: true } } },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { confidence: 'desc' },
       take: 20,
     });
 
@@ -78,9 +115,25 @@ export class AutoExecScheduler {
       if (this.attempted.has(s.id)) continue;
 
       const meta = (s.metadata ?? {}) as Record<string, any>;
-      if (meta.tp_feasibility === 'LOW' || meta.sl_in_noise === true) {
+      if (meta.tp_feasibility === 'LOW' || meta.sl_in_noise === true || meta.sentiment_pending === true) {
         this.attempted.add(s.id);
-        this.logger.log(`autoexec skip ${s.asset.symbol}: tp_feasibility=${meta.tp_feasibility} sl_in_noise=${meta.sl_in_noise}`);
+        continue;
+      }
+
+      // Symbole déjà ouvert sur le compte broker → skip.
+      const mt5Symbol = this.mt5.mapSymbol(s.asset.symbol);
+      if (openSymbols.has(mt5Symbol)) {
+        this.attempted.add(s.id);
+        continue;
+      }
+
+      // Signal déjà exécuté (manuel ou auto) → Position liée existe.
+      const existing = await this.prisma.position.findFirst({
+        where: { signalId: s.id, portfolioId: portfolio.id },
+        select: { id: true },
+      });
+      if (existing) {
+        this.attempted.add(s.id);
         continue;
       }
 
@@ -89,48 +142,36 @@ export class AutoExecScheduler {
       const quantity = +(this.notionalUsd / entry).toFixed(8);
       if (quantity <= 0) continue;
 
-      for (const conn of connections) {
-        const portfolio = await this.prisma.portfolio.findFirst({
-          where: { userId: conn.userId, type: 'LIVE' },
-          select: { id: true },
+      try {
+        const res = await this.execution.executeOrder(conn.userId, {
+          connectionId: conn.id,
+          symbol: s.asset.symbol,
+          side: s.signal as OrderSide,
+          type: OrderType.MARKET,
+          quantity,
+          signalId: s.id,
+          portfolioId: portfolio.id,
+          stopLoss: s.stopLoss != null ? Number(s.stopLoss) : undefined,
+          takeProfit: s.takeProfit1 != null ? Number(s.takeProfit1) : undefined,
         });
-        if (!portfolio) {
-          this.logger.warn(`autoexec: pas de portfolio LIVE pour user ${conn.userId} — signal ${s.id} ignoré`);
-          continue;
-        }
-
-        const existing = await this.prisma.position.findFirst({
-          where: { signalId: s.id, portfolioId: portfolio.id },
-          select: { id: true },
-        });
-        if (existing) continue;
-
-        try {
-          const res = await this.execution.executeOrder(conn.userId, {
-            connectionId: conn.id,
-            symbol: s.asset.symbol,
-            side: s.signal as OrderSide,
-            type: OrderType.MARKET,
-            quantity,
-            signalId: s.id,
-            portfolioId: portfolio.id,
-            stopLoss: s.stopLoss != null ? Number(s.stopLoss) : undefined,
-            takeProfit: s.takeProfit1 != null ? Number(s.takeProfit1) : undefined,
-          });
-          this.attempted.add(s.id);
-          this.dailyCount++;
-          this.logger.log(
-            `autoexec FILLED: ${s.signal} ${s.asset.symbol} qty=${quantity} ` +
-            `conf=${s.confidence} order=${res.orderId ?? 'n/a'} (${this.dailyCount}/${this.maxDaily})`,
-          );
-        } catch (err: any) {
-          this.attempted.add(s.id);
-          this.logger.warn(`autoexec failed ${s.asset.symbol} ${s.signal}: ${err?.message?.slice(0, 200)}`);
-        }
+        this.attempted.add(s.id);
+        this.dailyCount++;
+        openSymbols.add(mt5Symbol);
+        this.logger.log(
+          `autoexec FILLED: ${s.signal} ${s.asset.symbol} qty=${quantity} ` +
+          `conf=${s.confidence} order=${res.orderId ?? 'n/a'} (${this.dailyCount}/${this.maxDaily})`,
+        );
+      } catch (err: any) {
+        const status = err?.response?.status ?? err?.status;
+        const retriable = status == null || status >= 500;
+        if (!retriable) this.attempted.add(s.id); // rejet métier définitif
+        this.logger.warn(
+          `autoexec ${retriable ? 'retry-l8r' : 'rejected'} ${s.asset.symbol} ${s.signal}: ` +
+          `${err?.message?.slice(0, 160)}`,
+        );
       }
     }
 
-    // Mémoire : caper le set pour éviter la dérive sur longue durée.
     if (this.attempted.size > 2000) {
       this.attempted = new Set([...this.attempted].slice(-1000));
     }

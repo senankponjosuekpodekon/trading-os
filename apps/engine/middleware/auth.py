@@ -26,8 +26,11 @@ _PRODUCTION = os.getenv("ENVIRONMENT", os.getenv("NODE_ENV", "")).strip().lower(
 
 class EngineAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        # WebSocket upgrades — skip auth (they have their own connection logic)
-        if request.headers.get("upgrade", "").lower() == "websocket":
+        # WebSocket upgrades — skip auth (they have their own connection
+        # logic). Vérifie le SCOPE ASGI, pas le header forgeable : un
+        # client envoyant "Upgrade: websocket" sur du HTTP classique ne
+        # doit pas court-circuiter l'auth.
+        if request.scope.get("type") == "websocket":
             return await call_next(request)
 
         # Health & metrics — always public

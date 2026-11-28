@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import axios from 'axios';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaSystemService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { AlertService } from './alert.service';
 
@@ -19,7 +19,7 @@ export class DailyReportScheduler {
   private readonly logger = new Logger(DailyReportScheduler.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly prisma: PrismaSystemService,
     private readonly mail: MailService,
     private readonly alerts: AlertService,
   ) {}
@@ -92,14 +92,16 @@ export class DailyReportScheduler {
     if (process.env.DAILY_REPORT_EMAIL === '1') {
       try {
         const users = await this.prisma.user.findMany({
-          where: { isActive: true },
+          where: {
+            isActive: true,
+            notificationPreference: { emailEnabled: true },
+          },
           select: { email: true },
         });
-        for (const u of users) {
-          if (!u.email) continue;
-          await this.mail.send(u.email, title, body, body.replace(/\n/g, '<br>'));
-        }
-        this.logger.log(`daily report emailed to ${users.length} user(s)`);
+        const sends = users.filter(u => u.email)
+          .map(u => this.mail.send(u.email, title, body, body.replace(/\n/g, '<br>')));
+        await Promise.allSettled(sends);
+        this.logger.log(`daily report emailed to ${sends.length} user(s)`);
       } catch (e: any) {
         this.logger.error(`daily report email failed: ${e?.message}`);
       }

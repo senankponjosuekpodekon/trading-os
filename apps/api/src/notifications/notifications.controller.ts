@@ -8,6 +8,7 @@ import { AlertService } from './alert.service';
 import { UpdateNotificationPreferenceDto } from './dto/notification-preference.dto';
 import { TrackRecordService } from '../track-record/track-record.service';
 import { Observable } from 'rxjs';
+import { timingSafeEqual } from 'crypto';
 import * as jwt from 'jsonwebtoken';
 
 @Controller('notifications')
@@ -42,14 +43,16 @@ export class NotificationsController {
 
   @SkipThrottle()
   @Sse('stream')
-  stream(@Query('sse_token') sseToken: string, @Query('token') legacyToken: string): Observable<MessageEvent> {
-    const token = sseToken || legacyToken;
+  stream(@Query('sse_token') sseToken: string): Observable<MessageEvent> {
+    const token = sseToken;
     if (!token) throw new UnauthorizedException('Missing SSE token');
 
     const secret = this.config.get<string>('JWT_SECRET')!;
     try {
       const payload: any = jwt.verify(token, secret);
-      if (payload.purpose !== 'sse' && !legacyToken) {
+      // Seuls les tickets à usage unique (purpose=sse) — un access JWT
+      // complet en query param finirait dans les logs/Referer.
+      if (payload.purpose !== 'sse') {
         throw new UnauthorizedException('Invalid token type');
       }
       return this.notificationsService.subscribe(payload.sub);
@@ -124,7 +127,9 @@ export class NotificationsController {
   internalPatternAlert(@Body() body: any, @Headers() headers: any) {
     const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
     const providedKey = headers['x-engine-key'] || '';
-    if (!engineKey || providedKey !== engineKey) {
+    const valid = !!engineKey && providedKey.length === engineKey.length
+      && timingSafeEqual(Buffer.from(providedKey), Buffer.from(engineKey));
+    if (!valid) {
       throw new UnauthorizedException('Invalid engine key');
     }
     if (!body?.symbol || !body?.name) {
@@ -151,7 +156,9 @@ export class NotificationsController {
   async internalBroadcast(@Body() body: any, @Headers() headers: any) {
     const engineKey = this.config.get<string>('ENGINE_API_KEY', '');
     const providedKey = headers['x-engine-key'] || '';
-    if (!engineKey || providedKey !== engineKey) {
+    const valid = !!engineKey && providedKey.length === engineKey.length
+      && timingSafeEqual(Buffer.from(providedKey), Buffer.from(engineKey));
+    if (!valid) {
       throw new UnauthorizedException('Invalid engine key');
     }
     if (!body?.title || !body?.message) {

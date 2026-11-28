@@ -24,6 +24,7 @@ const NOTIF_TYPES: { key: string; label: string; desc: string }[] = [
   { key: 'gem_paper', label: 'Paper trades gems', desc: 'Ouvertures/clôtures des positions virtuelles' },
   { key: 'onchain', label: 'Régime onchain', desc: 'Changements de régime de marché onchain' },
   { key: 'early_alpha', label: 'Early Alpha', desc: 'Candidats pre-listing' },
+  { key: 'daily_report', label: 'Rapport quotidien', desc: 'Bilan positions MT5 + signaux (push)' },
 ];
 
 export default function DistributionSettingsPage() {

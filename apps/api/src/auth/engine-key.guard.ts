@@ -1,5 +1,6 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
 
 /**
  * Guard for internal endpoints called by the engine (e.g. signal ingest).
@@ -13,7 +14,9 @@ export class EngineKeyGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const key = request.headers['x-engine-key'];
     const expected = this.config.get<string>('ENGINE_API_KEY', '');
-    if (!expected || key !== expected) {
+    const valid = !!expected && typeof key === 'string' && key.length === expected.length
+      && timingSafeEqual(Buffer.from(key), Buffer.from(expected));
+    if (!valid) {
       throw new UnauthorizedException('Invalid engine key');
     }
     return true;

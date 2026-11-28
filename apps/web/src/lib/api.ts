@@ -70,6 +70,9 @@ api.interceptors.response.use(
           return api(original);
         } catch {
           isRefreshing = false;
+          // Vide la file : les requêtes en attente ne doivent pas rester
+          // pendantes à vie si le refresh a échoué.
+          refreshSubscribers = [];
           clearUserStorage();
           try { window.location.href = '/auth/login'; } catch {}
           return Promise.reject(err);

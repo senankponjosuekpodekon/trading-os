@@ -706,7 +706,14 @@ export class PositionsService {
     await this._run('TRAILING_STOPS_ENABLED', async () => {
       this.logger.log('TRAILING: synchronisation des trailing stops');
       const open = await this.systemPrisma.position.findMany({
-        where: { status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] }, portfolio: { user: { email: { not: AUTOPILOT_EMAIL } } } },
+        where: {
+          status: { in: ['OPEN', 'PARTIAL', 'PARTIAL_2'] },
+          portfolio: { user: { email: { not: AUTOPILOT_EMAIL } }, type: { not: 'LIVE' } },
+          // Les positions LIVE sont des ordres broker réels (MT5) : leur
+          // SL/TP vit côté broker — fermer la ligne DB ici créerait un
+          // zombie réconciliable nulle part. La gestion passe par
+          // /execution/mt5/* ou la réconciliation.
+        },
         include: {
           asset: { select: { symbol: true } },
           portfolio: { select: { userId: true, currentCapital: true } },

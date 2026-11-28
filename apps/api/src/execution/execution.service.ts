@@ -97,7 +97,9 @@ export class ExecutionService {
         quantity: dto.quantity,
         price: dto.price,
         timeInForce: dto.timeInForce,
-        stopPrice: dto.stopPrice,
+        // MT5 lit stopPrice comme SL broker-side ; takeProfit idem.
+        stopPrice: dto.stopPrice ?? dto.stopLoss,
+        takeProfit: dto.takeProfit,
       });
     } catch (err: any) {
       await this.exchangeConnections.markValidated(userId, dto.connectionId, false, err?.message);
